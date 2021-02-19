@@ -1,2 +1,1 @@
-include ':approov-sdk'
-include ':library'
+include ':approov-service'
