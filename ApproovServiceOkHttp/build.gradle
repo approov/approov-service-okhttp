@@ -1,9 +1,17 @@
 plugins {
     id 'com.android.library'
-    id 'com.github.dcendents.android-maven'
+    id 'maven-publish'
 }
 
-group="com.github.approov"
+repositories {
+    mavenCentral()
+    google()
+    jcenter()
+    maven { url "https://jitpack.io" }
+}
+
+group = 'com.github.approov'
+version = '1.0'
 
 android {
     compileSdkVersion 30
@@ -33,3 +41,15 @@ android {
 dependencies {
 }
 
+afterEvaluate {
+    publishing {
+        publications {
+            release(MavenPublication) {
+                from components.release
+                groupId = 'com.github.approov'
+                artifactId = 'approov-service-okhttp'
+                version = '1.0'
+            }
+        }
+    }
+}
