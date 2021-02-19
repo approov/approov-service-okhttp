@@ -1,0 +1,2 @@
+include ':approov-sdk'
+include ':library'
