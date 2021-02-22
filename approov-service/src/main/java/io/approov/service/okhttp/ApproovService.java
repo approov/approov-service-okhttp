@@ -44,6 +44,12 @@ public class ApproovService {
     private static final String APPROOV_CONFIG = "approov-config";
     private static final String APPROOV_PREFS = "approov-prefs";
 
+    // default header that will be added to Approov enabled requests
+    private static final String APPROOV_TOKEN_HEADER = "Approov-Token";
+
+    // default  prefix to be added before the Approov token by default
+    private static final String APPROOV_TOKEN_PREFIX = "";
+
     // true if the Approov SDK initialized okay
     private boolean initialized;
 
@@ -55,6 +61,12 @@ public class ApproovService {
 
     // cached OkHttpClient to use or null if not set
     private OkHttpClient okHttpClient;
+
+    // header to be used to send Approov tokens
+    private String approovTokenHeader;
+
+    // any prefix String to be added before the transmitted Approov token
+    private String approovTokenPrefix;
 
     // any header to be used for binding in Approov tokens or null if not set
     private String bindingHeader;
@@ -71,6 +83,9 @@ public class ApproovService {
         initialized = false;
         okHttpBuilder = new OkHttpClient.Builder();
         okHttpClient = null;
+        approovTokenHeader = APPROOV_TOKEN_HEADER;
+        approovTokenPrefix = APPROOV_TOKEN_PREFIX;
+        bindingHeader = null;
     
         // initialize the Approov SDK
         String dynamicConfig = getApproovDynamicConfig();
@@ -150,6 +165,20 @@ public class ApproovService {
     }
 
     /**
+     * Sets the header that the Approov token is added on, as well as an optional
+     * prefix String (such as "Bearer "). By default the token is provided on
+     * "Approov-Token" with no prefix.
+     *
+     * @param header is the header to place the Approov token on
+     * @param prefix is any prefix String for the Approov token header
+     */
+    public synchronized void setApproovHeader(String header, String prefix) {
+        approovTokenHeader = header;
+        approovTokenPrefix = prefix;
+        okHttpClient = null;
+    }
+
+    /**
      * Sets a binding header that must be present on all requests using the Approov service. A
      * header should be chosen whose value is unchanging for most requests (such as an
      * Authorization header). A hash of the header value is included in the issued Approov tokens
@@ -159,6 +188,8 @@ public class ApproovService {
      * @param header is the header to use for Approov token binding
      */
     public synchronized void setBindingHeader(String header) {
+        if (initialized && (bindingHeader != null))
+            Approov.setDataHashInToken("NONE");
         bindingHeader = header;
         okHttpClient = null;
     }
@@ -195,7 +226,7 @@ public class ApproovService {
                 // build the OkHttpClient with the correct pins preset and ApproovTokenInterceptor
                 Log.i(TAG, "Building new Approov OkHttpClient");
                 okHttpClient = okHttpBuilder.certificatePinner(pinBuilder.build())
-                        .addInterceptor(new ApproovTokenInterceptor(this, bindingHeader))
+                        .addInterceptor(new ApproovTokenInterceptor(this, approovTokenHeader, approovTokenPrefix, bindingHeader))
                         .build();
             } else {
                 // if the Approov SDK could not be initialized then we can't pin or add Approov tokens
@@ -229,14 +260,14 @@ class ApproovTokenInterceptor implements Interceptor {
     // logging tag
     private final static String TAG = "ApproovInterceptor";
 
-    // header that will be added to Approov enabled requests
-    private static final String APPROOV_HEADER = "Approov-Token";
-
-    // any prefix to be added before the Approov token, such as "Bearer "
-    private static final String APPROOV_TOKEN_PREFIX = "";
-
     // underlying ApproovService being utilized
     private ApproovService approovService;
+
+    // the name of the header to be added to hold the Approov token
+    private String approovTokenHeader;
+
+    // prefix to be used for the Approov token
+    private String approovTokenPrefix;
 
     // any binding header for Approov token binding, or null if none
     private String bindingHeader;
@@ -245,11 +276,15 @@ class ApproovTokenInterceptor implements Interceptor {
      * Constructs an new interceptor that adds Approov tokens.
      *
      * @param service is the underlying ApproovService being used
-     * @param header is any token binding header to use or null otherwise
+     * @param approovTokenHeader is the name of the header to be used for the Approov token
+     * @param approovTokenPrefix is the prefix string to be used with the Approov token
+     * @param bindingHeader is any token binding header to use or null otherwise
      */
-    public ApproovTokenInterceptor(ApproovService service, String header) {
+    public ApproovTokenInterceptor(ApproovService service, String approovTokenHeader, String approovTokenPrefix, String bindingHeader) {
         approovService = service;
-        bindingHeader = header;
+        this.approovTokenHeader = approovTokenHeader;
+        this.approovTokenPrefix = approovTokenPrefix;
+        this.bindingHeader = bindingHeader;
     }
 
     @Override
@@ -257,9 +292,10 @@ class ApproovTokenInterceptor implements Interceptor {
         // update the data hash based on any token binding header
         Request request = chain.request();
         if (bindingHeader != null) {
-            if (!request.headers().names().contains(bindingHeader))
-                throw new IOException("Approov missing token binding header: " + bindingHeader);
-            Approov.setDataHashInToken(request.header(bindingHeader));
+            if (request.headers().names().contains(bindingHeader))
+                Approov.setDataHashInToken(request.header(bindingHeader));
+            else
+                Approov.setDataHashInToken("NONE");
         }
 
         // request an Approov token for the domain
@@ -283,7 +319,7 @@ class ApproovTokenInterceptor implements Interceptor {
         // check the status of Approov token fetch
         if (approovResults.getStatus() == Approov.TokenFetchStatus.SUCCESS) {
             // we successfully obtained a token so add it to the header for the request
-            request = request.newBuilder().header(APPROOV_HEADER, APPROOV_TOKEN_PREFIX + approovResults.getToken()).build();
+            request = request.newBuilder().header(approovTokenHeader, approovTokenPrefix + approovResults.getToken()).build();
         }
         else if ((approovResults.getStatus() != Approov.TokenFetchStatus.NO_APPROOV_SERVICE) &&
                  (approovResults.getStatus() != Approov.TokenFetchStatus.UNKNOWN_URL) &&
