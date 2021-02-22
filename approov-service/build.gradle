@@ -12,7 +12,6 @@ repositories {
 }
 
 group = 'com.github.approov'
-version = '1.0'
 
 android {
     compileSdkVersion 30
@@ -20,8 +19,6 @@ android {
     defaultConfig {
         minSdkVersion 21
         targetSdkVersion 28
-        versionCode 1
-        versionName "1.0"
     }
 
     buildTypes {
@@ -34,26 +31,22 @@ android {
         sourceCompatibility JavaVersion.VERSION_1_8
         targetCompatibility JavaVersion.VERSION_1_8
     }
-    kotlinOptions {
-        jvmTarget = '1.8'
-    }
 }
 
 dependencies {
-    implementation 'com.squareup.okhttp3:okhttp:4.9.0'
-    implementation 'com.github.approov:approov-android-sdk:main-SNAPSHOT'
+    implementation 'com.squareup.okhttp3:okhttp:4.9.1'
+    implementation 'com.github.approov:approov-android-sdk:2.6.1'
 }
 
-afterEvaluate {
-    publishing {
-        publications {
-            // Creates a Maven publication called "release".
-            release(MavenPublication) {
-                from components.release
-                groupId = 'com.github.approov'
-                artifactId = 'approov-service-okhttp'
-                version = '1.0'
-            }
-        }
-    }
-}
+//afterEvaluate {
+//    publishing {
+//        publications {
+//            release(MavenPublication) {
+//                from components.release
+//                groupId = 'com.github.approov'
+//                artifactId = 'approov-service-okhttp'
+//                version = '2.6.1'
+//            }
+//        }
+//    }
+//}
