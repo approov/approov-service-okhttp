@@ -38,15 +38,15 @@ dependencies {
     implementation 'com.github.approov:approov-android-sdk:2.6.1'
 }
 
-//afterEvaluate {
-//    publishing {
-//        publications {
-//            release(MavenPublication) {
-//                from components.release
-//                groupId = 'com.github.approov'
-//                artifactId = 'approov-service-okhttp'
-//                version = '2.6.1'
-//            }
-//        }
-//    }
-//}
+afterEvaluate {
+    publishing {
+        publications {
+            release(MavenPublication) {
+                from components.release
+                groupId = 'com.github.approov'
+                artifactId = 'approov-service-okhttp'
+                version = '2.6.1'
+            }
+        }
+    }
+}
