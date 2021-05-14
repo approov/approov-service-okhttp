@@ -34,7 +34,7 @@ android {
 
 dependencies {
     implementation 'com.squareup.okhttp3:okhttp:4.9.1'
-    implementation 'com.github.approov:approov-android-sdk:2.6.1'
+    implementation 'com.github.approov:approov-android-sdk:2.7.0'
 }
 
 afterEvaluate {
@@ -44,7 +44,7 @@ afterEvaluate {
                 from components.release
                 groupId = 'com.github.approov'
                 artifactId = 'approov-service-okhttp'
-                version = '2.6.1'
+                version = '2.7.0'
             }
         }
     }

@@ -20,7 +20,7 @@ Secondly, add the dependency in your app's `build.gradle`:
 
 ```
 dependencies {
-	 implementation 'com.github.approov:approov-service-okhttp:2.6.1'
+	 implementation 'com.github.approov:approov-service-okhttp:2.7.0'
 }
 ```
 
