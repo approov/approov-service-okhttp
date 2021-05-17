@@ -38,19 +38,18 @@ public class YourApp extends Application {
     @Override
     public void onCreate() {
         super.onCreate();
-        approovService = new ApproovService(getApplicationContext(), "init-config");
+        approovService = new ApproovService(getApplicationContext(), "<enter-your-config-string-here>");
     }
 }
 
 ```
 
-The `init-config` is a custom string that configures your Approov account access. Obtain this using the Approov CLI:
+The `<enter-your-config-string-here>` is a custom string that configures your Approov account access. Obtain this using the `approov` CLI tool (see [installation instructions](https://approov.io/docs/latest/approov-installation/)):
 
 ```
-$ approov sdk -getConfig initial-config.txt
+approov sdk -getConfigString
 ```
-
-Paste the file content of `initial-config.txt` into the `init-config` string above.
+This will output a configuration string, something like `#123456#K/XPlLtfcwnWkzv99Wj5VmAxo4CrU267J1KlQyoz8Qo=`, that will identify your Approov account. Use this instead of the text `<enter-your-config-string-here>`.
 
 You can then make Approov enabled `OkHttp` API calls by using the `OkHttpClient` available from the `ApproovService`:
 
@@ -73,6 +72,37 @@ YourApp.approovService.setOkHttpClientBuilder(new OkHttpClient.Builder().connect
 ```
 
 This call only needs to be made once. Subsequent calls to `YourApp.approovService.getOkHttpClient()` will then always a `OkHttpClient` with the builder values included.
+
+## Manifest Changes
+
+The following app permissions need to be available in the manifest to use Approov:
+
+```xml
+<uses-permission android:name="android.permission.ACCESS_NETWORK_STATE" />
+<uses-permission android:name="android.permission.INTERNET" />
+```
+
+Note that the minimum SDK version you can use with the Approov package is 21 (Android 5.0). 
+
+Please [read this](https://approov.io/docs/latest/approov-usage-documentation/#targetting-android-11-and-above) section of the reference documentation if targetting Android 11 (API level 30) or above.
+
+## Discovery Mode
+
+If you are performing a quick assessment of the environments that you app is running in, and also if there are any requests being made that are not emanating from your apps, then you can use discovery mode. This is a minimal implementation of Approov that doesn't automatically check Approov tokens at the backend. Requesting the Approov tokens in your apps gathers metrics. Once you have pushed the version of the app using Approov to all of your users you can do an informal check using logs of your backend requests to see if there are any requests that are not presenting an Approov token.
+
+Setting up Approov to work in this way is extremely simple. You must enabled the wildcard option on your account as follows:
+
+```
+approov api -setWildcardMode on
+```
+
+This ensures that Approov will provide an Approov token for every API request being made, without having to specifically add API domains. The Approov token will be added as an `Approov-Token` header for all requests that are made via an `ApproovService` created `OkHttpClient`.
+
+These Approov tokens will not be valid are are simply provided to assess if they are reaching your backend API or not. Since they are not valid they do not need to be protected via pinning and thus none is applied by Approov. Furthermore, if you are only performing discovery you do not need to register your apps.
+
+It is possible to see the properties of all of your running apps using [metrics graphs](https://approov.io/docs/latest/approov-usage-documentation/#metrics-graphs). You can also [assess the validity](https://approov.io/docs/latest/approov-usage-documentation/#checking-token-validity) of individual Approov tokens if required.
+
+Remember to [switch](https://approov.io/docs/latest/approov-usage-documentation/#setting-wildcard-mode) to `off` again before completing a full Approov integration.
 
 ## Approov Token Header
 The default header name of `Approov-Token` can be changed as follows:
