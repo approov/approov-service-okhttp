@@ -106,6 +106,15 @@ public class ApproovService {
     }
 
     /**
+     * Clears the OkHttp client if there are some potential pinning changes that require an
+     * update.
+     */
+    public synchronized void clearOkHttpClient() {
+        Log.d(TAG, "OKHttp client cleared");
+        okHttpClient = null;
+    }
+
+    /**
      * Sets the OkHttpClient.Builder to be used for constructing the Approov OkHttpClient. This
      * allows a custom configuration to be set, with additional interceptors and properties.
      * This clears the cached OkHttp client so should only be called when an actual builder
@@ -319,7 +328,7 @@ public class ApproovService {
 
                 // build the OkHttpClient with the correct pins preset and ApproovTokenInterceptor
                 Log.d(TAG, "Building new Approov OkHttpClient");
-                ApproovTokenInterceptor interceptor = new ApproovTokenInterceptor(approovTokenHeader,
+                ApproovTokenInterceptor interceptor = new ApproovTokenInterceptor(this, approovTokenHeader,
                         approovTokenPrefix, bindingHeader, substitutionHeaders);
                 okHttpClient = okHttpBuilder.certificatePinner(pinBuilder.build()).addInterceptor(interceptor).build();
             } else {
@@ -354,6 +363,9 @@ class ApproovTokenInterceptor implements Interceptor {
     // logging tag
     private final static String TAG = "ApproovInterceptor";
 
+    // underlying ApproovService being utilized
+    private ApproovService approovService;
+
     // the name of the header to be added to hold the Approov token
     private String approovTokenHeader;
 
@@ -370,13 +382,15 @@ class ApproovTokenInterceptor implements Interceptor {
     /**
      * Constructs a new interceptor that adds Approov tokens and substitute headers.
      *
+     * @param approovService is the underlying ApproovService being used
      * @param approovTokenHeader is the name of the header to be used for the Approov token
      * @param approovTokenPrefix is the prefix string to be used with the Approov token
      * @param bindingHeader is any token binding header to use or null otherwise
      * @param substitutionHeaders is the map of secure string substitution headers mapped to any required prefixes
      */
-    public ApproovTokenInterceptor(String approovTokenHeader, String approovTokenPrefix,
+    public ApproovTokenInterceptor(ApproovService approovService, String approovTokenHeader, String approovTokenPrefix,
                                    String bindingHeader, Map<String, String> substitutionHeaders) {
+        this.approovService = approovService;
         this.approovTokenHeader = approovTokenHeader;
         this.approovTokenPrefix = approovTokenPrefix;
         this.bindingHeader = bindingHeader;
@@ -399,13 +413,21 @@ class ApproovTokenInterceptor implements Interceptor {
         // will appear here to determine why a request is being rejected)
         Log.d(TAG, "Token for " + host + ": " + approovResults.getLoggableToken());
 
+        // force a pinning change if there is any dynamic config update
+        if (approovResults.isConfigChanged()) {
+            Approov.fetchConfig();
+            approovService.clearOkHttpClient();
+        }
+
         // we cannot proceed if the pins need to be updated. This will be cleared by using getOkHttpClient
         // but will persist if the app fails to rebuild the OkHttpClient regularly. This might occur
         // on first use after initial app install if the initial network fetch was unable to obtain
         // the dynamic configuration for the account if there was poor network connectivity at that
         // point.
-        if (approovResults.isForceApplyPins())
+        if (approovResults.isForceApplyPins()) {
+            approovService.clearOkHttpClient();
             throw new ApproovNetworkException("Pins need to be updated");
+        }
 
         // check the status of Approov token fetch
         if (approovResults.getStatus() == Approov.TokenFetchStatus.SUCCESS)
