@@ -17,14 +17,14 @@
 
 package io.approov.service.okhttp;
 
-// ApproovException indicates an exception caused by networking conditions which is likely to be
+// ApproovNetworkException indicates an exception caused by networking conditions which is likely to be
 // temporary so a user initiated retry should be performed
 public class ApproovNetworkException extends ApproovException {
 
     /**
      * Constructs an Approov networking exception.
      *
-     * @param message is the basic information about the exception cause.
+     * @param message is the basic information about the exception cause
      */
     public ApproovNetworkException(String message) {
         super(message);

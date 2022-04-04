@@ -28,7 +28,7 @@ public class ApproovRejectionException extends ApproovException {
     /**
      * Constructs an exception if the app is rejected by Approov.
      *
-     * @param message is the basic information about the exception cause.
+     * @param message is the basic information about the exception cause
      * @param arc is the code that can be used for support purposes
      * @param rejectionReasons may provide a comma separated list of rejection reasons
      */

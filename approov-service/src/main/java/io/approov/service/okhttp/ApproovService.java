@@ -86,7 +86,7 @@ public class ApproovService {
         // initialize the Approov SDK
         try {
             Approov.initialize(context, config, "auto", null);
-            Approov.setUserProperty("QuickstartOkHttp");
+            Approov.setUserProperty("approov-service-okhttp");
         } catch (IllegalArgumentException e) {
             Log.e(TAG, "Approov initialization failed: " + e.getMessage());
             return;
@@ -103,6 +103,47 @@ public class ApproovService {
         if (initialized)
             // fetch an Approov token using a placeholder domain
             Approov.fetchApproovToken(new PrefetchCallbackHandler(), "www.approov.io");
+    }
+
+    // Performs a precheck to determine if the app will pass attestation. This requires secure
+    // strings to be enabled for the account, although no strings need to be set up. This will
+    // likely require network access so may take some time to complete. It may throw ApproovException
+    // if the precheck fails or if there is some other problem. ApproovRejectionException is thrown
+    // if the app has failed Approov checks or ApproovNetworkException for networking issues where a
+    // user initiated retry of the operation should be allowed. An ApproovRejectionException may provide
+    // additional information about the cause of the rejection.
+    //
+    // @throws ApproovException if there was a problem
+    public static void precheck() throws ApproovException {
+        // try and fetch a non-existent secure string in order to check for a rejection
+        Approov.TokenFetchResult approovResults;
+        try {
+            approovResults = Approov.fetchSecureStringAndWait("precheck-dummy-key", null);
+            Log.d(TAG, "precheck: " + approovResults.getStatus().toString());
+        }
+        catch (IllegalStateException e) {
+            throw new ApproovException("IllegalState: " + e.getMessage());
+        }
+        catch (IllegalArgumentException e) {
+            throw new ApproovException("IllegalArgument: " + e.getMessage());
+        }
+
+        // process the returned Approov status
+        if (approovResults.getStatus() == Approov.TokenFetchStatus.REJECTED)
+            // if the request is rejected then we provide a special exception with additional information
+            throw new ApproovRejectionException("precheck: " + approovResults.getStatus().toString() + ": " +
+                    approovResults.getARC() + " " + approovResults.getRejectionReasons(),
+                    approovResults.getARC(), approovResults.getRejectionReasons());
+        else if ((approovResults.getStatus() == Approov.TokenFetchStatus.NO_NETWORK) ||
+                (approovResults.getStatus() == Approov.TokenFetchStatus.POOR_NETWORK) ||
+                (approovResults.getStatus() == Approov.TokenFetchStatus.MITM_DETECTED))
+            // we are unable to get the secure string due to network conditions so the request can
+            // be retried by the user later
+            throw new ApproovNetworkException("precheck: " + approovResults.getStatus().toString());
+        else if ((approovResults.getStatus() != Approov.TokenFetchStatus.SUCCESS) &&
+                (approovResults.getStatus() != Approov.TokenFetchStatus.UNKNOWN_KEY))
+            // we are unable to get the secure string due to a more permanent error
+            throw new ApproovException("precheck:" + approovResults.getStatus().toString());
     }
 
     /**
@@ -199,7 +240,7 @@ public class ApproovService {
      * @param key is the secure string key to be looked up
      * @param newDef is any new definition for the secure string, or null for lookup only
      * @return secure string (should not be cached by your app) or null if it was not defined
-     * @throws ApproovException if here was a problem
+     * @throws ApproovException if there was a problem
      */
     public static String fetchSecureString(String key, String newDef) throws ApproovException {
         // determine the type of operation as the values themselves cannot be logged
@@ -251,7 +292,7 @@ public class ApproovService {
      *
      * @param payload is the marshaled JSON object for the claims to be included
      * @return custom JWT string
-     * @throws ApproovException if here was a problem
+     * @throws ApproovException if there was a problem
      */
     public static String fetchCustomJWT(String payload) throws ApproovException {
         // fetch the custom JWT catching any exceptions the SDK might throw
