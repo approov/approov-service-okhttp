@@ -114,7 +114,7 @@ public class ApproovService {
     // additional information about the cause of the rejection.
     //
     // @throws ApproovException if there was a problem
-    public static void precheck() throws ApproovException {
+    public void precheck() throws ApproovException {
         // try and fetch a non-existent secure string in order to check for a rejection
         Approov.TokenFetchResult approovResults;
         try {
@@ -242,7 +242,7 @@ public class ApproovService {
      * @return secure string (should not be cached by your app) or null if it was not defined
      * @throws ApproovException if there was a problem
      */
-    public static String fetchSecureString(String key, String newDef) throws ApproovException {
+    public String fetchSecureString(String key, String newDef) throws ApproovException {
         // determine the type of operation as the values themselves cannot be logged
         String type = "lookup";
         if (newDef != null)
@@ -294,7 +294,7 @@ public class ApproovService {
      * @return custom JWT string
      * @throws ApproovException if there was a problem
      */
-    public static String fetchCustomJWT(String payload) throws ApproovException {
+    public String fetchCustomJWT(String payload) throws ApproovException {
         // fetch the custom JWT catching any exceptions the SDK might throw
         Approov.TokenFetchResult approovResults;
         try {
