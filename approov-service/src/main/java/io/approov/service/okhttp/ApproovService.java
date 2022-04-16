@@ -24,9 +24,13 @@ import com.criticalblue.approovsdk.Approov;
 
 import java.io.IOException;
 import java.util.HashMap;
+import java.util.HashSet;
 import java.util.Iterator;
 import java.util.List;
 import java.util.Map;
+import java.util.Set;
+import java.util.regex.Matcher;
+import java.util.regex.Pattern;
 
 import okhttp3.CertificatePinner;
 import okhttp3.Interceptor;
@@ -48,6 +52,10 @@ public class ApproovService {
     // true if the Approov SDK initialized okay
     private boolean initialized;
 
+    // true if the interceptor should proceed on network failures and not add an
+    // Approov token
+    private boolean proceedOnNetworkFail;
+
     // builder to be used for new OkHttp clients
     private OkHttpClient.Builder okHttpBuilder;
 
@@ -67,31 +75,50 @@ public class ApproovService {
     // required prefixes
     private Map<String, String> substitutionHeaders;
 
+    // set of query parameters that may be substituted, specified by the key name
+    private Set<String> substitutionQueryParams;
+
     /**
      * Creates an Approov service.
      *
      * @param context the Application context
-     * @param config the initial service config string
+     * @param config the initial service config string, or empty for no initialization
      */
     public ApproovService(Context context, String config) {
         // setup for creating clients
         initialized = false;
+        proceedOnNetworkFail = false;
         okHttpBuilder = new OkHttpClient.Builder();
         okHttpClient = null;
         approovTokenHeader = APPROOV_TOKEN_HEADER;
         approovTokenPrefix = APPROOV_TOKEN_PREFIX;
         bindingHeader = null;
         substitutionHeaders = new HashMap<>();
+        substitutionQueryParams = new HashSet<>();
     
         // initialize the Approov SDK
         try {
-            Approov.initialize(context, config, "auto", null);
+            if (config.length() != 0)
+                Approov.initialize(context, config, "auto", null);
             Approov.setUserProperty("approov-service-okhttp");
         } catch (IllegalArgumentException e) {
             Log.e(TAG, "Approov initialization failed: " + e.getMessage());
             return;
         }
         initialized = true;
+    }
+
+    /**
+     * Sets a flag indicating if the network interceptor should proceed anyway if it is
+     * not possible to obtain an Approov token due to a networking failure. If this is set
+     * then your backend API can receive calls without the expected Approov token header
+     * being added, or without header/query parameter substitutions being made.
+     *
+     * @param proceed is true if Approov networking fails should allow continuation
+     */
+    public synchronized void setProceedOnNetworkFail(boolean proceed) {
+        proceedOnNetworkFail = proceed;
+        okHttpClient = null;
     }
 
     /**
@@ -200,7 +227,7 @@ public class ApproovService {
      * Adds the name of a header which should be subject to secure strings substitution. This
      * means that if the header is present then the value will be used as a key to look up a
      * secure string value which will be substituted into the header value instead. This allows
-     * easy migration to the use of secure strings. Note that this should be done on initialization
+     * easy migration to the use of secure strings. Note that this function should be called on initialization
      * rather than for every request as it will require a new OkHttpClient to be built. A required
      * prefix may be specified to deal with cases such as the use of "Bearer " prefixed before values
      * in an authorization header.
@@ -223,6 +250,31 @@ public class ApproovService {
      */
     public synchronized void removeSubstitutionHeader(String header) {
         substitutionHeaders.remove(header);
+        okHttpClient = null;
+    }
+
+    /**
+     * Adds a key name for a query parameter that should be subject to secure strings substitution.
+     * This means that if the query parameter is present in a URL then the value will be used as a
+     * key to look up a secure string value which will be substituted as the query parameter value
+     * instead. This allows easy migration to the use of secure strings. Note that this function
+     * should be called on initialization rather than for every request as it will require a new
+     * OkHttpClient to be built.
+     *
+     * @param key is the query parameter key name to be added for substitution
+     */
+    public synchronized void addSubstitutionQueryParam(String key) {
+        substitutionQueryParams.add(key);
+        okHttpClient = null;
+    }
+
+    /**
+     * Removes a query parameter key name previously added using addSubstitutionQueryParam.
+     *
+     * @param key is the query parameter key name to be removed for substitution
+     */
+    public synchronized void removeSubstitutionQueryParam(String key) {
+        substitutionHeaders.remove(key);
         okHttpClient = null;
     }
 
@@ -370,7 +422,7 @@ public class ApproovService {
                 // build the OkHttpClient with the correct pins preset and ApproovTokenInterceptor
                 Log.d(TAG, "Building new Approov OkHttpClient");
                 ApproovTokenInterceptor interceptor = new ApproovTokenInterceptor(this, approovTokenHeader,
-                        approovTokenPrefix, bindingHeader, substitutionHeaders);
+                        approovTokenPrefix, bindingHeader, proceedOnNetworkFail, substitutionHeaders, substitutionQueryParams);
                 okHttpClient = okHttpBuilder.certificatePinner(pinBuilder.build()).addInterceptor(interceptor).build();
             } else {
                 // if the Approov SDK could not be initialized then we can't add Approov capabilities
@@ -399,7 +451,7 @@ final class PrefetchCallbackHandler implements Approov.TokenFetchCallback {
     }
 }
 
-// interceptor to add Approov tokens
+// interceptor to add Approov tokens or substitute headers and query parameters
 class ApproovTokenInterceptor implements Interceptor {
     // logging tag
     private final static String TAG = "ApproovInterceptor";
@@ -416,26 +468,42 @@ class ApproovTokenInterceptor implements Interceptor {
     // any binding header for Approov token binding, or null if none
     private String bindingHeader;
 
+    // true if the interceptor should proceed on network failures and not add an Approov token
+    private boolean proceedOnNetworkFail;
+
     // map of headers that should have their values substituted for secure strings, mapped to their
     // required prefixes
     private Map<String, String> substitutionHeaders;
 
+    // set of query parameters that may be substituted, specified by the key name, mapped to their regex patterns
+    private Map<String, Pattern> substitutionQueryParams;
+
     /**
-     * Constructs a new interceptor that adds Approov tokens and substitute headers.
+     * Constructs a new interceptor that adds Approov tokens and substitute headers or query
+     * parameters.
      *
      * @param approovService is the underlying ApproovService being used
      * @param approovTokenHeader is the name of the header to be used for the Approov token
      * @param approovTokenPrefix is the prefix string to be used with the Approov token
      * @param bindingHeader is any token binding header to use or null otherwise
+     * @param proceedOnNetworkFail is true the interceptor should proceed on Approov networking failures
      * @param substitutionHeaders is the map of secure string substitution headers mapped to any required prefixes
+     * @param substitutionQueryParams is the set of query parameter key names subject to substitution
      */
     public ApproovTokenInterceptor(ApproovService approovService, String approovTokenHeader, String approovTokenPrefix,
-                                   String bindingHeader, Map<String, String> substitutionHeaders) {
+                                   String bindingHeader, boolean proceedOnNetworkFail, Map<String,String> substitutionHeaders,
+                                   Set<String> substitutionQueryParams) {
         this.approovService = approovService;
         this.approovTokenHeader = approovTokenHeader;
         this.approovTokenPrefix = approovTokenPrefix;
         this.bindingHeader = bindingHeader;
+        this.proceedOnNetworkFail = proceedOnNetworkFail;
         this.substitutionHeaders = new HashMap<>(substitutionHeaders);
+        this.substitutionQueryParams = new HashMap<>();
+        for (String key: substitutionQueryParams) {
+            Pattern pattern = Pattern.compile("[\\?&]"+key+"=([^&;]+)");
+            this.substitutionQueryParams.put(key, pattern);
+        }
     }
 
     @Override
@@ -476,10 +544,12 @@ class ApproovTokenInterceptor implements Interceptor {
             request = request.newBuilder().header(approovTokenHeader, approovTokenPrefix + approovResults.getToken()).build();
         else if ((approovResults.getStatus() == Approov.TokenFetchStatus.NO_NETWORK) ||
                  (approovResults.getStatus() == Approov.TokenFetchStatus.POOR_NETWORK) ||
-                 (approovResults.getStatus() == Approov.TokenFetchStatus.MITM_DETECTED))
+                 (approovResults.getStatus() == Approov.TokenFetchStatus.MITM_DETECTED)) {
             // we are unable to get an Approov token due to network conditions so the request can
-            // be retried by the user later
-            throw new ApproovNetworkException("Approov token fetch for " + host + ": " + approovResults.getStatus().toString());
+            // be retried by the user later - unless this is overridden
+            if (!proceedOnNetworkFail)
+                throw new ApproovNetworkException("Approov token fetch for " + host + ": " + approovResults.getStatus().toString());
+        }
         else if ((approovResults.getStatus() != Approov.TokenFetchStatus.NO_APPROOV_SERVICE) &&
                  (approovResults.getStatus() != Approov.TokenFetchStatus.UNKNOWN_URL) &&
                  (approovResults.getStatus() != Approov.TokenFetchStatus.UNPROTECTED_URL))
@@ -512,14 +582,61 @@ class ApproovTokenInterceptor implements Interceptor {
                             approovResults.getARC(), approovResults.getRejectionReasons());
                 else if ((approovResults.getStatus() == Approov.TokenFetchStatus.NO_NETWORK) ||
                         (approovResults.getStatus() == Approov.TokenFetchStatus.POOR_NETWORK) ||
-                        (approovResults.getStatus() == Approov.TokenFetchStatus.MITM_DETECTED))
+                        (approovResults.getStatus() == Approov.TokenFetchStatus.MITM_DETECTED)) {
                     // we are unable to get the secure string due to network conditions so the request can
-                    // be retried by the user later
-                    throw new ApproovNetworkException("Header substitution for " + header + ": " +
+                    // be retried by the user later - unless this is overridden
+                    if (!proceedOnNetworkFail)
+                        throw new ApproovNetworkException("Header substitution for " + header + ": " +
                             approovResults.getStatus().toString());
+                }
                 else if (approovResults.getStatus() != Approov.TokenFetchStatus.UNKNOWN_KEY)
                     // we have failed to get a secure string with a more serious permanent error
                     throw new ApproovException("Header substitution for " + header + ": " +
+                            approovResults.getStatus().toString());
+            }
+        }
+
+        // we now deal with any query parameter substitutions, which may require further fetches but these
+        // should be using cached results
+        String currentURL = request.url().toString();
+        for (Map.Entry<String, Pattern> entry: substitutionQueryParams.entrySet()) {
+            String queryKey = entry.getKey();
+            Pattern pattern = entry.getValue();
+            Matcher matcher = pattern.matcher(currentURL);
+            if (matcher.find()) {
+                // we have found an occurrence of the query parameter to be replaced so we look up the existing
+                // value as a key for a secure string
+                String queryValue = matcher.group(1);
+                approovResults = Approov.fetchSecureStringAndWait(queryValue, null);
+                Log.d(TAG, "Substituting query parameter: " + queryKey + ", " + approovResults.getStatus().toString());
+                if (approovResults.getStatus() == Approov.TokenFetchStatus.SUCCESS) {
+                    if (isIllegalSubstitution)
+                        // don't allow substitutions on unadded API domains to prevent them accidentally being
+                        // subject to a Man-in-the-Middle (MitM) attack
+                        throw new ApproovException("Query parameter substitution for " + queryKey +
+                                " illegal for " + host + " that is not an added API domain");
+                    currentURL = new StringBuilder(currentURL).replace(matcher.start(1),
+                            matcher.end(1), approovResults.getSecureString()).toString();
+                    request = request.newBuilder().url(currentURL).build();
+                }
+                else if (approovResults.getStatus() == Approov.TokenFetchStatus.REJECTED)
+                    // if the request is rejected then we provide a special exception with additional information
+                    throw new ApproovRejectionException("Query parameter substitution for " + queryKey + ": " +
+                            approovResults.getStatus().toString() + ": " + approovResults.getARC() +
+                            " " + approovResults.getRejectionReasons(),
+                            approovResults.getARC(), approovResults.getRejectionReasons());
+                else if ((approovResults.getStatus() == Approov.TokenFetchStatus.NO_NETWORK) ||
+                        (approovResults.getStatus() == Approov.TokenFetchStatus.POOR_NETWORK) ||
+                        (approovResults.getStatus() == Approov.TokenFetchStatus.MITM_DETECTED)) {
+                    // we are unable to get the secure string due to network conditions so the request can
+                    // be retried by the user later - unless this is overridden
+                    if (!proceedOnNetworkFail)
+                        throw new ApproovNetworkException("Query parameter substitution for " + queryKey + ": " +
+                            approovResults.getStatus().toString());
+                }
+                else if (approovResults.getStatus() != Approov.TokenFetchStatus.UNKNOWN_KEY)
+                    // we have failed to get a secure string with a more serious permanent error
+                    throw new ApproovException("Query parameter substitution for " + queryKey + ": " +
                             approovResults.getStatus().toString());
             }
         }
