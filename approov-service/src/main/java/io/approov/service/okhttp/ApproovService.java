@@ -80,7 +80,7 @@ public class ApproovService {
     private static Set<String> substitutionQueryParams = null;
 
     // set of URL regexs that should be excluded from any Approov protection, mapped to the compiled Pattern
-    private static Map<String, Pattern> exclusionURLRegexs;
+    private static Map<String, Pattern> exclusionURLRegexs = null;
 
     /**
      * Construction is disallowed as this is a static only class.
@@ -610,6 +610,8 @@ public class ApproovService {
             } else {
                 // if the ApproovService was not initialized then we can't add Approov capabilities
                 Log.e(TAG, "Cannot build Approov OkHttpClient as not initialized");
+                if (okHttpBuilder == null)
+                    okHttpBuilder = new OkHttpClient.Builder();
                 okHttpClient = okHttpBuilder.build();
             }
         }
