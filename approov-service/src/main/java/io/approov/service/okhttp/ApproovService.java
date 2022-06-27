@@ -691,7 +691,7 @@ class ApproovTokenInterceptor implements Interceptor {
                 this.substitutionQueryParams.put(key, pattern);
             }
             catch (PatternSyntaxException e) {
-                Log.e(TAG, "addSubtitutionQueryParam " + key + " error: " + e.getMessage());
+                Log.e(TAG, "addSubstitutionQueryParam " + key + " error: " + e.getMessage());
             }
         }
         this.exclusionURLRegexs = new HashMap<>(exclusionURLRegexs);
