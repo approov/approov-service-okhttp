@@ -135,6 +135,30 @@ public class ApproovService {
     }
 
     /**
+     * Sets a development key indicating that the app is a development version and it should
+     * pass attestation even if the app is not registered or it is running on an emulator. The
+     * development key value can be rotated at any point in the account if a version of the app
+     * containing the development key is accidentally released. This is primarily
+     * used for situations where the app package must be modified or resigned in
+     * some way as part of the testing process.
+     *
+     * @param devKey is the development key to be used
+     * @throws ApproovException if there was a problem
+     */
+    public static synchronized void setDevKey(String devKey) throws ApproovException {
+        try {
+            Approov.setDevKey(devKey);
+            Log.d(TAG, "setDevKey");
+        }
+        catch (IllegalStateException e) {
+            throw new ApproovException("IllegalState: " + e.getMessage());
+        }
+        catch (IllegalArgumentException e) {
+            throw new ApproovException("IllegalArgument: " + e.getMessage());
+        }
+    }
+
+    /**
      * Sets the header that the Approov token is added on, as well as an optional
      * prefix String (such as "Bearer "). By default the token is provided on
      * "Approov-Token" with no prefix.
