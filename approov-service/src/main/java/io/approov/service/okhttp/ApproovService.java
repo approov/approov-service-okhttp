@@ -47,8 +47,11 @@ public class ApproovService {
     // default header that will be added to Approov enabled requests
     private static final String APPROOV_TOKEN_HEADER = "Approov-Token";
 
-    // default  prefix to be added before the Approov token by default
+    // default prefix to be added before the Approov token by default
     private static final String APPROOV_TOKEN_PREFIX = "";
+
+    // name for the default builder
+    private static final String DEFAULT_BUILDER_NAME = "_default";
 
     // true if the Approov SDK initialized okay
     private static boolean isInitialized = false;
@@ -57,11 +60,11 @@ public class ApproovService {
     // Approov token
     private static boolean proceedOnNetworkFail = false;
 
-    // builder to be used for new OkHttp clients
-    private static OkHttpClient.Builder okHttpBuilder = null;
+    // builders to be used for new OkHttp clients where each can be named
+    private static Map<String, OkHttpClient.Builder> okHttpBuilders = null;
 
-    // cached OkHttpClient to use or null if not set
-    private static OkHttpClient okHttpClient = null;
+    // cached OkHttpClients to use for each of the named builders
+    private static Map<String, OkHttpClient> okHttpClients = null;
 
     // header to be used to send Approov tokens
     private static String approovTokenHeader = null;
@@ -98,8 +101,9 @@ public class ApproovService {
         // setup for creating clients
         isInitialized = false;
         proceedOnNetworkFail = false;
-        okHttpBuilder = new OkHttpClient.Builder();
-        okHttpClient = null;
+        okHttpBuilders = new HashMap<>();
+        okHttpBuilders.put(DEFAULT_BUILDER_NAME, new OkHttpClient.Builder());
+        okHttpClients =  new HashMap<>();
         approovTokenHeader = APPROOV_TOKEN_HEADER;
         approovTokenPrefix = APPROOV_TOKEN_PREFIX;
         bindingHeader = null;
@@ -124,14 +128,15 @@ public class ApproovService {
      * then your backend API can receive calls without the expected Approov token header
      * being added, or without header/query parameter substitutions being made. Note that
      * this should be used with caution because it may allow a connection to be established
-     * before any dynamic pins have been received via Approov, thus potentially opening the channel to a MitM.
+     * before any dynamic pins have been received via Approov, thus potentially opening the
+     * channel to a MitM.
      *
      * @param proceed is true if Approov networking fails should allow continuation
      */
     public static synchronized void setProceedOnNetworkFail(boolean proceed) {
         Log.d(TAG, "setProceedOnNetworkFail " + proceed);
         proceedOnNetworkFail = proceed;
-        okHttpClient = null;
+        okHttpClients.clear();
     }
 
     /**
@@ -170,7 +175,7 @@ public class ApproovService {
         Log.d(TAG, "setApproovHeader " + header + ", " + prefix);
         approovTokenHeader = header;
         approovTokenPrefix = prefix;
-        okHttpClient = null;
+        okHttpClients.clear();
     }
 
     /**
@@ -185,7 +190,7 @@ public class ApproovService {
     public static synchronized void setBindingHeader(String header) {
         Log.d(TAG, "setBindingHeader " + header);
         bindingHeader = header;
-        okHttpClient = null;
+        okHttpClients.clear();
     }
 
     /**
@@ -207,7 +212,7 @@ public class ApproovService {
                 substitutionHeaders.put(header, "");
             else
                 substitutionHeaders.put(header, requiredPrefix);
-            okHttpClient = null;
+            okHttpClients.clear();
         }
     }
 
@@ -220,7 +225,7 @@ public class ApproovService {
         if (isInitialized) {
             Log.d(TAG, "removeSubstitutionHeader " + header);
             substitutionHeaders.remove(header);
-            okHttpClient = null;
+            okHttpClients.clear();
         }
     }
 
@@ -238,7 +243,7 @@ public class ApproovService {
         if (isInitialized) {
             Log.d(TAG, "addSubstitutionQueryParam " + key);
             substitutionQueryParams.add(key);
-            okHttpClient = null;
+            okHttpClients.clear();
         }
     }
 
@@ -251,7 +256,7 @@ public class ApproovService {
         if (isInitialized) {
             Log.d(TAG, "removeSubstitutionQueryParam " + key);
             substitutionQueryParams.remove(key);
-            okHttpClient = null;
+            okHttpClients.clear();
         }
     }
 
@@ -274,7 +279,7 @@ public class ApproovService {
             try {
                 Pattern pattern = Pattern.compile(urlRegex);
                 exclusionURLRegexs.put(urlRegex, pattern);
-                okHttpClient = null;
+                okHttpClients.clear();
                 Log.d(TAG, "addExclusionURLRegex " + urlRegex);
             } catch (PatternSyntaxException e) {
                 Log.e(TAG, "addExclusionURLRegex " + urlRegex + " error: " + e.getMessage());
@@ -291,7 +296,7 @@ public class ApproovService {
         if (isInitialized) {
             Log.d(TAG, "removeExclusionURLRegex " + urlRegex);
             exclusionURLRegexs.remove(urlRegex);
-            okHttpClient = null;
+            okHttpClients.clear();
         }
     }
 
@@ -562,38 +567,58 @@ public class ApproovService {
     }
 
     /**
-     * Clears the OkHttp client if there are some potential pinning changes that require an
+     * Clears the OkHttp clients if there are some potential pinning changes that require an
      * update.
      */
     public static synchronized void clearOkHttpClient() {
-        Log.d(TAG, "OkHttp client cleared");
-        okHttpClient = null;
+        Log.d(TAG, "OkHttp clients cleared");
+        okHttpClients.clear();
     }
 
     /**
-     * Sets the OkHttpClient.Builder to be used for constructing the Approov OkHttpClient. This
-     * allows a custom configuration to be set, with additional interceptors and properties.
-     * This clears the cached OkHttp client so should only be called when an actual builder
-     * change is required.
+     * Sets the OkHttpClient.Builder to be used for constructing the Approov OkHttpClient for a
+     * named builder. This allows custom configurations to be set, with additional interceptors and
+     * properties. This clears the appropriate cached OkHttp client so should only be called when an
+     * actual builder change is required.
+     *
+     * @param builderName is the name of the builder to set
+     * @param builder is the OkHttpClient.Builder to be used as a basis for the Approov OkHttpClient
+     */
+    public static synchronized void setOkHttpClientBuilder(String builderName, OkHttpClient.Builder builder) {
+        Log.d(TAG, "OkHttp client builder set for " + builderName);
+        okHttpBuilders.put(builderName, builder);
+        okHttpClients.remove(builderName);
+    }
+
+    /**
+     * Sets the OkHttpClient.Builder to be used for constructing the default Approov OkHttpClient.
+     * This allows a default custom configuration to be set, with additional interceptors and properties.
      *
      * @param builder is the OkHttpClient.Builder to be used as a basis for the Approov OkHttpClient
      */
     public static synchronized void setOkHttpClientBuilder(OkHttpClient.Builder builder) {
-        Log.d(TAG, "OkHttp client builder set");
-        okHttpBuilder = builder;
-        okHttpClient = null;
+        setOkHttpClientBuilder(DEFAULT_BUILDER_NAME, builder);
     }
 
     /**
-     * Gets the OkHttpClient that enables the Approov service. This adds the Approov token in
-     * a header to requests, and also pins the connections. The OkHttpClient is constructed
-     * lazily on demand but is cached if there are no changes. Use "setOkHttpClientBuilder" to
-     * provide any special properties.
+     * Gets the OkHttpClient that enables the Approov service for the named builder. This adds
+     * the Approov token in a header to requests, and also pins the connections. The OkHttpClient
+     * is constructed lazily on demand but is cached if there are no changes. Use "setOkHttpClientBuilder"
+     * to provide any special properties.
      *
+     * @param builderName is the name for the builder
      * @return OkHttpClient to be used with Approov
      */
-    public static synchronized OkHttpClient getOkHttpClient() {
+    public static synchronized OkHttpClient getOkHttpClient(String builderName) {
+        OkHttpClient okHttpClient = okHttpClients.get(builderName);
         if (okHttpClient == null) {
+            // get the builder and warn if none was available
+            OkHttpClient.Builder okHttpBuilder = okHttpBuilders.get(builderName);
+            if (okHttpBuilder == null) {
+                Log.d(TAG, "No builder available for " + builderName);
+                okHttpBuilder = new OkHttpClient.Builder();
+            }
+
             // build a new OkHttpClient on demand
             if (isInitialized) {
                 // build the pinning configuration
@@ -626,7 +651,7 @@ public class ApproovService {
                 }
 
                 // build the OkHttpClient with the correct pins preset and ApproovTokenInterceptor
-                Log.d(TAG, "Building new Approov OkHttpClient");
+                Log.d(TAG, "Building new Approov OkHttpClient for " + builderName);
                 ApproovTokenInterceptor interceptor = new ApproovTokenInterceptor(approovTokenHeader,
                         approovTokenPrefix, bindingHeader, proceedOnNetworkFail, substitutionHeaders,
                         substitutionQueryParams, exclusionURLRegexs);
@@ -634,12 +659,25 @@ public class ApproovService {
             } else {
                 // if the ApproovService was not initialized then we can't add Approov capabilities
                 Log.e(TAG, "Cannot build Approov OkHttpClient as not initialized");
-                if (okHttpBuilder == null)
-                    okHttpBuilder = new OkHttpClient.Builder();
                 okHttpClient = okHttpBuilder.build();
             }
+
+            // cache the client for future usages
+            okHttpClients.put(builderName, okHttpClient);
         }
         return okHttpClient;
+    }
+
+    /**
+     * Gets the default kHttpClient that enables the Approov service. This adds the Approov token
+     * in a header to requests, and also pins the connections. The OkHttpClient is constructed
+     * lazily on demand but is cached if there are no changes. Use "setOkHttpClientBuilder" to
+     * provide any special properties.
+     *
+     * @return OkHttpClient to be used with Approov
+     */
+    public static synchronized OkHttpClient getOkHttpClient() {
+        return getOkHttpClient(DEFAULT_BUILDER_NAME);
     }
 }
 
