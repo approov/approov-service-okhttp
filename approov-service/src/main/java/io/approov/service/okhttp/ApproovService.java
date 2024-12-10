@@ -75,6 +75,9 @@ public class ApproovService {
     // Approov token
     private static boolean proceedOnNetworkFail = false;
 
+    // true if message signing has been enabled for the ApproovService
+    private static boolean isMessageSigningEnabled = false;
+
     // builder to be used for new OkHttp clients
     private static OkHttpClient.Builder okHttpBuilder = null;
 
@@ -151,6 +154,8 @@ public class ApproovService {
      * @param signBody is true if the message body should also be included in the message signature
      */
     public static synchronized void setMessageSigning(String header, ArrayList<String> signedHeaders, boolean signBody) {
+        // Set flag to indicate feature is enabled
+        isMessageSigningEnabled = true;
         if ((header == null || header.isEmpty()) && (signedHeaders == null || signedHeaders.isEmpty()) && signBody == false) {
             ApproovService.messageSigningConfig = null;
         } else {
@@ -160,19 +165,20 @@ public class ApproovService {
     }
 
     /**
-     * Sets a flag indicating if the network interceptor should proceed anyway if it is
-     * not possible to obtain an Approov token due to a networking failure. If this is set
-     * then your backend API can receive calls without the expected Approov token header
-     * being added, or without header/query parameter substitutions being made. Note that
-     * this should be used with caution because it may allow a connection to be established
-     * before any dynamic pins have been received via Approov, thus potentially opening the channel to a MitM.
-     *
-     * @param proceed is true if Approov networking fails should allow continuation
+     * Returns true if the the message signing configuration has been requested by invoking setMessageSigning
+     * @return true if the message signing feature has been requested
      */
-    public static synchronized void setProceedOnNetworkFail(boolean proceed) {
-        Log.d(TAG, "setProceedOnNetworkFail " + proceed);
-        proceedOnNetworkFail = proceed;
-        okHttpClient = null;
+    synchronized boolean messageSigningEnabled() {
+        return isMessageSigningEnabled;
+    }
+
+    /**
+     * 
+     * 
+     * @return true if Message Signing has been enabled in the interceptor
+     */
+    static synchronized boolean getMessageSigningEnabled() {
+        return isMessageSigningEnabled;
     }
 
     /**
@@ -785,176 +791,189 @@ class ApproovTokenInterceptor implements Interceptor {
 
         // request an Approov token for the domain
         String host = request.url().host();
-        // Ensure that the signing key used for signing the message belongs to the Approov token fetched here
-        synchronized (ApproovTokenInterceptor.class) {
-            // fetch the Approov token for the domain
-            Approov.TokenFetchResult approovResults = Approov.fetchApproovTokenAndWait(host);
-
-            // provide information about the obtained token or error (note "approov token -check" can
-            // be used to check the validity of the token and if you use token annotations they
-            // will appear here to determine why a request is being rejected)
-            Log.d(TAG, "Token for " + host + ": " + approovResults.getLoggableToken());
-
-            // force a pinning change if there is any dynamic config update
-            if (approovResults.isConfigChanged()) {
-                Approov.fetchConfig();
-                ApproovService.clearOkHttpClient();
+        // The updated request
+        Request updatedRequest;
+        if (ApproovService.getMessageSigningEnabled()) {
+            // Ensure that the signing key used for signing the message belongs to the Approov token fetched here
+            synchronized (ApproovTokenInterceptor.class) {
+                updatedRequest = updateRequestWithApproov(request, url, host);
             }
-
-            // we cannot proceed if the pins need to be updated. This will be cleared by using getOkHttpClient
-            // but will persist if the app fails to rebuild the OkHttpClient regularly. This might occur
-            // on first use after initial app install if the initial network fetch was unable to obtain
-            // the dynamic configuration for the account if there was poor network connectivity at that
-            // point.
-            if (approovResults.isForceApplyPins()) {
-                ApproovService.clearOkHttpClient();
-                throw new ApproovNetworkException("Pins need to be updated");
-            }
-
-            // check the status of Approov token fetch
-            if (approovResults.getStatus() == Approov.TokenFetchStatus.SUCCESS)
-                // we successfully obtained a token so add it to the header for the request
-                request = request.newBuilder().header(approovTokenHeader, approovTokenPrefix + approovResults.getToken()).build();
-            else if ((approovResults.getStatus() == Approov.TokenFetchStatus.NO_NETWORK) ||
-                    (approovResults.getStatus() == Approov.TokenFetchStatus.POOR_NETWORK) ||
-                    (approovResults.getStatus() == Approov.TokenFetchStatus.MITM_DETECTED)) {
-                // we are unable to get an Approov token due to network conditions so the request can
-                // be retried by the user later - unless this is overridden
-                if (!proceedOnNetworkFail)
-                    throw new ApproovNetworkException("Approov token fetch for " + host + ": " + approovResults.getStatus().toString());
-            }
-            else if ((approovResults.getStatus() != Approov.TokenFetchStatus.NO_APPROOV_SERVICE) &&
-                    (approovResults.getStatus() != Approov.TokenFetchStatus.UNKNOWN_URL) &&
-                    (approovResults.getStatus() != Approov.TokenFetchStatus.UNPROTECTED_URL))
-                // we have failed to get an Approov token with a more serious permanent error
-                throw new ApproovException("Approov token fetch for " + host + ": " + approovResults.getStatus().toString());
-
-            // we only continue additional processing if we had a valid status from Approov, to prevent additional delays
-            // by trying to fetch from Approov again and this also protects against header substitutions in domains not
-            // protected by Approov and therefore potential subject to a MitM
-            if ((approovResults.getStatus() != Approov.TokenFetchStatus.SUCCESS) &&
-                    (approovResults.getStatus() != Approov.TokenFetchStatus.UNPROTECTED_URL))
-                return chain.proceed(request);
-
-            // we now deal with any header substitutions, which may require further fetches but these
-            // should be using cached results
-            for (Map.Entry<String, String> entry: substitutionHeaders.entrySet()) {
-                String header = entry.getKey();
-                String prefix = entry.getValue();
-                String value = request.header(header);
-                if ((value != null) && value.startsWith(prefix) && (value.length() > prefix.length())) {
-                    approovResults = Approov.fetchSecureStringAndWait(value.substring(prefix.length()), null);
-                    Log.d(TAG, "Substituting header: " + header + ", " + approovResults.getStatus().toString());
-                    if (approovResults.getStatus() == Approov.TokenFetchStatus.SUCCESS) {
-                        // substitute the header
-                        request = request.newBuilder().header(header, prefix + approovResults.getSecureString()).build();
-                    }
-                    else if (approovResults.getStatus() == Approov.TokenFetchStatus.REJECTED)
-                        // if the request is rejected then we provide a special exception with additional information
-                        throw new ApproovRejectionException("Header substitution for " + header + ": " +
-                                approovResults.getStatus().toString() + ": " + approovResults.getARC() +
-                                " " + approovResults.getRejectionReasons(),
-                                approovResults.getARC(), approovResults.getRejectionReasons());
-                    else if ((approovResults.getStatus() == Approov.TokenFetchStatus.NO_NETWORK) ||
-                            (approovResults.getStatus() == Approov.TokenFetchStatus.POOR_NETWORK) ||
-                            (approovResults.getStatus() == Approov.TokenFetchStatus.MITM_DETECTED)) {
-                        // we are unable to get the secure string due to network conditions so the request can
-                        // be retried by the user later - unless this is overridden
-                        if (!proceedOnNetworkFail)
-                            throw new ApproovNetworkException("Header substitution for " + header + ": " +
-                                approovResults.getStatus().toString());
-                    }
-                    else if (approovResults.getStatus() != Approov.TokenFetchStatus.UNKNOWN_KEY)
-                        // we have failed to get a secure string with a more serious permanent error
-                        throw new ApproovException("Header substitution for " + header + ": " +
-                                approovResults.getStatus().toString());
-                }
-            }
-
-            // we now deal with any query parameter substitutions, which may require further fetches but these
-            // should be using cached results
-            String currentURL = request.url().toString();
-            for (Map.Entry<String, Pattern> entry: substitutionQueryParams.entrySet()) {
-                String queryKey = entry.getKey();
-                Pattern pattern = entry.getValue();
-                Matcher matcher = pattern.matcher(currentURL);
-                if (matcher.find()) {
-                    // we have found an occurrence of the query parameter to be replaced so we look up the existing
-                    // value as a key for a secure string
-                    String queryValue = matcher.group(1);
-                    approovResults = Approov.fetchSecureStringAndWait(queryValue, null);
-                    Log.d(TAG, "Substituting query parameter: " + queryKey + ", " + approovResults.getStatus().toString());
-                    if (approovResults.getStatus() == Approov.TokenFetchStatus.SUCCESS) {
-                        // substitute the query parameter
-                        currentURL = new StringBuilder(currentURL).replace(matcher.start(1),
-                                matcher.end(1), approovResults.getSecureString()).toString();
-                        request = request.newBuilder().url(currentURL).build();
-                    }
-                    else if (approovResults.getStatus() == Approov.TokenFetchStatus.REJECTED)
-                        // if the request is rejected then we provide a special exception with additional information
-                        throw new ApproovRejectionException("Query parameter substitution for " + queryKey + ": " +
-                                approovResults.getStatus().toString() + ": " + approovResults.getARC() +
-                                " " + approovResults.getRejectionReasons(),
-                                approovResults.getARC(), approovResults.getRejectionReasons());
-                    else if ((approovResults.getStatus() == Approov.TokenFetchStatus.NO_NETWORK) ||
-                            (approovResults.getStatus() == Approov.TokenFetchStatus.POOR_NETWORK) ||
-                            (approovResults.getStatus() == Approov.TokenFetchStatus.MITM_DETECTED)) {
-                        // we are unable to get the secure string due to network conditions so the request can
-                        // be retried by the user later - unless this is overridden
-                        if (!proceedOnNetworkFail)
-                            throw new ApproovNetworkException("Query parameter substitution for " + queryKey + ": " +
-                                approovResults.getStatus().toString());
-                    }
-                    else if (approovResults.getStatus() != Approov.TokenFetchStatus.UNKNOWN_KEY)
-                        // we have failed to get a secure string with a more serious permanent error
-                        throw new ApproovException("Query parameter substitution for " + queryKey + ": " +
-                                approovResults.getStatus().toString());
-                }
-            }
-
-            // if message signing is enabled, add the signature header to the request
-            if (messageSigningConfig != null) {
-                Log.d(TAG, "Signing message: headers " + messageSigningConfig.signedHeaders +
-                        (messageSigningConfig.signBody ? ", body" : ""));
-                // build the message to sign, consisting of the URL, the names and values of the included headers and
-                // the body, if enabled, where each entry is separated from the next by a newline character
-                StringBuilder message = new StringBuilder();
-                // add the URL to the message, followed by a newline
-                message.append(request.url().toString());
-                message.append("\n");
-                // add the required headers to the message as 'headername:headervalue', where the headername is in
-                // lowercase
-                if (messageSigningConfig.signedHeaders != null) {
-                    for (String header : messageSigningConfig.signedHeaders) {
-                        // add one headername:headervalue\n entry for each header value to be included in the signature
-                        List<String> values = request.headers(header);
-                        for (String value : values) {
-                            message.append(header.toLowerCase()).append(":");
-                            if (value != null) {
-                                message.append(value);
-                            }
-                            message.append("\n");
-                        }
-                    }
-                }
-                // add the body to the message
-                if (messageSigningConfig.signBody) {
-                    okhttp3.RequestBody body = request.body();
-                    if (body != null) {
-                        Buffer buffer = new Buffer();
-                        body.writeTo(buffer);
-                        message.append(buffer.readUtf8());
-                    }
-                }
-                // compute the signature and add it to the request (passing on any exceptions that may occur)
-                if (messageSigningConfig.targetHeader != null && !messageSigningConfig.targetHeader.isEmpty()) {
-                    String signature = ApproovService.getMessageSignature(message.toString());
-                    request = request.newBuilder().header(messageSigningConfig.targetHeader, signature).build();
-                }
-            }
+        } else {
+            // We are not using message signing so no need to synchronize
+            updatedRequest = updateRequestWithApproov(request, url, host);
         }
 
         // proceed with the rest of the chain
         return chain.proceed(request);
+    }
+
+    Request updateRequestWithApproov(Request request, String url, String host) throws ApproovException, IOException {
+        // fetch the Approov token for the domain
+        Approov.TokenFetchResult approovResults = Approov.fetchApproovTokenAndWait(url);
+
+        // provide information about the obtained token or error (note "approov token -check" can
+        // be used to check the validity of the token and if you use token annotations they
+        // will appear here to determine why a request is being rejected)
+        Log.d(TAG, "Token for " + host + ": " + approovResults.getLoggableToken());
+
+        // force a pinning change if there is any dynamic config update
+        if (approovResults.isConfigChanged()) {
+            Approov.fetchConfig();
+            ApproovService.clearOkHttpClient();
+        }
+
+        // we cannot proceed if the pins need to be updated. This will be cleared by using getOkHttpClient
+        // but will persist if the app fails to rebuild the OkHttpClient regularly. This might occur
+        // on first use after initial app install if the initial network fetch was unable to obtain
+        // the dynamic configuration for the account if there was poor network connectivity at that
+        // point.
+        if (approovResults.isForceApplyPins()) {
+            ApproovService.clearOkHttpClient();
+            throw new ApproovNetworkException("Pins need to be updated");
+        }
+
+        // check the status of Approov token fetch
+        if (approovResults.getStatus() == Approov.TokenFetchStatus.SUCCESS)
+            // we successfully obtained a token so add it to the header for the request
+            request = request.newBuilder().header(approovTokenHeader, approovTokenPrefix + approovResults.getToken()).build();
+        else if ((approovResults.getStatus() == Approov.TokenFetchStatus.NO_NETWORK) ||
+                (approovResults.getStatus() == Approov.TokenFetchStatus.POOR_NETWORK) ||
+                (approovResults.getStatus() == Approov.TokenFetchStatus.MITM_DETECTED)) {
+            // we are unable to get an Approov token due to network conditions so the request can
+            // be retried by the user later - unless this is overridden
+            if (!proceedOnNetworkFail)
+                throw new ApproovNetworkException("Approov token fetch for " + host + ": " + approovResults.getStatus().toString());
+        }
+        else if ((approovResults.getStatus() != Approov.TokenFetchStatus.NO_APPROOV_SERVICE) &&
+                (approovResults.getStatus() != Approov.TokenFetchStatus.UNKNOWN_URL) &&
+                (approovResults.getStatus() != Approov.TokenFetchStatus.UNPROTECTED_URL))
+            // we have failed to get an Approov token with a more serious permanent error
+            throw new ApproovException("Approov token fetch for " + host + ": " + approovResults.getStatus().toString());
+
+        // we only continue additional processing if we had a valid status from Approov, to prevent additional delays
+        // by trying to fetch from Approov again and this also protects against header substitutions in domains not
+        // protected by Approov and therefore potential subject to a MitM
+        if ((approovResults.getStatus() != Approov.TokenFetchStatus.SUCCESS) &&
+                (approovResults.getStatus() != Approov.TokenFetchStatus.UNPROTECTED_URL))
+            return request; //return chain.proceed(request);
+
+        // we now deal with any header substitutions, which may require further fetches but these
+        // should be using cached results
+        for (Map.Entry<String, String> entry: substitutionHeaders.entrySet()) {
+            String header = entry.getKey();
+            String prefix = entry.getValue();
+            String value = request.header(header);
+            if ((value != null) && value.startsWith(prefix) && (value.length() > prefix.length())) {
+                approovResults = Approov.fetchSecureStringAndWait(value.substring(prefix.length()), null);
+                Log.d(TAG, "Substituting header: " + header + ", " + approovResults.getStatus().toString());
+                if (approovResults.getStatus() == Approov.TokenFetchStatus.SUCCESS) {
+                    // substitute the header
+                    request = request.newBuilder().header(header, prefix + approovResults.getSecureString()).build();
+                }
+                else if (approovResults.getStatus() == Approov.TokenFetchStatus.REJECTED)
+                    // if the request is rejected then we provide a special exception with additional information
+                    throw new ApproovRejectionException("Header substitution for " + header + ": " +
+                            approovResults.getStatus().toString() + ": " + approovResults.getARC() +
+                            " " + approovResults.getRejectionReasons(),
+                            approovResults.getARC(), approovResults.getRejectionReasons());
+                else if ((approovResults.getStatus() == Approov.TokenFetchStatus.NO_NETWORK) ||
+                        (approovResults.getStatus() == Approov.TokenFetchStatus.POOR_NETWORK) ||
+                        (approovResults.getStatus() == Approov.TokenFetchStatus.MITM_DETECTED)) {
+                    // we are unable to get the secure string due to network conditions so the request can
+                    // be retried by the user later - unless this is overridden
+                    if (!proceedOnNetworkFail)
+                        throw new ApproovNetworkException("Header substitution for " + header + ": " +
+                            approovResults.getStatus().toString());
+                }
+                else if (approovResults.getStatus() != Approov.TokenFetchStatus.UNKNOWN_KEY)
+                    // we have failed to get a secure string with a more serious permanent error
+                    throw new ApproovException("Header substitution for " + header + ": " +
+                            approovResults.getStatus().toString());
+            }
+        }
+
+        // we now deal with any query parameter substitutions, which may require further fetches but these
+        // should be using cached results
+        String currentURL = request.url().toString();
+        for (Map.Entry<String, Pattern> entry: substitutionQueryParams.entrySet()) {
+            String queryKey = entry.getKey();
+            Pattern pattern = entry.getValue();
+            Matcher matcher = pattern.matcher(currentURL);
+            if (matcher.find()) {
+                // we have found an occurrence of the query parameter to be replaced so we look up the existing
+                // value as a key for a secure string
+                String queryValue = matcher.group(1);
+                approovResults = Approov.fetchSecureStringAndWait(queryValue, null);
+                Log.d(TAG, "Substituting query parameter: " + queryKey + ", " + approovResults.getStatus().toString());
+                if (approovResults.getStatus() == Approov.TokenFetchStatus.SUCCESS) {
+                    // substitute the query parameter
+                    currentURL = new StringBuilder(currentURL).replace(matcher.start(1),
+                            matcher.end(1), approovResults.getSecureString()).toString();
+                    request = request.newBuilder().url(currentURL).build();
+                }
+                else if (approovResults.getStatus() == Approov.TokenFetchStatus.REJECTED)
+                    // if the request is rejected then we provide a special exception with additional information
+                    throw new ApproovRejectionException("Query parameter substitution for " + queryKey + ": " +
+                            approovResults.getStatus().toString() + ": " + approovResults.getARC() +
+                            " " + approovResults.getRejectionReasons(),
+                            approovResults.getARC(), approovResults.getRejectionReasons());
+                else if ((approovResults.getStatus() == Approov.TokenFetchStatus.NO_NETWORK) ||
+                        (approovResults.getStatus() == Approov.TokenFetchStatus.POOR_NETWORK) ||
+                        (approovResults.getStatus() == Approov.TokenFetchStatus.MITM_DETECTED)) {
+                    // we are unable to get the secure string due to network conditions so the request can
+                    // be retried by the user later - unless this is overridden
+                    if (!proceedOnNetworkFail)
+                        throw new ApproovNetworkException("Query parameter substitution for " + queryKey + ": " +
+                            approovResults.getStatus().toString());
+                }
+                else if (approovResults.getStatus() != Approov.TokenFetchStatus.UNKNOWN_KEY)
+                    // we have failed to get a secure string with a more serious permanent error
+                    throw new ApproovException("Query parameter substitution for " + queryKey + ": " +
+                            approovResults.getStatus().toString());
+            }
+        }
+
+        // if message signing is enabled, add the signature header to the request
+        if (messageSigningConfig != null) {
+            Log.d(TAG, "Signing message: headers " + messageSigningConfig.signedHeaders +
+                    (messageSigningConfig.signBody ? ", body" : ""));
+            // build the message to sign, consisting of the URL, the names and values of the included headers and
+            // the body, if enabled, where each entry is separated from the next by a newline character
+            StringBuilder message = new StringBuilder();
+            // add the URL to the message, followed by a newline
+            message.append(request.url().toString());
+            message.append("\n");
+            // add the required headers to the message as 'headername:headervalue', where the headername is in
+            // lowercase
+            if (messageSigningConfig.signedHeaders != null) {
+                for (String header : messageSigningConfig.signedHeaders) {
+                    // add one headername:headervalue\n entry for each header value to be included in the signature
+                    List<String> values = request.headers(header);
+                    for (String value : values) {
+                        message.append(header.toLowerCase()).append(":");
+                        if (value != null) {
+                            message.append(value);
+                        }
+                        message.append("\n");
+                    }
+                }
+            }
+            // add the body to the message
+            if (messageSigningConfig.signBody) {
+                okhttp3.RequestBody body = request.body();
+                if (body != null) {
+                    Buffer buffer = new Buffer();
+                    body.writeTo(buffer);
+                    message.append(buffer.readUtf8());
+                }
+            }
+            // compute the signature and add it to the request (passing on any exceptions that may occur)
+            if (messageSigningConfig.targetHeader != null && !messageSigningConfig.targetHeader.isEmpty()) {
+                String signature = ApproovService.getMessageSignature(message.toString());
+                request = request.newBuilder().header(messageSigningConfig.targetHeader, signature).build();
+            }
+        }
+
+        return request;
     }
 }
