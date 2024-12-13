@@ -118,7 +118,7 @@ public class ApproovService {
      * @param context the Application context
      * @param config the configuration string, or empty for no SDK initialization
      */
-    public static void initialize(Context context, String config) {
+    public static void initialize(Context context, String config, String comment) {
         // setup for creating clients
         isInitialized = false;
         proceedOnNetworkFail = false;
@@ -133,8 +133,11 @@ public class ApproovService {
 
         // initialize the Approov SDK
         try {
-            if (config.length() != 0)
+            if (config.length() != 0) {
                 Approov.initialize(context, config, "auto", "init-fetch");
+                if (comment != null)
+                    Approov.initialize(context, config, "auto", comment);
+            }
             Approov.setUserProperty("approov-service-okhttp");
             isInitialized = true;
         } catch (IllegalArgumentException e) {
