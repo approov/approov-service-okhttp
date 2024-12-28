@@ -8,8 +8,6 @@ repositories {
     google()
 }
 
-group = 'com.github.approov'
-
 android {
     compileSdk 34
 
@@ -35,15 +33,3 @@ dependencies {
     implementation 'io.approov:approov-android-sdk:3.3.0'
 }
 
-afterEvaluate {
-    publishing {
-        publications {
-            release(MavenPublication) {
-                from components.release
-                groupId = 'com.github.approov'
-                artifactId = 'approov-service-okhttp'
-                version = '3.3.0'
-            }
-        }
-    }
-}

@@ -6,7 +6,7 @@
 # For Approov SDK release 3.3.0 (library 7257) the version was 3.3.0
 # This is also used to rename the folder where the package is stored by replacing the TAG-RENAME-DIR
 # THE POM FILE MUST BE UPDATED WITH THE CORRECT VERSION WHICH MUST MATCH THIS VARIABLE
-VERSION="3.3.0"
+VERSION="3.3.1"
 
 # Constant: current package name
 CURRENT_PACKAGE_NAME="service.okhttp"
