@@ -205,6 +205,8 @@ zip -r ${FILE_PREFIX}.zip "io"
 # Test if the zip file was created
 if [ -f "${FILE_PREFIX}.zip" ]; then
     echo "Zip file created successfully: ${FILE_PREFIX}.zip"
+    # Copy the zip file to the root directory so we can test artifacts locally
+    cp ${FILE_PREFIX}.zip ../
 else
     echo "Failed to create zip file: ${FILE_PREFIX}.zip"
     exit 1
