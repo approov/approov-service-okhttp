@@ -18,15 +18,12 @@ if [ -z "$MAVEN_PASSWORD" ]; then
   echo "Error: MAVEN_PASSWORD is not set. This script requires a password to be set."
   exit 1
 fi
-echo ${MAVEN_USERNAME} > ${WORKSPACE}/maven_user.txt
-echo ${MAVEN_PASSWORD} > ${WORKSPACE}/maven_password.txt
+
 # The body artifact name
 BODY_ARTIFACT="service.okhttp-${CURRENT_TAG}.zip"
 
 # The username:password for the maven repository
 MAVEN_CREDENTIALS=$(printf "${MAVEN_USERNAME}:${MAVEN_PASSWORD}" | base64)
-echo ${MAVEN_CREDENTIALS} > ${WORKSPACE}/maven-credentials.txt
-# Publish the body artifact
 # Publish the body artifact
 curl --request POST \
   --verbose \
