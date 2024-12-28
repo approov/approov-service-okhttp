@@ -34,16 +34,25 @@ jobs:
     - name: Install Android SDK
       run: |
           sudo apt-get update
-          sudo apt-get install -y unzip curl gnupg
-          curl -o android-sdk.zip https://dl.google.com/android/repository/commandlinetools-linux-9123335_latest.zip
+          sudo apt-get install -y unzip curl
           mkdir -p $ANDROID_HOME/cmdline-tools
+          curl -o android-sdk.zip https://dl.google.com/android/repository/commandlinetools-linux-9123335_latest.zip
           unzip -q android-sdk.zip -d $ANDROID_HOME/cmdline-tools
           mv $ANDROID_HOME/cmdline-tools/cmdline-tools $ANDROID_HOME/cmdline-tools/tools
           rm android-sdk.zip
-          echo "export PATH=$PATH:$ANDROID_HOME/cmdline-tools/tools/bin:$ANDROID_HOME/platform-tools:$ANDROID_HOME/emulator" >> $GITHUB_ENV
-          echo "export ANDROID_HOME=$ANDROID_HOME" >> $GITHUB_ENV
-          sdkmanager --licenses
+          echo "ANDROID_HOME=$ANDROID_HOME" >> $GITHUB_ENV
+          echo "PATH=$ANDROID_HOME/cmdline-tools/tools/bin:$ANDROID_HOME/platform-tools:$ANDROID_HOME/emulator:$PATH" >> $GITHUB_ENV
+    - name: Accept Android SDK Licenses
+      shell: bash
+      run: |
+          source $GITHUB_ENV
+          yes | sdkmanager --licenses
+    - name: Install Required SDK Packages
+      shell: bash
+      run: |
+          source $GITHUB_ENV
           sdkmanager "platform-tools" "platforms;android-33" "build-tools;33.0.2"
+  
   
     - name: Install GPG
       run: |
