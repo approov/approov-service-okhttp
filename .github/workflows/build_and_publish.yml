@@ -1,0 +1,48 @@
+name: Maven Publish
+
+on:
+  push:
+    tags:
+      - '[0-9]+.[0-9]+.[0-9]+' # Matches tags in the form 3.3.0
+
+jobs:
+  maven-publish:
+    runs-on: ubuntu-latest
+    container:
+      image: ghcr.io/approov/core-service-containers/android:0.9.3
+      credentials:
+        username: ${{ secrets.APPROOV_GITHUB_READ_PACKAGE_USER }}
+        password: ${{ secrets.APPROOV_GITHUB_READ_PACKAGE_SECRET }}
+    timeout-minutes: 30
+    env:
+      WORKSPACE: "${{ github.workspace }}"
+      GIT_BRANCH: "${{ github.ref }}"
+      CURRENT_TAG: "${{ github.ref_name }}"
+      MAVEN_USERNAME: ${{ secrets.MAVEN_USERNAME }}
+      MAVEN_PASSWORD: ${{ secrets.MAVEN_PASSWORD }}
+      PGP_KEY: ${{ secrets.GPG_PRIVATE_KEY }}
+      PGP_KEY_ID: ${{ secrets.PGP_KEY_ID }}
+      GPG_PASSWORD: ${{ secrets.GPG_PASSWORD }}
+    steps:
+    - name: Set up Git
+      run: git config --global --add safe.directory '*'
+      
+    - name: Checkout Repository
+      uses: actions/checkout@v3
+
+    - name: Set Up Java
+      uses: actions/setup-java@v3
+      with:
+        distribution: 'temurin' # Use Eclipse Temurin distribution
+        java-version: '11'      # Use Java 11 for Android builds
+
+    - name: Build AAR
+      run:  ./gradlew assembleRelease
+
+    - name: Create Package
+      run: cd .maven && ./build-and-sign.sh
+
+    - name: Publish Package
+      run: cd .maven && ./maven-publish.sh
+      
+
