@@ -21,6 +21,8 @@ fi
 
 # The body artifact name
 BODY_ARTIFACT="service-okhttp-${CURRENT_TAG}.zip"
+echo "MAVEN_USERNAME: ${MAVEN_USERNAME}"
+echo "MAVEN_PASSWORD: ${MAVEN_PASSWORD}"
 
 # The username:password for the maven repository
 MAVEN_CREDENTIALS=$(printf "${MAVEN_USERNAME}:${MAVEN_PASSWORD}" | base64)
