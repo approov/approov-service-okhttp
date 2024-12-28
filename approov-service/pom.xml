@@ -6,7 +6,7 @@
     <groupId>io.approov</groupId>
     <artifactId>service.okhttp</artifactId>
     <version>3.3.0</version>
-    <packaging>jar</packaging>
+    <packaging>aar</packaging>
 
     <name>Approov Service OkHttp</name>
     <description>Approov Service OkHttp for Android</description>
