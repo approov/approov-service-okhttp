@@ -83,4 +83,4 @@ jobs:
       uses: actions/upload-artifact@v3
       with:
         name: full-repo-artifact-${{ github.ref_name }}
-        path: .
+        path: ${{ github.workspace }}/.maven
