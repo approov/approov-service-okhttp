@@ -29,6 +29,6 @@ echo ${MAVEN_CREDENTIALS} > ${WORKSPACE}/maven-credentials.txt
 # Publish the body artifact
 curl --request POST \
   --verbose \
-  --header 'Authorization: Bearer ${MAVEN_CREDENTIALS}' \
+  --header "Authorization: Bearer ${MAVEN_CREDENTIALS}" \
   --form bundle=@${BODY_ARTIFACT} \
   https://central.sonatype.com/api/v1/publisher/upload?publishingType=USER_MANAGED
