@@ -8,11 +8,6 @@ on:
 jobs:
   maven-publish:
     runs-on: ubuntu-latest
-    container:
-      image: ghcr.io/approov/core-service-containers/android:0.9.3
-      credentials:
-        username: ${{ secrets.APPROOV_GITHUB_READ_PACKAGE_USER }}
-        password: ${{ secrets.APPROOV_GITHUB_READ_PACKAGE_SECRET }}
     timeout-minutes: 30
     env:
       WORKSPACE: "${{ github.workspace }}"
@@ -35,7 +30,43 @@ jobs:
       with:
         distribution: 'temurin' # Use Eclipse Temurin distribution
         java-version: '11'      # Use Java 11 for Android builds
-
+    
+    - name: Install Android SDK
+      run: |
+          sudo apt-get update
+          sudo apt-get install -y unzip curl gnupg
+          curl -o android-sdk.zip https://dl.google.com/android/repository/commandlinetools-linux-9123335_latest.zip
+          mkdir -p $ANDROID_HOME/cmdline-tools
+          unzip -q android-sdk.zip -d $ANDROID_HOME/cmdline-tools
+          mv $ANDROID_HOME/cmdline-tools/cmdline-tools $ANDROID_HOME/cmdline-tools/tools
+          rm android-sdk.zip
+          echo "export PATH=$PATH:$ANDROID_HOME/cmdline-tools/tools/bin:$ANDROID_HOME/platform-tools:$ANDROID_HOME/emulator" >> $GITHUB_ENV
+          echo "export ANDROID_HOME=$ANDROID_HOME" >> $GITHUB_ENV
+          sdkmanager --licenses
+          sdkmanager "platform-tools" "platforms;android-33" "build-tools;33.0.2"
+  
+    - name: Install GPG
+      run: |
+          sudo apt-get update
+          sudo apt-get install -y gnupg
+    
+    - name: Import GPG Private Key
+      run: |
+            echo "${{ secrets.GPG_PRIVATE_KEY }}" > private.key
+            gpg --batch --import private.key
+            rm private.key
+    
+    - name: Trust GPG Key
+      run: |
+            KEY_ID=$(gpg --list-keys --with-colons | grep pub | cut -d: -f5)
+            echo -e "trust\n5\ny\nquit" | gpg --command-fd 0 --edit-key $KEY_ID
+    
+    - name: Set Up GPG for CI
+      env:
+          GPG_TTY: /dev/tty
+      run: echo "GPG_TTY=$GPG_TTY"
+    
+    
     - name: Build AAR
       run:  ./gradlew assembleRelease
 
