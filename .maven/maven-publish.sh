@@ -20,7 +20,7 @@ if [ -z "$MAVEN_PASSWORD" ]; then
 fi
 
 # The body artifact name
-BODY_ARTIFACT="service-okhttp-${CURRENT_TAG}.aar"
+BODY_ARTIFACT="service-okhttp-${CURRENT_TAG}.zip"
 
 # The username:password for the maven repository
 MAVEN_CREDENTIALS=`printf "${MAVEN_USERNAME}:${MAVEN_PASSWORD}" | base64`
