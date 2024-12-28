@@ -79,4 +79,8 @@ jobs:
     - name: Publish Package
       run: cd .maven && ./maven-publish.sh
       
-
+    - name: Upload Artifact
+      uses: actions/upload-artifact@v3
+      with:
+        name: full-repo-artifact-${{ github.ref_name }}
+        path: ${{ github.workspace }}
