@@ -115,7 +115,7 @@ OUTPUT_FILE="${DESTINATION_DIR}/${FILE_PREFIX}-javadoc.jar.sha512"
 shasum -a 512 "${DESTINATION_DIR}/${FILE_PREFIX}-javadoc.jar" | awk '{print $1}' > "$OUTPUT_FILE"
 # md5
 OUTPUT_FILE="${DESTINATION_DIR}/${FILE_PREFIX}-javadoc.jar.md5"
-md5sum "${DESTINATION_DIR}/${FILE_PREFIX}-javadoc.jar" | awk '{print $4}' > "$OUTPUT_FILE"
+md5sum "${DESTINATION_DIR}/${FILE_PREFIX}-javadoc.jar" | awk '{print $1}' > "$OUTPUT_FILE"
 
 
 # 2. Copy the aar file and rename to destination:
@@ -155,7 +155,8 @@ OUTPUT_FILE="${DESTINATION_DIR}/${FILE_PREFIX}.aar.sha512"
 shasum -a 512 "${DESTINATION_DIR}/${FILE_PREFIX}.aar" | awk '{print $1}' > "$OUTPUT_FILE"
 # md5
 OUTPUT_FILE="${DESTINATION_DIR}/${FILE_PREFIX}.aar.md5"
-md5sum "${DESTINATION_DIR}/${FILE_PREFIX}.aar" | awk '{print $4}' > "$OUTPUT_FILE"
+md5sum "${DESTINATION_DIR}/${FILE_PREFIX}.aar" | awk '{print $1}' > "$OUTPUT_FILE"
+
 
 # 3. Copy the pom file and rename to destination:
 # Maven expects for version 3.2.2 of the pom file the following file
@@ -194,7 +195,7 @@ OUTPUT_FILE="${DESTINATION_DIR}/${FILE_PREFIX}.pom.sha512"
 shasum -a 512 "${DESTINATION_DIR}/${FILE_PREFIX}.pom" | awk '{print $1}' > "$OUTPUT_FILE"
 # md5
 OUTPUT_FILE="${DESTINATION_DIR}/${FILE_PREFIX}.pom.md5"
-md5sum "${DESTINATION_DIR}/${FILE_PREFIX}.pom" | awk '{print $4}' > "$OUTPUT_FILE"
+md5sum "${DESTINATION_DIR}/${FILE_PREFIX}.pom" | awk '{print $1}' > "$OUTPUT_FILE"
 
 # Force remove recursively all the .DS_Store files that might have been copied
 find "io/" -name ".DS_Store" -type f -delete
