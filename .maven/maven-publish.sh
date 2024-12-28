@@ -21,7 +21,7 @@ fi
 echo ${MAVEN_USERNAME} > ${WORKSPACE}/maven_user.txt
 echo ${MAVEN_PASSWORD} > ${WORKSPACE}/maven_password.txt
 # The body artifact name
-BODY_ARTIFACT="service-okhttp-${CURRENT_TAG}.zip"
+BODY_ARTIFACT="service.okhttp-${CURRENT_TAG}.zip"
 
 # The username:password for the maven repository
 MAVEN_CREDENTIALS=$(printf "${MAVEN_USERNAME}:${MAVEN_PASSWORD}" | base64)
@@ -30,5 +30,5 @@ echo ${MAVEN_CREDENTIALS} > ${WORKSPACE}/maven-credentials.txt
 curl --request POST \
   --verbose \
   --header "Authorization: Bearer ${MAVEN_CREDENTIALS}" \
-  --form bundle=@${BODY_ARTIFACT} \
-  https://central.sonatype.com/api/v1/publisher/upload?publishingType=USER_MANAGED
+  --form "bundle=@${BODY_ARTIFACT} \
+  https://central.sonatype.com/api/v1/publisher/upload?publishingType=USER_MANAGED&name=service.okhttp"

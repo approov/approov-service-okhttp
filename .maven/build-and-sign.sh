@@ -9,7 +9,7 @@
 VERSION="3.3.0"
 
 # Constant: current package name
-CURRENT_PACKAGE_NAME="service-okhttp"
+CURRENT_PACKAGE_NAME="service.okhttp"
 
 # Constant: Required package subdir structure
 PACKAGE_DIR_STRUCTURE="io/approov/${CURRENT_PACKAGE_NAME}"
@@ -120,7 +120,7 @@ md5sum "${DESTINATION_DIR}/${FILE_PREFIX}-javadoc.jar" | awk '{print $1}' > "$OU
 
 # 2. Copy the aar file and rename to destination:
 # Maven expects for version 3.2.2 of the aar file the following file
-# service-okhttp-3.2.2.aar
+# service.okhttp-3.2.2.aar
 cp ${AAR_PATH} ${DESTINATION_DIR}/${FILE_PREFIX}.aar
 
 # Check if the command was successful
@@ -160,7 +160,7 @@ md5sum "${DESTINATION_DIR}/${FILE_PREFIX}.aar" | awk '{print $1}' > "$OUTPUT_FIL
 
 # 3. Copy the pom file and rename to destination:
 # Maven expects for version 3.2.2 of the pom file the following file
-# service-okhttp-3.2.2.pom
+# service.okhttp-3.2.2.pom
 cp ${POM_FILE_PATH} ${DESTINATION_DIR}/${FILE_PREFIX}.pom
 
 # Check if the command was successful
