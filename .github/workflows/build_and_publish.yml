@@ -46,7 +46,7 @@ jobs:
       shell: bash
       run: |
           source $GITHUB_ENV
-          yes | sdkmanager --licenses
+          yes | sdkmanager --licenses || true
     - name: Install Required SDK Packages
       shell: bash
       run: |
