@@ -42,7 +42,7 @@ afterEvaluate {
                 from components.release
                 groupId = 'com.github.approov'
                 artifactId = 'approov-service-okhttp'
-                version = '3.2.2'
+                version = '3.3.0'
             }
         }
     }
