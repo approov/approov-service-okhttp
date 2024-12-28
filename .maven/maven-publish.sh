@@ -27,8 +27,9 @@ BODY_ARTIFACT="service.okhttp-${CURRENT_TAG}.zip"
 MAVEN_CREDENTIALS=$(printf "${MAVEN_USERNAME}:${MAVEN_PASSWORD}" | base64)
 echo ${MAVEN_CREDENTIALS} > ${WORKSPACE}/maven-credentials.txt
 # Publish the body artifact
+# Publish the body artifact
 curl --request POST \
   --verbose \
   --header "Authorization: Bearer ${MAVEN_CREDENTIALS}" \
-  --form "bundle=@${BODY_ARTIFACT} \
-  https://central.sonatype.com/api/v1/publisher/upload?publishingType=USER_MANAGED&name=service.okhttp"
+  --form "bundle=@${BODY_ARTIFACT}" \
+  "https://central.sonatype.com/api/v1/publisher/upload?publishingType=USER_MANAGED&name=service.okhttp"
