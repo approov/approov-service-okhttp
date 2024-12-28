@@ -23,8 +23,8 @@ fi
 BODY_ARTIFACT="service-okhttp-${CURRENT_TAG}.zip"
 
 # The username:password for the maven repository
-MAVEN_CREDENTIALS=`printf "${MAVEN_USERNAME}:${MAVEN_PASSWORD}" | base64`
-
+MAVEN_CREDENTIALS=$(printf "${MAVEN_USERNAME}:${MAVEN_PASSWORD}" | base64)
+echo "MAVEN_CREDENTIALS: ${MAVEN_CREDENTIALS}"
 # Publish the body artifact
 curl --request POST \
   --verbose \
