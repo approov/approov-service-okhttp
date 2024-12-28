@@ -61,20 +61,14 @@ jobs:
     
     - name: Import GPG Private Key
       run: |
-            echo "${{ secrets.GPG_PRIVATE_KEY }}" > private.key
-            gpg --batch --import private.key
-            rm private.key
-    
+        echo "${{ secrets.GPG_PRIVATE_KEY }}" > private.key
+        gpg --batch --import private.key
+        rm private.key
+
     - name: Trust GPG Key
       run: |
-            KEY_ID=$(gpg --list-keys --with-colons | grep pub | cut -d: -f5)
-            echo -e "trust\n5\ny\nquit" | gpg --command-fd 0 --edit-key $KEY_ID
-    
-    - name: Set Up GPG for CI
-      env:
-          GPG_TTY: /dev/tty
-      run: echo "GPG_TTY=$GPG_TTY"
-    
+        KEY_ID=$(gpg --list-keys --with-colons | grep pub | cut -d: -f5)
+        echo -e "trust\n5\ny\nquit" | gpg --batch --yes --command-fd 0 --edit-key $KEY_ID
     
     - name: Build AAR
       run:  ./gradlew assembleRelease
