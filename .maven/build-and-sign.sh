@@ -81,7 +81,7 @@ fi
 # Copy operations to destination directory
 # 1. Copy javadoc.jar file and rename to destination:
 # Maven expects for version 3.2.2 of the javadoc.jar the following file
-# approov-service-3.2.2-javadoc.jar
+# service.okhttp-3.2.2-javadoc.jar
 cp ${JAVADOC_JAR_PATH} ${DESTINATION_DIR}/${FILE_PREFIX}-javadoc.jar
 
 # Check if the command was successful
