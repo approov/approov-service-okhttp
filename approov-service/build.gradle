@@ -6,18 +6,14 @@ plugins {
 repositories {
     mavenCentral()
     google()
-    jcenter()
-    maven { url "https://jitpack.io" }
 }
 
-group = 'com.github.approov'
-
 android {
-    compileSdkVersion 30
-
+    compileSdkVersion 34
+    namespace 'io.approov.service.okhttp'
     defaultConfig {
         minSdkVersion 21
-        targetSdkVersion 28
+        targetSdkVersion 34
     }
 
     buildTypes {
@@ -34,18 +30,6 @@ android {
 
 dependencies {
     implementation 'com.squareup.okhttp3:okhttp:4.12.0'
-    implementation 'com.github.approov:approov-android-sdk:3.2.2'
+    implementation 'io.approov:approov-android-sdk:3.3.0'
 }
 
-afterEvaluate {
-    publishing {
-        publications {
-            release(MavenPublication) {
-                from components.release
-                groupId = 'com.github.approov'
-                artifactId = 'approov-service-okhttp'
-                version = '3.2.2'
-            }
-        }
-    }
-}
