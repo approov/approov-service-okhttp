@@ -7,7 +7,7 @@ import okhttp3.Request;
 interface MessageSigningConfig {
     String getSigningMessage();
     String getTargetHeaderName();
-    String generateTargetHeaderValue(String messageSignature, String approovTokenHeader);
+    String generateTargetHeaderValue(String messageSignature);
 }
 
 interface MessageSigningConfigFactory {
@@ -21,11 +21,11 @@ interface MessageSigningConfigFactory {
 * You can have multiple configurations for different domains and a default '*' configuration that will be used if no
 * specific configuration is found for a domain.
 */
-public class DefaultMessageSigningConfigFactory implements MessageSigningConfigFactory {
+public final class DefaultMessageSigningConfigFactory implements MessageSigningConfigFactory {
     // the name of the header that will be used to send the message signature
-    protected String targetHeader;
+    private String targetHeader;
     // the list of headers to include in the message to be signed, in the order they should be added
-    protected ArrayList<String> signedHeaders;
+    private ArrayList<String> signedHeaders;
 
     // constructor
     public ApproovMessageSigningConfig(String targetHeader) {
@@ -51,7 +51,7 @@ public class DefaultMessageSigningConfigFactory implements MessageSigningConfigF
     }
 
     MessageSigningConfig generateMessageSigningConfig(Request request, String approovTokenHeader){
-        StringBuilder usedHeadersSpec = new StringBuilder();
+        List<String> usedHeaders = new ArrayList<>();
         StringBuilder message = new StringBuilder();
         // 1. Add the Method to the message
         message.append(request.method());
@@ -61,7 +61,10 @@ public class DefaultMessageSigningConfigFactory implements MessageSigningConfigF
         message.append("\n");
         // 3. add the Approov token header to the message
         List<String> values = request.headers(approovTokenHeader); // make sure the okhtp lookup works whatever the case used on the header name
-        usedHeadersSpec.append(approovTokenHeader.toLowerCase() + "," + values.size())
+        if values == null || values.isEmpty() {
+            throw new IllegalArgumentException("provided request does not include the Approov token header");
+        }
+        usedHeaders.add(approovTokenHeader.toLowerCase())
         for (String value : values) {
             message.append(approovTokenHeader.toLowerCase()).append(":");
             if (value != null) {
@@ -76,8 +79,8 @@ public class DefaultMessageSigningConfigFactory implements MessageSigningConfigF
             for (String header : messageSigningConfig.signedHeaders) {
                 // add one headername:headervalue\n entry for each header value to be included in the signature
                 List<String> values = request.headers(header);
-                if (values != null && values.length() > 0) {
-                    usedHeadersSpec.append(approovTokenHeader.toLowerCase()+ "," + values.size())
+                if (values != null && values.size() > 0) {
+                    usedHeaders.add(approovTokenHeader.toLowerCase())
                     for (String value : values) {
                         message.append(header.toLowerCase()).append(":");
                         if (value != null) {
@@ -88,18 +91,16 @@ public class DefaultMessageSigningConfigFactory implements MessageSigningConfigF
                 }
             }
         }
-        String finalUsedHeadersSpec = usedHeadersSpec.String()
-        message.append(finalUsedHeadersSpec)
 
         // add the body to the message
         okhttp3.RequestBody body = request.body();
-        if (body != null) {
+        if (body != null && !body.isOneShot()) { // we can't support one-shot bodies without making a copy - we probably need to do that extra work.
             Buffer buffer = new Buffer();
             body.writeTo(buffer);
+            // need to convert the contents of the buffer to b64 - using readUtf8 may still cause serious problems in the message signing code if it contains control characters (or most problematic NULLs)
             message.append(buffer.readUtf8());
         }
-        return new DefaultMessageSigningConfig(
-        );
+        return new DefaultMessageSigningConfig(targetHeader, usedHeaders, message.String());
     }
 }
 
@@ -107,19 +108,26 @@ public class DefaultMessageSigningConfig implements MessageSigningConfig
     // the name of the header that will be used to send the message signature
     private String targetHeader;
     // the list of headers with counts that are expected by the server and were also included in the message to be signed
-    private String usedHeadersSpec;
+    private List<String> usedHeaders;
     // the message to be signed
     private String message;
 
-    DefaultMessageSigningConfig(String targetHeader, String usedHeadersSpec, String message) {
+    DefaultMessageSigningConfig(String targetHeader, String usedHeaders, String message) {
         this.targeHeader = targetHeader;
-        this.usedHeaderSpec = usedHeaderSpec;
+        this.usedHeaders = usedHeaders;
         this.message = message;
     }
 
     public String getTargetHeaderName(){ return targetHeader }
     public String getSigningMessage() { return usedHeadersSpec }
     public String generateTargetHeaderValue(String messageSignature) {
-        return usedHeaderSpec + ";" + messageSignature;
+        // create a JSON object of the following form:
+        // {
+        //     "accountSig":"messageSignature.String()",
+        //     "headers":usedHeaders list as JSON list of strings
+        // }
+        // base 64 the JSON
+        String b64HeaderValue = ""
+        return b64HeaderValue;
     }
 }
