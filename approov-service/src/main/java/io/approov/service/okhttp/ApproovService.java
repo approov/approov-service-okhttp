@@ -84,7 +84,7 @@ public class ApproovService {
     private static Map<String, Pattern> exclusionURLRegexs = null;
 
     // message signing configurations mapped to a domain
-    private static Map<String,ApproovMessageSigningConfig> messageSigningConfigs = null;
+    private static MessageSigningConfigFactory messageSigningConfigFactory = null;
 
     /**
      * Construction is disallowed as this is a static only class.
@@ -123,28 +123,16 @@ public class ApproovService {
     }
 
     /**
-     * Sets the message signing configuration. If this is set, then a message signature will be computed based on the
-     * request URL, the headers specified in signedHeaders in the order in which they are listed and, optionally, the
-     * body of the message. The signature will be added to the request headers using the header name specified in header.
+     * Sets the message signing configuration. If this is set, then it will be used to generate a message from each request
+     * which is then signed and the signature data is added to a header on the request sent to the server.
      *
-     * To unset message signing, call this function as setMessageSigning(nil, nil, false)
+     * To unset message signing, call this function as setMessageSigning(null)
      *
-     * @param messageConfig is the ApproovMessageSingingConfig object that contains the message signing configuration
-     * @param domain is the domain for which the message signing configuration should be used; use '*' for the default configuration which is applied when no specific configuration is found for a domain
+     * @param factory is the MessageSigningConfigFactory that is used by the interceptor to determine request specific
+     *     message signing properties.
      */
-    public static synchronized void setMessageSigning(ApproovMessageSigningConfig messageConfig, String domain) throws ApproovException {
-        if ((messageConfig == null) || (domain == null) || (domain.isEmpty())) {
-            throw new ApproovException("The message signing configuration and domain must be specified");
-        } else {
-            // We check if this is the first message configuration that is created
-            if (messageSigningConfigs == null) {
-                messageSigningConfigs = new HashMap<>();
-            }
-            // Add the configuration and domain to the map
-            messageSigningConfigs.put(domain, messageConfig);
-            Log.d(TAG, "setMessageSigning for domain: " + domain);
-        }
-        
+    public static synchronized void setMessageSigning(MessageSigningConfigFactory factory) throws ApproovException {
+         messageSigningConfigFactory = factory
     }
 
     /**
@@ -197,10 +185,6 @@ public class ApproovService {
      */
     public static synchronized void setApproovHeader(String header, String prefix) throws ApproovException {
         Log.d(TAG, "setApproovHeader " + header + ", " + prefix);
-        // We only allow this to proceed if message signing is not enabled since changing the header after configuring the message signing is not allowed
-        if (messageSigningConfigs != null) {
-            throw new ApproovException("The Approov Token header cannot be changed after configuring the message signing");
-        }
         approovTokenHeader = header;
         approovTokenPrefix = prefix;
         okHttpClient = null;
@@ -663,7 +647,7 @@ public class ApproovService {
                 Log.d(TAG, "Building new Approov OkHttpClient");
                 ApproovTokenInterceptor interceptor = new ApproovTokenInterceptor(approovTokenHeader,
                         approovTokenPrefix, bindingHeader, proceedOnNetworkFail, substitutionHeaders,
-                        substitutionQueryParams, exclusionURLRegexs, messageSigningConfigs);
+                        substitutionQueryParams, exclusionURLRegexs, messageSigningConfigFactory);
                 okHttpClient = okHttpBuilder.certificatePinner(pinBuilder.build()).addInterceptor(interceptor).build();
             } else {
                 // if the ApproovService was not initialized then we can't add Approov capabilities
@@ -722,8 +706,8 @@ class ApproovTokenInterceptor implements Interceptor {
     // set of URL regexs that should be excluded from any Approov protection, mapped to the compiled Pattern
     private Map<String, Pattern> exclusionURLRegexs;
 
-    // message signing configuration, if any
-    private Map<String,ApproovMessageSigningConfig> messageSigningConfigs;
+    // message signing configuration
+    private MessageSigningConfigFactory messageSigningConfigFactory;
 
     /**
      * Constructs a new interceptor that adds Approov tokens and substitute headers or query
@@ -736,11 +720,12 @@ class ApproovTokenInterceptor implements Interceptor {
      * @param substitutionHeaders is the map of secure string substitution headers mapped to any required prefixes
      * @param substitutionQueryParams is the set of query parameter key names subject to substitution
      * @param exclusionURLRegexs specifies regexs of URLs that should be excluded
+     * @paraf messageSigningConfigFactory FIXME
      */
     public ApproovTokenInterceptor(String approovTokenHeader, String approovTokenPrefix, String bindingHeader,
                                    boolean proceedOnNetworkFail, Map<String, String> substitutionHeaders,
                                    Set<String> substitutionQueryParams, Map<String, Pattern> exclusionURLRegexs,
-                                   Map<String,ApproovMessageSigningConfig> messageSigningConfigs) {
+                                   MessageSigningConfigFactory messageSigningConfigFactory) {
         this.approovTokenHeader = approovTokenHeader;
         this.approovTokenPrefix = approovTokenPrefix;
         this.bindingHeader = bindingHeader;
@@ -757,7 +742,7 @@ class ApproovTokenInterceptor implements Interceptor {
             }
         }
         this.exclusionURLRegexs = new HashMap<>(exclusionURLRegexs);
-        this.messageSigningConfigs = messageSigningConfigs;
+        this.messageSigningConfigFactory = messageSigningConfigFactory;
     }
 
     @Override
@@ -904,66 +889,13 @@ class ApproovTokenInterceptor implements Interceptor {
         }
 
         // if message signing is enabled, add the signature header to the request
-        if (messageSigningConfigs != null) {
-            // Match the domain of the request URL against the configured message signing domains
-            String domain = request.url().host();
-            ApproovMessageSigningConfig messageSigningConfig = messageSigningConfigs.get(domain);
-            if (messageSigningConfig == null) {
-                // If no specific configuration is found for the domain, use the default configuration
-                domain = "*";
-                messageSigningConfig = messageSigningConfigs.get(domain);
-            }
-            if (messageSigningConfig == null) {
-                // If no default configuration is found, do not sign the message
-                return chain.proceed(request);
-            }
-            Log.d(TAG, "Signing message with configuration for domain: "  + domain + ":  " + (messageSigningConfig.getSignApproovToken() ? ", " + approovTokenHeader +  " **** " : "") + " headers " + messageSigningConfig.getSignedHeaders() +
-                    (messageSigningConfig.getSignBody() ? ", body" : ""));
-            // build the message to sign, consisting of the URL, the names and values of the included headers and
-            // the body, if enabled, where each entry is separated from the next by a newline character
-            StringBuilder message = new StringBuilder();
-            //  1. add the URL to the message, followed by a newline
-            message.append(request.url());
-            message.append("\n");
-            // 2. Add the Method to the message
-            message.append(request.method());
-            message.append("\n");
-            // 3. add the Approov token to the message, if required (TODO: Note we add the approov token and the prefix!?????)
-            if (messageSigningConfig.signApproovToken) {
-                if (approovResults.getToken() != null) {
-                    message.append(approovTokenPrefix + approovResults.getToken());
-                }
-                message.append("\n");
-            }
-            // 4. add the required headers to the message as 'headername:headervalue', where the headername is in
-            // lowercase
-            if (messageSigningConfig.getSignedHeaders() != null) {
-                for (String header : messageSigningConfig.signedHeaders) {
-                    // add one headername:headervalue\n entry for each header value to be included in the signature
-                    List<String> values = request.headers(header);
-                    for (String value : values) {
-                        message.append(header.toLowerCase()).append(":");
-                        if (value != null) {
-                            message.append(value);
-                        }
-                        message.append("\n");
-                    }
-                }
-            }
-            // add the body to the message
-            if (messageSigningConfig.getSignBody()) {
-                okhttp3.RequestBody body = request.body();
-                if (body != null) {
-                    Buffer buffer = new Buffer();
-                    body.writeTo(buffer);
-                    message.append(buffer.readUtf8());
-                }
-            }
-            // compute the signature and add it to the request (passing on any exceptions that may occur)
-            if (messageSigningConfig.targetHeader != null && !messageSigningConfig.targetHeader.isEmpty()) {
-                String signature = ApproovService.getMessageSignature(message.toString());
-                request = request.newBuilder().header(messageSigningConfig.targetHeader, signature).build();
-            }
+        if (messageSigningConfigFactory != null) {
+            MessageSigningConfig messageSigningConfig = messageSigningConfigFactory.generateMessageSigningConfig(request, approovTokenHeader);
+            Log.d(TAG, "Signing message with configuration: "  + messageSigningConfig); // add a useful toString on DefaultMessageSigningConfig
+            String signature = ApproovService.getMessageSignature(messageSigningConfig.getMessage());
+            String signatureHeaderName = messageSigningConfig.getTargetHeaderName();
+            String signatureHeaderValue = messageSigningConfig.generateTargetHeaderValue(signature);
+            request = request.newBuilder().header(signatureHeaderName, signatureHeaderValue).build();
         }
 
         // proceed with the rest of the chain
