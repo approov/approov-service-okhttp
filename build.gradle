@@ -1,11 +1,10 @@
 buildscript {
     repositories {
         google()
-        jcenter()
         mavenCentral()
     }
     dependencies {
-        classpath 'com.android.tools.build:gradle:8.1.1' // Update to the latest version
+        classpath 'com.android.tools.build:gradle:8.1.4' // Update to the latest version
     }
 }
 
@@ -13,10 +12,9 @@ allprojects {
     repositories {
         mavenCentral()
         google()
-        jcenter()
     }
 }
 
-task clean(type: Delete) {
+tasks.register('clean', Delete) {
     delete rootProject.buildDir
 }

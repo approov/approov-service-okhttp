@@ -61,10 +61,10 @@ public final class DefaultMessageSigningConfigFactory implements MessageSigningC
         message.append("\n");
         // 3. add the Approov token header to the message
         List<String> values = request.headers(approovTokenHeader); // make sure the okhtp lookup works whatever the case used on the header name
-        if values == null || values.isEmpty() {
+        if (values == null || values.isEmpty()) {
             throw new IllegalArgumentException("provided request does not include the Approov token header");
         }
-        usedHeaders.add(approovTokenHeader.toLowerCase())
+        usedHeaders.add(approovTokenHeader.toLowerCase());
         for (String value : values) {
             message.append(approovTokenHeader.toLowerCase()).append(":");
             if (value != null) {
@@ -78,11 +78,11 @@ public final class DefaultMessageSigningConfigFactory implements MessageSigningC
         if (messageSigningConfig.getSignedHeaders() != null) {
             for (String header : messageSigningConfig.signedHeaders) {
                 // add one headername:headervalue\n entry for each header value to be included in the signature
-                List<String> values = request.headers(header);
-                if (values != null && values.size() > 0) {
-                    usedHeaders.add(approovTokenHeader.toLowerCase())
+                List<String> headerValues = request.headers(header);
+                if (headerValues != null && headerValues.size() > 0) {
+                    usedHeaders.add(approovTokenHeader.toLowerCase());
                     for (String value : values) {
-                        message.append(header.toLowerCase()).append(":");
+                        message.append(headerValues.toLowerCase()).append(":");
                         if (value != null) {
                             message.append(value);
                         }
@@ -104,7 +104,7 @@ public final class DefaultMessageSigningConfigFactory implements MessageSigningC
     }
 }
 
-public class DefaultMessageSigningConfig implements MessageSigningConfig
+public class DefaultMessageSigningConfig implements MessageSigningConfig {
     // the name of the header that will be used to send the message signature
     private String targetHeader;
     // the list of headers with counts that are expected by the server and were also included in the message to be signed
@@ -118,8 +118,8 @@ public class DefaultMessageSigningConfig implements MessageSigningConfig
         this.message = message;
     }
 
-    public String getTargetHeaderName(){ return targetHeader }
-    public String getSigningMessage() { return usedHeadersSpec }
+    public String getTargetHeaderName(){ return targetHeader; }
+    public String getSigningMessage() { return usedHeadersSpec; }
     public String generateTargetHeaderValue(String messageSignature) {
         // create a JSON object of the following form:
         // {
@@ -127,7 +127,7 @@ public class DefaultMessageSigningConfig implements MessageSigningConfig
         //     "headers":usedHeaders list as JSON list of strings
         // }
         // base 64 the JSON
-        String b64HeaderValue = ""
+        String b64HeaderValue = "";
         return b64HeaderValue;
     }
 }

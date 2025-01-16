@@ -9,7 +9,7 @@ repositories {
 }
 
 android {
-    compileSdkVersion 34
+    compileSdk 34
     namespace 'io.approov.service.okhttp'
     defaultConfig {
         minSdkVersion 21

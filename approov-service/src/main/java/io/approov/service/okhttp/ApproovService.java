@@ -132,7 +132,7 @@ public class ApproovService {
      *     message signing properties.
      */
     public static synchronized void setMessageSigning(MessageSigningConfigFactory factory) throws ApproovException {
-         messageSigningConfigFactory = factory
+         messageSigningConfigFactory = factory;
     }
 
     /**
