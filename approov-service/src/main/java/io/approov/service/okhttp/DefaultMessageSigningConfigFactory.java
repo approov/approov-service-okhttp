@@ -1,17 +1,24 @@
 package io.approov.service.okhttp;
 
+import java.io.UnsupportedEncodingException;
+import java.nio.Buffer;
+import java.security.MessageDigest;
+import java.security.NoSuchAlgorithmException;
 import java.util.ArrayList;
+import java.util.Base64;
+import java.util.List;
+
 import okhttp3.Request;
 
 /* Add the following interfaces */
 interface MessageSigningConfig {
     String getSigningMessage();
     String getTargetHeaderName();
-    String generateTargetHeaderValue(String messageSignature);
+    String generateTargetHeaderValue(String messageSignature) throws UnsupportedEncodingException;
 }
 
 interface MessageSigningConfigFactory {
-    MessageSigningConfig generateMessageSigningConfig(Request request, String approovTokenHeader);
+    MessageSigningConfig generateMessageSigningConfig(Request request, String approovTokenHeader) throws UnsupportedEncodingException, NoSuchAlgorithmException;
 }
 
 /* message signing configuration
@@ -28,9 +35,11 @@ public final class DefaultMessageSigningConfigFactory implements MessageSigningC
     private ArrayList<String> signedHeaders;
     // set to true to include debug helper strings in the generated message signing header
     private boolean includeDebugHelperStrings;
+    // The debug helper configuration
+    private List<String> debugHelper;
 
     // constructor
-    public ApproovMessageSigningConfig(String targetHeader, ) {
+    public DefaultMessageSigningConfigFactory(String targetHeader) {
         if (targetHeader == null || targetHeader.isEmpty())
             throw new IllegalArgumentException("The target header must be specified");
         this.targetHeader = targetHeader;
@@ -58,20 +67,22 @@ public final class DefaultMessageSigningConfigFactory implements MessageSigningC
     }
 
     // add html method to the message
-    private addHTMLMethod(StringBuilder message, List<String> debugHelper, String method){
+    private void addHTMLMethod(StringBuilder message, List<String> debugHelper, String method){
         message.append(method);
         message.append("\n");
-        debugHelper.add(method.substring(0,2));
+        debugHelper.add(method.substring(0,2)); // TODO: ?
     }
 
     // Generate a SHA256 hash of the provided data, convert it to b64url and
     // return the specified number of characters at the start of the b64url string.
-    private getB64URLDigestSnippet(byte[] data, int snippetLength) String {
+    private String getB64URLDigestSnippet(byte[] data, int snippetLength) throws NoSuchAlgorithmException {
         if (snippetLength <= 0 || data == null || data.length == 0) {
-            return ""
+            return "";
+        }
         MessageDigest digest = MessageDigest.getInstance("SHA-256");
-        byte[] hash = digest.digest(data.getBytes("UTF-8"));
-        String b64UrlEncoded = Base64.getUrlEncoder().withoutPadding().encodeToString(hash);
+        byte[] hash = digest.digest(data);
+        //String b64UrlEncoded = Base64.getUrlEncoder().withoutPadding().encodeToString(hash);
+        String b64UrlEncoded = android.util.Base64.encodeToString(hash, android.util.Base64.URL_SAFE | android.util.Base64.NO_PADDING).replace("\n", "");
         if (b64UrlEncoded.length() <= snippetLength) {
             return b64UrlEncoded;
         }
@@ -79,25 +90,25 @@ public final class DefaultMessageSigningConfigFactory implements MessageSigningC
     }
 
     // adds the URL string to the message - must include all bits of the url from the scheme through to the last param
-    private addURL(StringBuilder message, List<String> debugHelper, String url) {
-        int start = message.length()
+    private void addURL(StringBuilder message, String url) throws UnsupportedEncodingException, NoSuchAlgorithmException {
+        int start = message.length();
         message.append(url);
         message.append("\n");
         if debugHelper != null {
-            debugHelper.add(getB64URLDigestSnippet(message.substring(start).getBytes("UTF-8"), 6);
+            debugHelper.add(getB64URLDigestSnippet(message.substring(start).getBytes("UTF-8"), 6));
         }
     }
         
     // add a header to the message
-    private addHeaderValues(List<String> usedHeaders, StringBuilder message, List<String> debugHelper, String headerName, List<String> headerValues) {
-        if (values == null || values.isEmpty()) {
-            return
+    private void addHeaderValues(List<String> usedHeaders, StringBuilder message, String headerName, List<String> headerValues) throws UnsupportedEncodingException, NoSuchAlgorithmException {
+        if (headerValues == null || headerValues.isEmpty()) {
+            return;
         }
         usedHeaders.add(headerName);
         int start = message.length();
         String lowercaseName = headerName.toLowerCase();
         // add one headername:headervalue\n entry for each header value to be included in the signature
-        for (String value : values) {
+        for (String value : headerValues) {
             message.append(lowercaseName).append(":");
             if (value != null) {
                 message.append(value);
@@ -105,19 +116,19 @@ public final class DefaultMessageSigningConfigFactory implements MessageSigningC
             message.append("\n");
         }
         if debugHelper != null {
-            debugHelper.add(getB64URLDigestSnippet(message.substring(start).getBytes("UTF-8"), 6);
+            debugHelper.add(getB64URLDigestSnippet(message.substring(start).getBytes("UTF-8"), 6));
         }
     }
 
-    private addBody(StringBuilder message, List<String> debugHelper, Buffer body) {
-        String b64UrlSha256 = body.sha256().base64Url();
-        message.append(b64UrlSha256);
+    private void addBody(StringBuilder message, Buffer body) {
+        //String b64UrlSha256 = body.sha256().base64Url();   //TODO: is this Buffer from nio package?
+        //message.append(b64UrlSha256); // TDOD: fix
         if debugHelper != null {
-            debugHelper.add(b64UrlSha256.substring(0, 6));
+            //debugHelper.add(b64UrlSha256.substring(0, 6)); // TODO: fix
         }
     }
 
-    MessageSigningConfig generateMessageSigningConfig(Request request, String approovTokenHeader){
+    public MessageSigningConfig generateMessageSigningConfig(Request request, String approovTokenHeader) throws UnsupportedEncodingException, NoSuchAlgorithmException {
         // capture the set of header names that are included in the message
         List<String> usedHeaders = new ArrayList<>();
         // build the message as a list of  
@@ -127,14 +138,14 @@ public final class DefaultMessageSigningConfigFactory implements MessageSigningC
         // server fails to match a signature it can iterate over the properties in the debug helper to determine
         // which property was incorrect while constructing the message. To keep the debug helper short it often
         // uses a substring of the base64 encoded SHA256 hash of the property added to the message.
-        List<String> debugHelper = includeDebugHelperStrings ? new ArrayList<>() : null;
+        debugHelper = includeDebugHelperStrings ? new ArrayList<>() : null;
 
         // 1. Add the Method to the message
         addHTMLMethod(message, debugHelper, request.method());
 
         //  2. add the URL to the message, followed by a newline
-        // TODO make sure this includes all the full URL - scheme through to all params
-        addURL(message, debugHelper, request.url())
+        // TODO: make sure this includes all the full URL - scheme through to all params
+        addURL(message, debugHelper, String.valueOf(request.url()));
 
         // 3. add the Approov token header to the message
         List<String> values = request.headers(approovTokenHeader); // make sure the okhtp lookup works whatever the case used on the header name
@@ -162,34 +173,4 @@ public final class DefaultMessageSigningConfigFactory implements MessageSigningC
     }
 }
 
-public class DefaultMessageSigningConfig implements MessageSigningConfig {
-    // the name of the header that will be used to send the message signature
-    private String targetHeader;
-    // the list of headers that were added to the message
-    private List<String> usedHeaders;
-    // the message to be signed
-    private String message;
-    // the list of strings that can be used to help find issues on the server if a message signature doesn't match the required value
-    private List<String> debugHelper;
 
-    DefaultMessageSigningConfig(String targetHeader, String usedHeaders, String message, List<String> debugHelper) {
-        this.targeHeader = targetHeader;
-        this.usedHeaders = usedHeaders;
-        this.message = message;
-        this.debugHelper = debugHelper;
-    }
-
-    public String getTargetHeaderName(){ return targetHeader; }
-    public String getSigningMessage() { return usedHeadersSpec; }
-    public String generateTargetHeaderValue(String messageSignature) {
-        // create a JSON object of the following form (although all blank space should be left out):
-        // {
-        //     "accountSig":"messageSignature.String()",
-        //     "headers": [JSON usedHeaders list string values],
-        //     "debugHelper": [JSON debug helpers list string values] // only add debugHelper if it is non-null
-        // }
-        // b64URL encode the JSON for communication in the target header
-        String jsonData = "{...}";
-        return Base64.getUrlEncoder().withoutPadding().encodeToString(jsonData.getBytes("UTF-8"));
-    }
-}
