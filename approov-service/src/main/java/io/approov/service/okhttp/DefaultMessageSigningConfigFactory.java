@@ -94,7 +94,7 @@ public final class DefaultMessageSigningConfigFactory implements MessageSigningC
         int start = message.length();
         message.append(url);
         message.append("\n");
-        if debugHelper != null {
+        if (debugHelper != null) {
             debugHelper.add(getB64URLDigestSnippet(message.substring(start).getBytes("UTF-8"), 6));
         }
     }
@@ -115,7 +115,7 @@ public final class DefaultMessageSigningConfigFactory implements MessageSigningC
             }
             message.append("\n");
         }
-        if debugHelper != null {
+        if (debugHelper != null) {
             debugHelper.add(getB64URLDigestSnippet(message.substring(start).getBytes("UTF-8"), 6));
         }
     }
@@ -123,7 +123,7 @@ public final class DefaultMessageSigningConfigFactory implements MessageSigningC
     private void addBody(StringBuilder message, Buffer body) {
         //String b64UrlSha256 = body.sha256().base64Url();   //TODO: is this Buffer from nio package?
         //message.append(b64UrlSha256); // TDOD: fix
-        if debugHelper != null {
+        if (debugHelper != null) {
             //debugHelper.add(b64UrlSha256.substring(0, 6)); // TODO: fix
         }
     }
