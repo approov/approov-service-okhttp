@@ -123,6 +123,28 @@ public class ApproovService {
     }
 
     /**
+     * Initializes the ApproovService with an account configuration and comment.
+     *
+     * @param context the Application context
+     * @param config the configuration string, or empty for no SDK initialization
+     * @param comment the comment string, or empty for no comment
+     */
+    public static void initialize(Context context, String config, String comment) {
+        // initialize the Approov SDK
+        try {
+            ApproovService.initialize(context, config);
+            if ((comment != null) && (comment.length() != 0)) {
+                Approov.initialize(context, config, "auto", comment);
+            }
+        } catch (IllegalArgumentException e) {
+            Log.e(TAG, "Approov initialization failed: " + e.getMessage());
+        } catch (IllegalStateException e) {
+            Log.e(TAG, "Approov initialization failed: " + e.getMessage());
+        }
+    }
+
+
+    /**
      * Sets a flag indicating if the network interceptor should proceed anyway if it is
      * not possible to obtain an Approov token due to a networking failure. If this is set
      * then your backend API can receive calls without the expected Approov token header
