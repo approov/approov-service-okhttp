@@ -2,6 +2,7 @@ package io.approov.service.okhttp;
 
 import java.io.UnsupportedEncodingException;
 import java.nio.Buffer;
+import java.nio.ByteBuffer;
 import java.security.MessageDigest;
 import java.security.NoSuchAlgorithmException;
 import java.util.ArrayList;
@@ -90,7 +91,7 @@ public final class DefaultMessageSigningConfigFactory implements MessageSigningC
     }
 
     // adds the URL string to the message - must include all bits of the url from the scheme through to the last param
-    private void addURL(StringBuilder message, String url) throws UnsupportedEncodingException, NoSuchAlgorithmException {
+    private void addURL(StringBuilder message, String url, List<String> debugHelper) throws UnsupportedEncodingException, NoSuchAlgorithmException {
         int start = message.length();
         message.append(url);
         message.append("\n");
@@ -145,29 +146,30 @@ public final class DefaultMessageSigningConfigFactory implements MessageSigningC
 
         //  2. add the URL to the message, followed by a newline
         // TODO: make sure this includes all the full URL - scheme through to all params
-        addURL(message, debugHelper, String.valueOf(request.url()));
+        addURL(message, String.valueOf(request.url()), debugHelper);
 
         // 3. add the Approov token header to the message
         List<String> values = request.headers(approovTokenHeader); // make sure the okhtp lookup works whatever the case used on the header name
         if (values == null || values.isEmpty()) {
             throw new IllegalArgumentException("provided request does not include the Approov token header");
         }
-        addHeaderValues(usedHeaders, message, debugHelper, approovTokenHeader, values);
+        addHeaderValues( usedHeaders, message, approovTokenHeader, values);
 
         // 4. add the required headers to the message as 'headername:headervalue', where the headername is in
         // lowercase
         if (messageSigningConfig.getSignedHeaders() != null) {
             for (String header : messageSigningConfig.signedHeaders) {
-                addHeaderValues(message, debugHelper, usedHeaders, header, request.headers(header));
+                  addHeaderValues(usedHeaders, message,  header, request.headers(header));
+                //addHeaderValues(List<String> usedHeaders, StringBuilder message, String headerName, List<String> headerValues)
             }
         }
 
         // add the body to the message
         okhttp3.RequestBody body = request.body();
         if (body != null && !body.isOneShot()) { // we can't support one-shot bodies without making a copy - we probably need to do that extra work.
-            Buffer buffer = new Buffer();
+            Buffer buffer = new ByteBuffer();
             body.writeTo(buffer);
-            addBody(message, debugHelper, buffer);
+            addBody(message, buffer);
         }
         return new DefaultMessageSigningConfig(targetHeader, usedHeaders, message.String(), debugHelper);
     }
