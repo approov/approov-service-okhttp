@@ -3,7 +3,7 @@
   <modelVersion>4.0.0</modelVersion>
   <groupId>io.approov</groupId>
   <artifactId>service.okhttp</artifactId>
-  <version>VERSION_PLACEHOLDER</version>
+  <version>0.0.2</version>
   <packaging>aar</packaging>
   <name>Approov enable okhttp interceptor</name>
     <description>Approov okhttp interceptor</description>

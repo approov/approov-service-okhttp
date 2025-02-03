@@ -5,12 +5,13 @@ plugins {
 
 repositories {
     mavenCentral()
+    mavenLocal()
     google()
 }
 
 android {
     compileSdk 34
-
+    namespace("io.approov.service.okhttp") // Required on android gradle plugin > 7.4.0
     defaultConfig {
         minSdkVersion 21
         targetSdkVersion 34
@@ -31,5 +32,6 @@ android {
 dependencies {
     implementation 'com.squareup.okhttp3:okhttp:4.12.0'
     implementation 'io.approov:approov-android-sdk:3.3.0'
+    implementation 'io.approov:service.httpsig:0.0.2'
 }
 

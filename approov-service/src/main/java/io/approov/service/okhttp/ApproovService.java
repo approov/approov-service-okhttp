@@ -825,6 +825,8 @@ class ApproovTokenInterceptor implements Interceptor {
         if (approovResults.getStatus() == Approov.TokenFetchStatus.SUCCESS)
             // we successfully obtained a token so add it to the header for the request
             request = request.newBuilder().header(approovTokenHeader, approovTokenPrefix + approovResults.getToken()).build();
+            // TODO: sign message and add signature parameter to headers
+
         else if ((approovResults.getStatus() == Approov.TokenFetchStatus.NO_NETWORK) ||
                  (approovResults.getStatus() == Approov.TokenFetchStatus.POOR_NETWORK) ||
                  (approovResults.getStatus() == Approov.TokenFetchStatus.MITM_DETECTED)) {
