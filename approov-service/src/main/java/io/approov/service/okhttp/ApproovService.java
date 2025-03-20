@@ -119,6 +119,8 @@ public class ApproovService {
             isInitialized = true;
         } catch (IllegalArgumentException e) {
             Log.e(TAG, "Approov initialization failed: " + e.getMessage());
+        } catch (IllegalStateException e) {
+            Log.e(TAG, "Approov already intialized: Ignoring native layer exception " + e.getMessage());
         }
     }
 
