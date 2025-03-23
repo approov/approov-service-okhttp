@@ -90,14 +90,17 @@ public class ApproovService {
      */
     private ApproovService() {
     }
-
     /**
-     * Initializes the ApproovService with an account configuration.
+     * Initializes the ApproovService with an account configuration and comment.
      *
      * @param context the Application context
      * @param config the configuration string, or empty for no SDK initialization
+     * @param comment the comment string, or empty for no comment
      */
-    public static void initialize(Context context, String config) {
+    public static void initialize(Context context, String config, String comment) {
+        if (isInitialized && !comment.startsWith("reinit")) {
+            throw new IllegalStateException("ApproovService layer is already initialized.");
+        }
         // setup for creating clients
         isInitialized = false;
         proceedOnNetworkFail = false;
@@ -113,36 +116,26 @@ public class ApproovService {
 
         // initialize the Approov SDK
         try {
-            if (config.length() != 0)
-                Approov.initialize(context, config, "auto", "init-fetch");
-            Approov.setUserProperty("approov-service-okhttp");
+            if (!config.isEmpty())
+                Approov.initialize(context, config, "auto", comment);
             isInitialized = true;
         } catch (IllegalArgumentException e) {
             Log.e(TAG, "Approov initialization failed: " + e.getMessage());
         } catch (IllegalStateException e) {
             Log.e(TAG, "Approov already intialized: Ignoring native layer exception " + e.getMessage());
         }
+        Approov.setUserProperty("approov-service-okhttp");
     }
 
     /**
-     * Initializes the ApproovService with an account configuration and comment.
+     * Initializes the ApproovService with an account configuration
      *
      * @param context the Application context
      * @param config the configuration string, or empty for no SDK initialization
-     * @param comment the comment string, or empty for no comment
      */
-    public static void initialize(Context context, String config, String comment) {
-        // initialize the Approov SDK
-        try {
-            ApproovService.initialize(context, config);
-            if ((comment != null) && (comment.length() != 0)) {
-                Approov.initialize(context, config, "auto", comment);
-            }
-        } catch (IllegalArgumentException e) {
-            Log.e(TAG, "Approov initialization failed: " + e.getMessage());
-        } catch (IllegalStateException e) {
-            Log.e(TAG, "Approov initialization failed: " + e.getMessage());
-        }
+    public static void initialize(Context context, String config) {
+        // default uses the empty comment string
+        initialize(context, config, "");
     }
 
 
