@@ -127,7 +127,7 @@ public class ApproovService {
                 Approov.initialize(context, config, "auto", comment);
         } catch (IllegalArgumentException e) {
             Log.e(TAG, "Approov initialization failed: " + e.getMessage());
-            throw e
+            throw e;
         } catch (IllegalStateException e) {
             Log.e(TAG, "Approov already intialized: Ignoring native layer exception " + e.getMessage());
         }
