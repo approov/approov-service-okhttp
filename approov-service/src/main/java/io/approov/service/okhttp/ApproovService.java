@@ -56,6 +56,9 @@ public class ApproovService {
     // true if the Approov SDK initialized okay
     private static boolean isInitialized = false;
 
+    // the config string used for initialization
+    private static String configString;
+
     // true if the interceptor should proceed on network failures and not add an
     // Approov token
     private static boolean proceedOnNetworkFail = false;
@@ -99,7 +102,11 @@ public class ApproovService {
      */
     public static void initialize(Context context, String config, String comment) {
         if (isInitialized && !comment.startsWith("reinit")) {
-            throw new IllegalStateException("ApproovService layer is already initialized.");
+            if (!config.equals(configString)) {
+                throw new IllegalStateException("ApproovService layer is already initialized.");
+            }
+            Log.d(TAG, "Ignoring multiple ApproovService layer initializations with the same config");
+            return;
         }
         // setup for creating clients
         isInitialized = false;
@@ -113,6 +120,7 @@ public class ApproovService {
         substitutionHeaders = new HashMap<>();
         substitutionQueryParams = new HashSet<>();
         exclusionURLRegexs = new HashMap<>();
+        configString = config;
 
         // initialize the Approov SDK
         try {
