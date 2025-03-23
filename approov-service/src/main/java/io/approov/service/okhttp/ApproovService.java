@@ -125,13 +125,14 @@ public class ApproovService {
         try {
             if (!config.isEmpty())
                 Approov.initialize(context, config, "auto", comment);
-            isInitialized = true;
-            configString = config;
         } catch (IllegalArgumentException e) {
             Log.e(TAG, "Approov initialization failed: " + e.getMessage());
+            throw e
         } catch (IllegalStateException e) {
             Log.e(TAG, "Approov already intialized: Ignoring native layer exception " + e.getMessage());
         }
+        isInitialized = true;
+        configString = config;
         Approov.setUserProperty("approov-service-okhttp");
     }
 
