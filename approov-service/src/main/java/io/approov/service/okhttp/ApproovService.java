@@ -120,13 +120,13 @@ public class ApproovService {
         substitutionHeaders = new HashMap<>();
         substitutionQueryParams = new HashSet<>();
         exclusionURLRegexs = new HashMap<>();
-        configString = config;
 
         // initialize the Approov SDK
         try {
             if (!config.isEmpty())
                 Approov.initialize(context, config, "auto", comment);
             isInitialized = true;
+            configString = config;
         } catch (IllegalArgumentException e) {
             Log.e(TAG, "Approov initialization failed: " + e.getMessage());
         } catch (IllegalStateException e) {
