@@ -23,9 +23,11 @@ import android.content.Context;
 import com.criticalblue.approovsdk.Approov;
 
 import java.io.IOException;
+import java.util.ArrayList;
 import java.util.HashMap;
 import java.util.HashSet;
 import java.util.Iterator;
+import java.util.LinkedHashMap;
 import java.util.List;
 import java.util.Map;
 import java.util.Set;
@@ -74,6 +76,12 @@ public class ApproovService {
 
     // any header to be used for binding in Approov tokens or null if not set
     private static String bindingHeader = null;
+
+    // An optional property to receive callbacks during the processing of a request. Added to
+    // support message signing in a general way, the callbacks give an opportunity for apps to
+    // customise behaviour at specific points in the attestation flow.
+    // Defaults to null - no callback.
+    private static ApproovLifecycleCallbackHandler lifecycleCallbacks = null;
 
     // map of headers that should have their values substituted for secure strings, mapped to their
     // required prefixes
@@ -212,6 +220,26 @@ public class ApproovService {
     public static synchronized void setBindingHeader(String header) {
         Log.d(TAG, "setBindingHeader " + header);
         bindingHeader = header;
+        okHttpClients.clear();
+    }
+
+    /**
+     * Sets the request lifecycle callbacks handler. This facility was introduced to support message
+     * signing that is independent from the rest of the attestation flow. The default ApproovService
+     * layer issues no callbacks, provide a non-null ApproovLifecycleCallbackHandler handler to add
+     * functionality to the attestation flow.
+     *
+     * @param callbacks is the configuration used to control message signing. The behaviour of the
+     *              provided configuration must remain constant while in use by the ApproovService.
+     *              Passing null to this method will disable message signing.
+     */
+    public static synchronized void setRequestLifecycleCallbacks(ApproovLifecycleCallbackHandler callbacks) {
+        if (callbacks == null) {
+            Log.d(TAG, "Lifecycle callbacks disabled");
+        } else {
+            Log.d(TAG, "Lifecycle callbacks enabled");
+        }
+        lifecycleCallbacks = callbacks;
         okHttpClients.clear();
     }
 
@@ -468,16 +496,74 @@ public class ApproovService {
      * available, because there has been no prior fetch or the feature is not enabled, then an
      * ApproovException is thrown.
      *
+     * Deprecated: use getAccountMessageSignature instead
+     *
      * @param message is the message whose content is to be signed
      * @return String of the base64 encoded message signature
      * @throws ApproovException if there was a problem
      */
+    @Deprecated
     public static String getMessageSignature(String message) throws ApproovException {
+        return getAccountMessageSignature(message);
+    }
+
+    /**
+     * Gets the signature for the given message. This uses an account specific message signing key that is
+     * transmitted to the SDK after a successful fetch if the facility is enabled for the account. Note
+     * that if the attestation failed then the signing key provided is actually random so that the
+     * signature will be incorrect. An Approov token should always be included in the message
+     * being signed and sent alongside this signature to prevent replay attacks. If no signature is
+     * available, because there has been no prior fetch or the feature is not enabled, then an
+     * ApproovException is thrown.
+     *
+     * Deprecated: use getAccountMessageSignature instead
+     *
+     * @param message is the message whose content is to be signed
+     * @return String of the base64 encoded message signature
+     * @throws ApproovException if there was a problem
+     */
+    public static String getAccountMessageSignature(String message) throws ApproovException {
         try {
+            // FIXME change to getAccountMessageSignature for 3.4 SDK
             String signature = Approov.getMessageSignature(message);
-            Log.d(TAG, "getMessageSignature");
+            Log.d(TAG, "getAccountMessageSignature");
             if (signature == null)
-                throw new ApproovException("no signature available");
+                throw new ApproovException("no account signature available");
+            return signature;
+        }
+        catch (IllegalStateException e) {
+            throw new ApproovException("IllegalState: " + e.getMessage());
+        }
+        catch (IllegalArgumentException e) {
+            throw new ApproovException("IllegalArgument: " + e.getMessage());
+        }
+    }
+
+    /** FIXME update docs
+     * Gets the signature for the given message. This uses a device specific message signing key that is
+     * generated on the device the first time an app launches. This signing mechanism uses an ECC key pair
+     * where the private key is managed by the secure element or trusted execution environment of the
+     * device. Where it can Approov uses attested key pairs to perform the message signing.
+     *
+     * An Approov token should always be included in the message being signed and sent alongside
+     * this signature to prevent replay attacks.
+     *
+     * If no signature is available, because there has
+     * been no prior fetch or the feature is not enabled, then an ApproovException is thrown.
+     *
+     * Deprecated: use getAccountMessageSignature instead
+     *
+     * @param message is the message whose content is to be signed
+     * @return String of the base64 encoded message signature
+     * @throws ApproovException if there was a problem
+     */
+    public static String getDeviceMessageSignature(String message) throws ApproovException {
+        try {
+            // FIXME change to getDeviceMessageSignature for 3.4 SDK
+            String signature = Approov.getMessageSignature(message);
+            Log.d(TAG, "getDeviceMessageSignature");
+            if (signature == null)
+                throw new ApproovException("no device signature available");
             return signature;
         }
         catch (IllegalStateException e) {
@@ -675,8 +761,8 @@ public class ApproovService {
                 // build the OkHttpClient with the correct pins preset and ApproovTokenInterceptor
                 Log.d(TAG, "Building new Approov OkHttpClient for " + builderName);
                 ApproovTokenInterceptor interceptor = new ApproovTokenInterceptor(approovTokenHeader,
-                        approovTokenPrefix, bindingHeader, proceedOnNetworkFail, substitutionHeaders,
-                        substitutionQueryParams, exclusionURLRegexs);
+                        approovTokenPrefix, bindingHeader, proceedOnNetworkFail, lifecycleCallbacks,
+                        substitutionHeaders, substitutionQueryParams, exclusionURLRegexs);
                 okHttpClient = okHttpBuilder.certificatePinner(pinBuilder.build()).addInterceptor(interceptor).build();
             } else {
                 // if the ApproovService was not initialized then we can't add Approov capabilities
@@ -738,6 +824,9 @@ class ApproovTokenInterceptor implements Interceptor {
     // true if the interceptor should proceed on network failures and not add an Approov token
     private boolean proceedOnNetworkFail;
 
+    // the target for request processing callbacks
+    private ApproovLifecycleCallbackHandler callbacks;
+
     // map of headers that should have their values substituted for secure strings, mapped to their
     // required prefixes
     private Map<String, String> substitutionHeaders;
@@ -756,12 +845,14 @@ class ApproovTokenInterceptor implements Interceptor {
      * @param approovTokenPrefix is the prefix string to be used with the Approov token
      * @param bindingHeader is any token binding header to use or null otherwise
      * @param proceedOnNetworkFail is true the interceptor should proceed on Approov networking failures
+     * @param callbacks the target for request processing callbacks
      * @param substitutionHeaders is the map of secure string substitution headers mapped to any required prefixes
      * @param substitutionQueryParams is the set of query parameter key names subject to substitution
      * @param exclusionURLRegexs specifies regexs of URLs that should be excluded
      */
     public ApproovTokenInterceptor(String approovTokenHeader, String approovTokenPrefix, String bindingHeader,
-                                   boolean proceedOnNetworkFail, Map<String, String> substitutionHeaders,
+                                   boolean proceedOnNetworkFail, ApproovLifecycleCallbackHandler callbacks,
+                                   Map<String, String> substitutionHeaders,
                                    Set<String> substitutionQueryParams, Map<String, Pattern> exclusionURLRegexs) {
         this.approovTokenHeader = approovTokenHeader;
         this.approovTokenPrefix = approovTokenPrefix;
@@ -784,12 +875,14 @@ class ApproovTokenInterceptor implements Interceptor {
     @Override
     public Response intercept(Chain chain) throws IOException {
         // check if the URL matches one of the exclusion regexs and just proceed
+        ApproovRequestMutations changes = new ApproovRequestMutations();
         Request request = chain.request();
         String url = request.url().toString();
         for (Pattern pattern: exclusionURLRegexs.values()) {
             Matcher matcher = pattern.matcher(url);
-            if (matcher.find())
+            if (matcher.find()) {
                 return chain.proceed(request);
+            }
         }
 
         // update the data hash based on any token binding header (presence is optional)
@@ -822,12 +915,15 @@ class ApproovTokenInterceptor implements Interceptor {
         }
 
         // check the status of Approov token fetch
-        if (approovResults.getStatus() == Approov.TokenFetchStatus.SUCCESS)
+        boolean aChange = false;
+        String setTokenHeaderKey = null;
+        String setTokenHeaderValue = null;
+        if (approovResults.getStatus() == Approov.TokenFetchStatus.SUCCESS) {
             // we successfully obtained a token so add it to the header for the request
-            request = request.newBuilder().header(approovTokenHeader, approovTokenPrefix + approovResults.getToken()).build();
-            // TODO: sign message and add signature parameter to headers
-
-        else if ((approovResults.getStatus() == Approov.TokenFetchStatus.NO_NETWORK) ||
+            aChange = true;
+            setTokenHeaderKey = approovTokenHeader;
+            setTokenHeaderValue = approovTokenPrefix + approovResults.getToken();
+        } else if ((approovResults.getStatus() == Approov.TokenFetchStatus.NO_NETWORK) ||
                  (approovResults.getStatus() == Approov.TokenFetchStatus.POOR_NETWORK) ||
                  (approovResults.getStatus() == Approov.TokenFetchStatus.MITM_DETECTED)) {
             // we are unable to get an Approov token due to network conditions so the request can
@@ -846,10 +942,12 @@ class ApproovTokenInterceptor implements Interceptor {
         // protected by Approov and therefore potential subject to a MitM
         if ((approovResults.getStatus() != Approov.TokenFetchStatus.SUCCESS) &&
                 (approovResults.getStatus() != Approov.TokenFetchStatus.UNPROTECTED_URL))
+            // setTokenHeaderKey and setTokenHeaderValue must be null
             return chain.proceed(request);
 
         // we now deal with any header substitutions, which may require further fetches but these
         // should be using cached results
+        Map<String,String> setSubstitutionHeaders = new LinkedHashMap<>(substitutionHeaders.size());
         for (Map.Entry<String, String> entry: substitutionHeaders.entrySet()) {
             String header = entry.getKey();
             String prefix = entry.getValue();
@@ -858,8 +956,8 @@ class ApproovTokenInterceptor implements Interceptor {
                 approovResults = Approov.fetchSecureStringAndWait(value.substring(prefix.length()), null);
                 Log.d(TAG, "Substituting header: " + header + ", " + approovResults.getStatus().toString());
                 if (approovResults.getStatus() == Approov.TokenFetchStatus.SUCCESS) {
-                    // substitute the header
-                    request = request.newBuilder().header(header, prefix + approovResults.getSecureString()).build();
+                    aChange = true;
+                    setSubstitutionHeaders.put(header,prefix + approovResults.getSecureString());
                 }
                 else if (approovResults.getStatus() == Approov.TokenFetchStatus.REJECTED)
                     // if the request is rejected then we provide a special exception with additional information
@@ -885,11 +983,13 @@ class ApproovTokenInterceptor implements Interceptor {
 
         // we now deal with any query parameter substitutions, which may require further fetches but these
         // should be using cached results
-        String currentURL = request.url().toString();
+        String originalURL = request.url().toString();
+        String replacementURL = originalURL;
+        List<String> queryKeys = new ArrayList<>(substitutionQueryParams.size());
         for (Map.Entry<String, Pattern> entry: substitutionQueryParams.entrySet()) {
             String queryKey = entry.getKey();
             Pattern pattern = entry.getValue();
-            Matcher matcher = pattern.matcher(currentURL);
+            Matcher matcher = pattern.matcher(replacementURL);
             if (matcher.find()) {
                 // we have found an occurrence of the query parameter to be replaced so we look up the existing
                 // value as a key for a secure string
@@ -898,9 +998,10 @@ class ApproovTokenInterceptor implements Interceptor {
                 Log.d(TAG, "Substituting query parameter: " + queryKey + ", " + approovResults.getStatus().toString());
                 if (approovResults.getStatus() == Approov.TokenFetchStatus.SUCCESS) {
                     // substitute the query parameter
-                    currentURL = new StringBuilder(currentURL).replace(matcher.start(1),
+                    aChange = true;
+                    queryKeys.add(queryKey);
+                    replacementURL = new StringBuilder(replacementURL).replace(matcher.start(1),
                             matcher.end(1), approovResults.getSecureString()).toString();
-                    request = request.newBuilder().url(currentURL).build();
                 }
                 else if (approovResults.getStatus() == Approov.TokenFetchStatus.REJECTED)
                     // if the request is rejected then we provide a special exception with additional information
@@ -923,7 +1024,31 @@ class ApproovTokenInterceptor implements Interceptor {
                             approovResults.getStatus().toString());
             }
         }
+        // Apply all the changes to the request
+        if (aChange) {
+            Request.Builder builder = request.newBuilder();
+            if (setTokenHeaderKey != null) {
+                builder.header(setTokenHeaderKey, setTokenHeaderValue);
+                changes.setTokenHeaderKey(setTokenHeaderKey);
+            }
+            if (!setSubstitutionHeaders.isEmpty()) {
+                for (Map.Entry<String, String> entry : setSubstitutionHeaders.entrySet()) {
+                    // substitute the header
+                    builder.header(entry.getKey(), entry.getValue());
+                }
+                changes.setSubstitutionHeaderKeys(new ArrayList<>(setSubstitutionHeaders.keySet()));
+            }
+            if (!originalURL.equals(replacementURL)) {
+                builder.url(replacementURL);
+                changes.setSubstitutionQueryParamResults(originalURL, queryKeys);
+            }
+            request = builder.build();
+        }
 
+        // Call the processed request callback
+        if (callbacks != null) {
+            request = callbacks.processedRequest(request, changes);
+        }
         // proceed with the rest of the chain
         return chain.proceed(request);
     }
