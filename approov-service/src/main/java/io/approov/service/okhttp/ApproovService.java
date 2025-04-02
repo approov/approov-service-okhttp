@@ -55,6 +55,7 @@ public class ApproovService {
 
     // default prefix to be added before the Approov token by default
     private static final String APPROOV_TOKEN_PREFIX = "";
+
     // name for the default builder
     private static final String DEFAULT_BUILDER_NAME = "_default";
 
@@ -94,7 +95,6 @@ public class ApproovService {
 
     // set of URL regexs that should be excluded from any Approov protection, mapped to the compiled Pattern
     private static Map<String, Pattern> exclusionURLRegexs = null;
-
 
     /**
      * Construction is disallowed as this is a static only class.
@@ -821,6 +821,7 @@ class ApproovTokenInterceptor implements Interceptor {
 
     // the target for request processing interceptorExtensions
     private ApproovInterceptorExtensions interceptorExtensions;
+
     // map of headers that should have their values substituted for secure strings, mapped to their
     // required prefixes
     private Map<String, String> substitutionHeaders;
@@ -830,7 +831,6 @@ class ApproovTokenInterceptor implements Interceptor {
 
     // set of URL regexs that should be excluded from any Approov protection, mapped to the compiled Pattern
     private Map<String, Pattern> exclusionURLRegexs;
-
 
     /**
      * Constructs a new interceptor that adds Approov tokens and substitute headers or query

@@ -1,0 +1,86 @@
+name: Maven Publish
+
+on:
+  push:
+    tags:
+      - '[0-9]+.[0-9]+.[0-9]+' # Matches tags in the form 3.3.0
+
+jobs:
+  maven-publish:
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    env:
+      WORKSPACE: "${{ github.workspace }}"
+      GIT_BRANCH: "${{ github.ref }}"
+      CURRENT_TAG: "${{ github.ref_name }}"
+      MAVEN_USERNAME: ${{ secrets.MAVEN_USERNAME }}
+      MAVEN_PASSWORD: ${{ secrets.MAVEN_PASSWORD }}
+      PGP_KEY: ${{ secrets.GPG_PRIVATE_KEY }}
+      PGP_KEY_ID: ${{ secrets.PGP_KEY_ID }}
+      GPG_PASSWORD: ${{ secrets.GPG_PASSWORD }}
+    steps:
+    - name: Set up Git
+      run: git config --global --add safe.directory '*'
+      
+    - name: Checkout Repository
+      uses: actions/checkout@v3
+
+    - name: Set Up Java
+      uses: actions/setup-java@v3
+      with:
+        distribution: 'temurin' # Use Eclipse Temurin distribution
+        java-version: '11'      # Use Java 11 for Android builds
+    
+    - name: Install Android SDK
+      run: |
+          sudo apt-get update
+          sudo apt-get install -y unzip curl
+          mkdir -p $ANDROID_HOME/cmdline-tools
+          curl -o android-sdk.zip https://dl.google.com/android/repository/commandlinetools-linux-9123335_latest.zip
+          unzip -q android-sdk.zip -d $ANDROID_HOME/cmdline-tools
+          mv $ANDROID_HOME/cmdline-tools/cmdline-tools $ANDROID_HOME/cmdline-tools/tools
+          rm android-sdk.zip
+          echo "ANDROID_HOME=$ANDROID_HOME" >> $GITHUB_ENV
+          echo "PATH=$ANDROID_HOME/cmdline-tools/tools/bin:$ANDROID_HOME/platform-tools:$ANDROID_HOME/emulator:$PATH" >> $GITHUB_ENV
+    - name: Accept Android SDK Licenses
+      shell: bash
+      run: |
+          source $GITHUB_ENV
+          yes | sdkmanager --licenses || true
+    - name: Install Required SDK Packages
+      shell: bash
+      run: |
+          source $GITHUB_ENV
+          sdkmanager "platform-tools" "platforms;android-33" "build-tools;33.0.2"
+  
+  
+    - name: Install GPG
+      run: |
+          sudo apt-get update
+          sudo apt-get install -y gnupg
+    
+    - name: Import GPG Private Key
+      run: |
+        echo "${{ secrets.GPG_PRIVATE_KEY }}" > private.key
+        gpg --batch --import private.key
+        rm private.key
+
+    - name: Trust GPG Key
+      run: |
+        KEY_ID=$(gpg --list-keys --with-colons | grep pub | cut -d: -f5)
+        echo -e "trust\n5\ny\nquit" | gpg --batch --yes --command-fd 0 --edit-key $KEY_ID
+    
+    - name: Build AAR
+      run:  ./gradlew assembleRelease
+
+    - name: Create Package
+      run: cd .maven && ./build-and-sign.sh
+
+    - name: Publish Package
+      run: cd .maven && ./maven-publish.sh
+      
+    - name: Upload Artifact
+      uses: actions/upload-artifact@v3
+      with:
+        name: full-repo-artifact-${{ github.ref_name }}
+        path: ${{ github.workspace }}

@@ -10,7 +10,7 @@ repositories {
 
 android {
     compileSdk 34
-    namespace 'io.approov.service.okhttp'
+
     defaultConfig {
         minSdkVersion 21
         targetSdkVersion 34
@@ -30,6 +30,5 @@ android {
 
 dependencies {
     implementation 'com.squareup.okhttp3:okhttp:4.12.0'
-    implementation 'io.approov:approov-android-sdk:3.3.0'
+    implementation 'io.approov:approov-android-sdk:3.4.0'
 }
-

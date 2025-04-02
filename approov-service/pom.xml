@@ -1,0 +1,47 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<project xmlns="http://maven.apache.org/POM/4.0.0" xsi:schemaLocation="http://maven.apache.org/POM/4.0.0 https://maven.apache.org/xsd/maven-4.0.0.xsd" xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance">
+  <modelVersion>4.0.0</modelVersion>
+  <groupId>io.approov</groupId>
+  <artifactId>service.okhttp</artifactId>
+  <version>VERSION_PLACEHOLDER</version>
+  <packaging>aar</packaging>
+  <name>Approov enable okhttp interceptor</name>
+    <description>Approov okhttp interceptor</description>
+    <url>https://approov.io</url>
+
+  <licenses>
+    <license>
+        <name>MIT License</name>
+        <url>https://opensource.org/licenses/MIT</url>
+        <distribution>repo</distribution>
+    </license>
+  </licenses>
+  <developers>
+      <developer>
+          <id>approov</id>
+          <name>Approov</name>
+          <email>support@approov.io</email>
+          <organization>Approov Inc.</organization>
+          <organizationUrl>https://approov.io</organizationUrl>
+      </developer>
+  </developers>
+  <scm>
+    <url>https://github.com/approov/approov-service-okhttp</url>
+    <connection>scm:git:git://github.com/approov/approov-service-okhttp.git</connection>
+    <developerConnection>scm:git:ssh://github.com/approov/approov-service-okhttp.git</developerConnection>
+  </scm>
+  <dependencies>
+    <dependency>
+      <groupId>com.squareup.okhttp3</groupId>
+      <artifactId>okhttp</artifactId>
+      <version>4.12.0</version>
+      <scope>runtime</scope>
+    </dependency>
+    <dependency>
+      <groupId>io.approov</groupId>
+      <artifactId>approov-android-sdk</artifactId>
+      <version>3.3.0</version>
+      <scope>runtime</scope>
+    </dependency>
+  </dependencies>
+</project>
