@@ -9,6 +9,7 @@ repositories {
 }
 
 android {
+    namespace = "io.approov.service.okhttp"
     compileSdk 34
 
     defaultConfig {
@@ -31,4 +32,6 @@ android {
 dependencies {
     implementation 'com.squareup.okhttp3:okhttp:4.12.0'
     implementation 'io.approov:approov-android-sdk:3.4.0'
+    implementation 'org.bouncycastle:bcprov-jdk15to18:1.80'
+    implementation 'androidx.annotation:annotation-jvm:1.9.1'
 }
