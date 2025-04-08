@@ -80,6 +80,7 @@ public class ApproovService {
 
     // any header to be used for binding in Approov tokens or null if not set
     private static String bindingHeader = null;
+
     // An optional property to receive callbacks during the processing of a request. Added to
     // support message signing in a general way, the callbacks give an opportunity for apps to
     // customise behaviour at specific points in the attestation flow.
@@ -721,6 +722,7 @@ public class ApproovService {
             OkHttpClient.Builder okHttpBuilder = okHttpBuilders.get(builderName);
             if (okHttpBuilder == null) {
                 Log.d(TAG, "No builder available for " + builderName);
+                // TODO: why not use the default builder?
                 okHttpBuilder = new OkHttpClient.Builder();
             }
             // build a new OkHttpClient on demand
@@ -772,7 +774,7 @@ public class ApproovService {
     }
 
     /**
-     * Gets the default kHttpClient that enables the Approov service. This adds the Approov token
+     * Gets the default OkHttpClient that enables the Approov service. This adds the Approov token
      * in a header to requests, and also pins the connections. The OkHttpClient is constructed
      * lazily on demand but is cached if there are no changes. Use "setOkHttpClientBuilder" to
      * provide any special properties.
@@ -833,7 +835,7 @@ class ApproovTokenInterceptor implements Interceptor {
     private Map<String, Pattern> exclusionURLRegexs;
 
     /**
-     * Constructs a new interceptor that adds Approov tokens and substitute headers or query
+     * Constructs a new interceptor that adds Approov tokens and substitutes headers or query
      * parameters.
      *
      * @param approovTokenHeader is the name of the header to be used for the Approov token
@@ -953,7 +955,7 @@ class ApproovTokenInterceptor implements Interceptor {
                 Log.d(TAG, "Substituting header: " + header + ", " + approovResults.getStatus().toString());
                 if (approovResults.getStatus() == Approov.TokenFetchStatus.SUCCESS) {
                     aChange = true;
-                    setSubstitutionHeaders.put(header,prefix + approovResults.getSecureString());
+                    setSubstitutionHeaders.put(header, prefix + approovResults.getSecureString());
                 }
                 else if (approovResults.getStatus() == Approov.TokenFetchStatus.REJECTED)
                     // if the request is rejected then we provide a special exception with additional information
