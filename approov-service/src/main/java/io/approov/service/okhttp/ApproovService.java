@@ -722,7 +722,6 @@ public class ApproovService {
             OkHttpClient.Builder okHttpBuilder = okHttpBuilders.get(builderName);
             if (okHttpBuilder == null) {
                 Log.d(TAG, "No builder available for " + builderName);
-                // TODO: why not use the default builder?
                 okHttpBuilder = new OkHttpClient.Builder();
             }
             // build a new OkHttpClient on demand
