@@ -229,7 +229,7 @@ public class ApproovService {
     /**
      * Sets the interceptor extensions callback handler. This facility was introduced to support
      * message signing that is independent from the rest of the attestation flow. The default
-     * ApproovService layer issues no callbacks, provide a non-null ApproovLifecycleCallbackHandler
+     * ApproovService layer issues no callbacks, provide a non-null ApproovInterceptorExtensions
      * handler to add functionality to the attestation flow.
      *
      * @param callbacks is the configuration used to control message signing. The behaviour of the
@@ -540,7 +540,7 @@ public class ApproovService {
     }
 
     /**
-     * Gets the install signature for the given message. This uses a app install specific message
+     * Gets the install signature for the given message. This uses an app install specific message
      * signing key that is generated the first time an app launches. This signing mechanism uses an
      * ECC key pair where the private key is managed by the secure element or trusted execution
      * environment of the device. Where it can, Approov uses attested key pairs to perform the
@@ -553,7 +553,7 @@ public class ApproovService {
      * enabled, then an ApproovException is thrown.
      *
      * @param message is the message whose content is to be signed
-     * @return String of the base64 encoded message signature
+     * @return String of the base64 encoded message signature in ASN.1 DER format
      * @throws ApproovException if there was a problem
      */
     public static String getInstallMessageSignature(String message) throws ApproovException {
