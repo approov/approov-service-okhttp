@@ -216,9 +216,12 @@ public class ApproovDefaultMessageSigning implements ApproovInterceptorExtension
                 sigId, ByteSequenceItem.valueOf(signature))).serialize();
         String sigInputHeader = Dictionary.valueOf(Map.of(
                 sigId, params.toComponentValue())).serialize();
-        // Log.d(TAG, "Message Value - Signature Message: " + message); // FIXME remove this - it includes the token
-        Log.d(TAG, "Message Header - Signature: " + sigHeader);
-        Log.d(TAG, "Message Header Signature-Input: " + sigInputHeader);
+
+        // Debugging - log the message and signature-related headers
+        // WARNING never log the message in production code as it contains the Approov token which allows API access
+        // Log.d(TAG, "Message Value - Signature Message: " + message);
+        // Log.d(TAG, "Message Header - Signature: " + sigHeader);
+        // Log.d(TAG, "Message Header Signature-Input: " + sigInputHeader);
 
         // Update the request from the one held by the component provider as the signature builder
         // may have modified it.
