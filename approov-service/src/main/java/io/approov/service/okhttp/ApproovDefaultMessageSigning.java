@@ -148,7 +148,7 @@ public class ApproovDefaultMessageSigning implements ApproovInterceptorExtension
      * Adds message signature to requests that have passed through the Approov
      * interceptor. The request is only modified to include message signature
      * headers if an ApproovToken has been added to the request and if there is
-     * a defined SignatureParamter factory for the request.
+     * a defined SignatureParameter factory for the request.
      *
      * @param request The original HTTP request.
      * @param changes The request mutations that were applied by the Approov interceptor.
@@ -172,8 +172,7 @@ public class ApproovDefaultMessageSigning implements ApproovInterceptorExtension
         // Apply the params to get the message
         SignatureBaseBuilder baseBuilder = new SignatureBaseBuilder(params, provider);
         String message = baseBuilder.createSignatureBase();
-        // WARNING never log the message as it contains an Approov token which provides access to
-        // your API.
+        // WARNING never log the message as it contains an Approov token which provides access to your API.
 
         // Generate the signature
         String sigId;
@@ -242,9 +241,8 @@ public class ApproovDefaultMessageSigning implements ApproovInterceptorExtension
         }
         Request signed = signedBuilder.build();
 
-        // WARNING never log the full request as it contains an Approov token which provides access
-        // to your API
-        Log.d(TAG, "Request String: " + signed.toString());
+        // WARNING never log the full request as it contains an Approov token which provides access to your API
+        // Log.d(TAG, "Request String: " + signed.toString());
         return signed;
     }
 
@@ -589,7 +587,7 @@ public class ApproovDefaultMessageSigning implements ApproovInterceptorExtension
             if (values.isEmpty()) {
                 throw new IllegalArgumentException("Could not find query parameter named " + name);
             } else if (values.size() > 1) {
-                // From 2.2.8 of the spec: If a parameter name occurs multiple times in a request, the
+                // From Section 2.2.8 of the spec: If a parameter name occurs multiple times in a request, the
                 // named query parameter MUST NOT be included. If multiple parameters are common within
                 // an application, it is RECOMMENDED to sign the entire query string using the @query
                 // component identifier defined in Section 2.2.7.
