@@ -1,7 +1,7 @@
 //
 // MIT License
 // 
-// Copyright (c) 2016-present, Critical Blue Ltd.
+// Copyright (c) 2016-present, Approov Ltd.
 //
 // Permission is hereby granted, free of charge, to any person obtaining a copy of this software and associated documentation files
 // (the "Software"), to deal in the Software without restriction, including without limitation the rights to use, copy, modify, merge,
@@ -10,7 +10,7 @@
 //
 // The above copyright notice and this permission notice shall be included in all copies or substantial portions of the Software.
 // 
-// THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND, EXPRESS OR IMPLIED, INCLUDING WITHOUT LIMITATION THE WARRANTIES OF
+// THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND, EXPRESS OR IMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF
 // MERCHANTABILITY, FITNESS FOR A PARTICULAR PURPOSE AND NONINFRINGEMENT. IN NO EVENT SHALL THE AUTHORS OR COPYRIGHT HOLDERS BE LIABLE FOR
 // ANY CLAIM, DAMAGES OR OTHER LIABILITY, WHETHER IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING FROM, OUT OF OR IN CONNECTION WITH
 // THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE SOFTWARE.
@@ -23,6 +23,7 @@ import android.content.Context;
 import com.criticalblue.approovsdk.Approov;
 
 import java.io.IOException;
+import java.security.cert.Certificate;
 import java.util.ArrayList;
 import java.util.HashMap;
 import java.util.HashSet;
@@ -36,6 +37,8 @@ import java.util.regex.Pattern;
 import java.util.regex.PatternSyntaxException;
 
 import okhttp3.CertificatePinner;
+import okhttp3.Connection;
+import okhttp3.Handshake;
 import okhttp3.Interceptor;
 import okhttp3.OkHttpClient;
 import okhttp3.Request;
@@ -62,9 +65,15 @@ public class ApproovService {
     // true if the Approov SDK initialized okay
     private static boolean isInitialized = false;
 
+    // the config string used for initialization
+    private static String configString;
+
     // true if the interceptor should proceed on network failures and not add an
     // Approov token
     private static boolean proceedOnNetworkFail = false;
+
+    // the Approov pinning interceptor to be used for all requests
+    private static ApproovPinningInterceptor pinningInterceptor = null;
 
     // builders to be used for new OkHttp clients where each can be named
     private static Map<String, OkHttpClient.Builder> okHttpBuilders = null;
@@ -102,38 +111,6 @@ public class ApproovService {
      */
     private ApproovService() {
     }
-
-    /**
-     * Initializes the ApproovService with an account configuration.
-     *
-     * @param context the Application context
-     * @param config the configuration string, or empty for no SDK initialization
-     */
-    public static void initialize(Context context, String config) {
-        // setup for creating clients
-        isInitialized = false;
-        proceedOnNetworkFail = false;
-        okHttpBuilders = new HashMap<>();
-        okHttpBuilders.put(DEFAULT_BUILDER_NAME, new OkHttpClient.Builder());
-        okHttpClients =  new HashMap<>();
-        approovTokenHeader = APPROOV_TOKEN_HEADER;
-        approovTokenPrefix = APPROOV_TOKEN_PREFIX;
-        bindingHeader = null;
-        substitutionHeaders = new HashMap<>();
-        substitutionQueryParams = new HashSet<>();
-        exclusionURLRegexs = new HashMap<>();
-
-        // initialize the Approov SDK
-        try {
-            if (config.length() != 0)
-                Approov.initialize(context, config, "auto", "init-fetch");
-            Approov.setUserProperty("approov-service-okhttp");
-            isInitialized = true;
-        } catch (IllegalArgumentException e) {
-            Log.e(TAG, "Approov initialization failed: " + e.getMessage());
-        }
-    }
-
     /**
      * Initializes the ApproovService with an account configuration and comment.
      *
@@ -142,17 +119,53 @@ public class ApproovService {
      * @param comment the comment string, or empty for no comment
      */
     public static void initialize(Context context, String config, String comment) {
-        // initialize the Approov SDK
-        try {
-            ApproovService.initialize(context, config);
-            if ((comment != null) && (comment.length() != 0)) {
-                Approov.initialize(context, config, "auto", comment);
+        // check if the Approov SDK is already initialized
+        if (isInitialized && !comment.startsWith("reinit")) {
+            if (!config.equals(configString)) {
+                throw new IllegalStateException("ApproovService layer is already initialized.");
             }
-        } catch (IllegalArgumentException e) {
-            Log.e(TAG, "Approov initialization failed: " + e.getMessage());
-        } catch (IllegalStateException e) {
-            Log.e(TAG, "Approov initialization failed: " + e.getMessage());
+            Log.d(TAG, "Ignoring multiple ApproovService layer initializations with the same config");
         }
+        else {
+            // setup for creating clients
+            isInitialized = false;
+            proceedOnNetworkFail = false;
+            okHttpBuilders = new HashMap<>();
+            okHttpBuilders.put(DEFAULT_BUILDER_NAME, new OkHttpClient.Builder());
+            okHttpClients =  new HashMap<>();
+            approovTokenHeader = APPROOV_TOKEN_HEADER;
+            approovTokenPrefix = APPROOV_TOKEN_PREFIX;
+            bindingHeader = null;
+            substitutionHeaders = new HashMap<>();
+            substitutionQueryParams = new HashSet<>();
+            exclusionURLRegexs = new HashMap<>();
+
+            // initialize the Approov SDK
+            try {
+                if (!config.isEmpty())
+                    Approov.initialize(context, config, "auto", comment);
+            } catch (IllegalArgumentException e) {
+                Log.e(TAG, "Approov initialization failed: " + e.getMessage());
+                throw e;
+            } catch (IllegalStateException e) {
+                Log.e(TAG, "Approov already intialized: Ignoring native layer exception " + e.getMessage());
+            }
+            pinningInterceptor = new ApproovPinningInterceptor();
+            isInitialized = true;
+            configString = config;
+            Approov.setUserProperty("approov-service-okhttp");
+        }
+    }
+
+    /**
+     * Initializes the ApproovService with an account configuration
+     *
+     * @param context the Application context
+     * @param config the configuration string, or empty for no SDK initialization
+     */
+    public static void initialize(Context context, String config) {
+        // default uses the empty comment string
+        initialize(context, config, "");
     }
 
     /**
@@ -673,12 +686,11 @@ public class ApproovService {
     }
 
     /**
-     * Clears the OkHttp clients if there are some potential pinning changes that require an
-     * update.
+     * Rebuilds the pins in the pinning interceptor after a dynamic configuration change.
      */
-    public static synchronized void clearOkHttpClient() {
-        Log.d(TAG, "OkHttp clients cleared");
-        okHttpClients.clear();
+    static synchronized void rebuildPins() {
+        if (pinningInterceptor != null)
+            pinningInterceptor.buildPins();
     }
 
     /**
@@ -692,8 +704,10 @@ public class ApproovService {
      */
     public static synchronized void setOkHttpClientBuilder(String builderName, OkHttpClient.Builder builder) {
         Log.d(TAG, "OkHttp client builder set for " + builderName);
-        okHttpBuilders.put(builderName, builder);
-        okHttpClients.remove(builderName);
+        OkHttpClient.Builder oldBuilder = okHttpBuilders.put(builderName, builder);
+        if (oldBuilder != builder)
+            // force a rebuild of the client if the builder has changed
+            okHttpClients.remove(builderName);
     }
 
     /**
@@ -726,26 +740,6 @@ public class ApproovService {
             }
             // build a new OkHttpClient on demand
             if (isInitialized) {
-                // build the pinning configuration
-                CertificatePinner.Builder pinBuilder = new CertificatePinner.Builder();
-                Map<String, List<String>> allPins = Approov.getPins("public-key-sha256");
-                for (Map.Entry<String, List<String>> entry: allPins.entrySet()) {
-                    String domain = entry.getKey();
-                    if (!domain.equals("*")) {
-                        // the * domain is for managed trust roots and should
-                        // not be added directly
-                        List<String> pins = entry.getValue();
-
-                        // if there are no pins then we try and use any managed trust roots
-                        if (pins.isEmpty() && (allPins.get("*") != null))
-                            pins = allPins.get("*");
-
-                        // add the required pins for the domain
-                        for (String pin: pins)
-                            pinBuilder = pinBuilder.add(domain, "sha256/" + pin);
-                    }
-                }
-
                 // remove any existing ApproovTokenInterceptor from the builder
                 List<Interceptor> interceptors = okHttpBuilder.interceptors();
                 Iterator<Interceptor> iter = interceptors.iterator();
@@ -755,12 +749,23 @@ public class ApproovService {
                         iter.remove();
                 }
 
-                // build the OkHttpClient with the correct pins preset and ApproovTokenInterceptor
+                // remove any existing ApproovPinningInterceptor from the builder
+                interceptors = okHttpBuilder.networkInterceptors();
+                iter = interceptors.iterator();
+                while (iter.hasNext()) {
+                    Interceptor interceptor = iter.next();
+                    if (interceptor instanceof ApproovPinningInterceptor)
+                        iter.remove();
+                }
+
+                // build the OkHttpClient with the interceptors
                 Log.d(TAG, "Building new Approov OkHttpClient for " + builderName);
-                ApproovTokenInterceptor interceptor = new ApproovTokenInterceptor(approovTokenHeader,
+                ApproovTokenInterceptor tokenInterceptor = new ApproovTokenInterceptor(approovTokenHeader,
                         approovTokenPrefix, bindingHeader, proceedOnNetworkFail, interceptorExtensions,
                         substitutionHeaders, substitutionQueryParams, exclusionURLRegexs);
-                okHttpClient = okHttpBuilder.certificatePinner(pinBuilder.build()).addInterceptor(interceptor).build();
+                okHttpClient = okHttpBuilder
+                        .addInterceptor(tokenInterceptor)
+                        .addNetworkInterceptor(pinningInterceptor).build();
             } else {
                 // if the ApproovService was not initialized then we can't add Approov capabilities
                 Log.e(TAG, "Cannot build Approov OkHttpClient as not initialized");
@@ -895,20 +900,11 @@ class ApproovTokenInterceptor implements Interceptor {
         // will appear here to determine why a request is being rejected)
         Log.d(TAG, "Token for " + host + ": " + approovResults.getLoggableToken());
 
-        // force a pinning change if there is any dynamic config update
+        // force a pinning rebuild if there is any dynamic config update
         if (approovResults.isConfigChanged()) {
             Approov.fetchConfig();
-            ApproovService.clearOkHttpClient();
-        }
-
-        // we cannot proceed if the pins need to be updated. This will be cleared by using getOkHttpClient
-        // but will persist if the app fails to rebuild the OkHttpClient regularly. This might occur
-        // on first use after initial app install if the initial network fetch was unable to obtain
-        // the dynamic configuration for the account if there was poor network connectivity at that
-        // point.
-        if (approovResults.isForceApplyPins()) {
-            ApproovService.clearOkHttpClient();
-            throw new ApproovNetworkException("Pins need to be updated");
+            ApproovService.rebuildPins();
+            Log.d(TAG, "Dynamic configuration updated");
         }
 
         // check the status of Approov token fetch
@@ -1049,5 +1045,60 @@ class ApproovTokenInterceptor implements Interceptor {
 
         // proceed with the rest of the chain
         return chain.proceed(request);
+    }
+}
+
+// interceptor to implement pinning on network connections
+class ApproovPinningInterceptor implements Interceptor {
+    // logging tag
+    private final static String TAG = "ApproovPinningInterceptor";
+
+    // the certificate pinner to use for pinning that may be rebuilt if there is a change
+    // in the pinning configuration
+    private CertificatePinner certificatePinner;
+
+    /**
+     * Construct a new pinning interceptor.
+     */
+    public ApproovPinningInterceptor() {
+        buildPins();
+    }
+
+    /**
+     * Rebuild the pinning configuration. This is called when the dynamic configuration
+     * changes and we need to update the pinning information.
+     */
+    public void buildPins() {
+        CertificatePinner.Builder pinBuilder = new CertificatePinner.Builder();
+        Map<String, List<String>> allPins = Approov.getPins("public-key-sha256");
+        for (Map.Entry<String, List<String>> entry: allPins.entrySet()) {
+            String domain = entry.getKey();
+            if (!domain.equals("*")) {
+                // the * domain is for managed trust roots and should
+                // not be added directly
+                List<String> pins = entry.getValue();
+
+                // if there are no pins then we try and use any managed trust roots
+                if (pins.isEmpty() && (allPins.get("*") != null))
+                    pins = allPins.get("*");
+
+                // add the required pins for the domain
+                for (String pin: pins)
+                    pinBuilder = pinBuilder.add(domain, "sha256/" + pin);
+            }
+        }
+        certificatePinner = pinBuilder.build();
+    }
+
+    @Override
+    public Response intercept(Chain chain) throws IOException {
+        String host = chain.request().url().host();
+        Connection connection = chain.connection();
+        Handshake handshake = (connection != null) ? connection.handshake() : null;
+        if (handshake == null)
+            throw new ApproovNetworkException("network interceptor has no connection information");
+        List<Certificate> certs = handshake.peerCertificates();
+        certificatePinner.check(host, certs);
+        return chain.proceed(chain.request());
     }
 }

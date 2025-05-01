@@ -19,7 +19,7 @@ if [[ ! "$CURRENT_TAG" =~ ^[0-9]+\.[0-9]+\.[0-9]+$ ]]; then
 fi
 
 # The version of the package that will be build and will be visible in maven central
-# For Approov SDK release 3.3.0 (library 7257) the version was 3.3.0
+# For Approov SDK release 3.4.0 (library 7270) the version was 3.4.0
 # This is also used to rename the folder where the package is stored by replacing the TAG-RENAME-DIR
 # THE POM FILE MUST BE UPDATED BY THIS SCRIPT (SEE BELOW) WITH THE CORRECT VERSION WHICH MUST MATCH THIS VARIABLE
 VERSION="${CURRENT_TAG}"

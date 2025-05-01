@@ -40,7 +40,11 @@
     <dependency>
       <groupId>io.approov</groupId>
       <artifactId>approov-android-sdk</artifactId>
+<<<<<<< HEAD
       <version>3.4.1</version>
+=======
+      <version>3.4.0</version>
+>>>>>>> feature/ignore-already-initialized
       <scope>runtime</scope>
     </dependency>
   </dependencies>
