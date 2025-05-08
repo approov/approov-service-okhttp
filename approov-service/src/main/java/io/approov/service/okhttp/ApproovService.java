@@ -878,7 +878,7 @@ final class PrefetchCallbackHandler implements Approov.TokenFetchCallback {
 // interceptor to add Approov tokens or substitute headers and query parameters
 class ApproovTokenInterceptor implements Interceptor {
     // logging tag
-    private final static String TAG = "ApproovInterceptor";
+    private final static String TAG = "ApproovTokenInterceptor";
 
     /**
      * Constructs a new interceptor that adds Approov tokens and substitutes headers or query
