@@ -295,7 +295,7 @@ public class ApproovDefaultMessageSigning implements ApproovInterceptorExtension
         }
         return new SignatureParametersFactory()
                 .setBaseParameters(baseParameters)
-                .setUseDeviceMessageSigning()
+                .setUseInstallMessageSigning()
                 .setAddCreated(true)
                 .setExpiresLifetime(defaultExpiresLifetime)
                 .setAddApproovTokenHeader(true)
@@ -356,7 +356,7 @@ public class ApproovDefaultMessageSigning implements ApproovInterceptorExtension
          *
          * @return The current instance for method chaining.
          */
-        public SignatureParametersFactory setUseDeviceMessageSigning() {
+        public SignatureParametersFactory setUseInstallMessageSigning() {
             this.useAccountMessageSigning = false;
             return this;
         }
