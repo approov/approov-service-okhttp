@@ -152,9 +152,9 @@ public class ApproovDefaultMessageSigning implements ApproovInterceptorExtension
             System.arraycopy(bytes, 0, bytes32, 32 - bytes.length, bytes.length);
         } else if (bytes.length == 32) {
             bytes32 = bytes;
-        } else if (bytes.length == 33) {
+        } else if (bytes.length == 33 && bytes[0] == 0) {
             bytes32 = new byte[32];
-            System.arraycopy(bytes, bytes.length - 32, bytes32, 0, 32);
+            System.arraycopy(bytes, 1, bytes32, 0, 32);
         } else {
             throw new IllegalArgumentException("Not an ASN.1 DER ES256 signature part");
         }

@@ -1,6 +1,6 @@
 //
 // MIT License
-// 
+//
 // Copyright (c) 2016-present, Approov Ltd.
 //
 // Permission is hereby granted, free of charge, to any person obtaining a copy of this software and associated documentation files
@@ -9,7 +9,7 @@
 // subject to the following conditions:
 //
 // The above copyright notice and this permission notice shall be included in all copies or substantial portions of the Software.
-// 
+//
 // THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND, EXPRESS OR IMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF
 // MERCHANTABILITY, FITNESS FOR A PARTICULAR PURPOSE AND NONINFRINGEMENT. IN NO EVENT SHALL THE AUTHORS OR COPYRIGHT HOLDERS BE LIABLE FOR
 // ANY CLAIM, DAMAGES OR OTHER LIABILITY, WHETHER IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING FROM, OUT OF OR IN CONNECTION WITH
@@ -189,7 +189,7 @@ public class ApproovService {
     /**
      * Gets a flag indicating if the network interceptor should proceed anyway if it is
      * not possible to obtain an Approov token due to a networking failure.
-     * 
+     *
      * @return true if Approov networking fails should allow continuation, false otherwise
      */
     public static synchronized boolean getProceedOnNetworkFail() {
@@ -236,7 +236,7 @@ public class ApproovService {
 
     /**
      * Gets the header that is used to add the Approov token.
-     * 
+     *
      * @return String of the header used for the Approov token
      */
     public static synchronized String getApproovTokenHeader() {
@@ -245,7 +245,7 @@ public class ApproovService {
 
     /**
      * Gets the prefix that is added before the Approov token in the header.
-     * 
+     *
      * @return String of the prefix added before the Approov token
      */
     public static synchronized String getApproovTokenPrefix() {
@@ -296,7 +296,7 @@ public class ApproovService {
 
     /**
      * Gets the interceptor extensions callback handlers.
-     * 
+     *
      * @return the interceptor extensions callback handlers or null if none set
      */
     public static synchronized ApproovInterceptorExtensions getApproovInterceptorExtensions() {
@@ -339,7 +339,7 @@ public class ApproovService {
 
     /**
      * Gets the map of headers that are subject to substitution.
-     * 
+     *
      * @return a map of headers that are subject to substitution, mapped to the required prefix
      */
     public static synchronized Map<String, String> getSubstitutionHeaders() {
@@ -383,7 +383,7 @@ public class ApproovService {
 
     /**
      * Gets the map of substitution query parameters.
-     * 
+     *
      * @return a map of query parameters to be substituted, mapped to the compiled Pattern
      */
     public static synchronized Map<String, Pattern> getSubstitutionQueryParams() {
@@ -957,7 +957,7 @@ class ApproovTokenInterceptor implements Interceptor {
         // we now deal with any header substitutions, which may require further fetches but these
         // should be using cached results
         Map<String, String> substitutionHeaders = ApproovService.getSubstitutionHeaders();
-        Map<String,String> setSubstitutionHeaders = new LinkedHashMap<>(substitutionHeaders.size());
+        Map<String, String> setSubstitutionHeaders = new LinkedHashMap<>(substitutionHeaders.size());
         for (Map.Entry<String, String> entry: substitutionHeaders.entrySet()) {
             String header = entry.getKey();
             String prefix = entry.getValue();
