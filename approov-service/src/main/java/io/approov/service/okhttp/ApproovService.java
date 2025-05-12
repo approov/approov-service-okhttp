@@ -36,6 +36,8 @@ import java.util.regex.Matcher;
 import java.util.regex.Pattern;
 import java.util.regex.PatternSyntaxException;
 
+import javax.net.ssl.SSLPeerUnverifiedException;
+
 import okhttp3.CertificatePinner;
 import okhttp3.Connection;
 import okhttp3.Handshake;
@@ -1074,18 +1076,23 @@ class ApproovPinningInterceptor implements Interceptor {
     // in the pinning configuration
     private CertificatePinner certificatePinner;
 
+    // set of TLS handshakes that are known to be valid
+    private Set<Handshake> knownValidHandshakes;
+
     /**
      * Construct a new pinning interceptor.
      */
     public ApproovPinningInterceptor() {
+        knownValidHandshakes = new HashSet<>();
         buildPins();
     }
 
     /**
      * Rebuild the pinning configuration. This is called when the dynamic configuration
-     * changes and we need to update the pinning information.
+     * changes and we need to update the pinning information. This forces all known valid
+     * handshakes to be cleared.
      */
-    public void buildPins() {
+    synchronized public void buildPins() {
         CertificatePinner.Builder pinBuilder = new CertificatePinner.Builder();
         Map<String, List<String>> allPins = Approov.getPins("public-key-sha256");
         for (Map.Entry<String, List<String>> entry: allPins.entrySet()) {
@@ -1105,6 +1112,36 @@ class ApproovPinningInterceptor implements Interceptor {
             }
         }
         certificatePinner = pinBuilder.build();
+        knownValidHandshakes.clear();
+    }
+
+    /**
+     * Gets the current CertificatePinner for checking peer certificate on a TLS handshake.
+     *
+     * @return the current CertificatePinner
+     */
+    synchronized private CertificatePinner getCertificatePinner() {
+        return certificatePinner;
+    }
+
+    /**
+     * Determines if the given handshake is known to be valid, supporting different TLS
+     * negotiations on different domains as required.
+     *
+     * @param handshake ot be checked
+     * @return true if the handsgake is known valid, false otherwise
+     */
+    synchronized private boolean isValidHandshake(Handshake handshake) {
+        return knownValidHandshakes.contains(handshake);
+    }
+
+    /**
+     * Adds a valid handshake to the cached set.
+     *
+     * @param handshake to be added as known valid
+     */
+    synchronized private void addValidHandshake(Handshake handshake) {
+        knownValidHandshakes.add(handshake);
     }
 
     @Override
@@ -1114,8 +1151,24 @@ class ApproovPinningInterceptor implements Interceptor {
         Handshake handshake = (connection != null) ? connection.handshake() : null;
         if (handshake == null)
             throw new ApproovNetworkException("network interceptor has no connection information");
-        List<Certificate> certs = handshake.peerCertificates();
-        certificatePinner.check(host, certs);
+        if (!isValidHandshake(handshake)) {
+            // if we haven't seen this handshake and pins combination before then we
+            // need to check it
+            List<Certificate> certs = handshake.peerCertificates();
+            try {
+                getCertificatePinner().check(host, certs);
+            } catch (SSLPeerUnverifiedException e) {
+                // if a certificate pinning error is detected then close the socket to force
+                // the next request to redo the TLS negotiation
+                Log.d(TAG, "Pinning failure: " + e.toString());
+                connection.socket().close();
+                throw e;
+            }
+
+            // pins were valid for the handshake so cache it
+            addValidHandshake(handshake);
+            Log.d(TAG, "Valid pinning for: " + handshake.toString());
+        }
         return chain.proceed(chain.request());
     }
 }
