@@ -1072,11 +1072,16 @@ class ApproovPinningInterceptor implements Interceptor {
     // logging tag
     private final static String TAG = "ApproovPinningInterceptor";
 
+    // maximum number of elements that may be held in the handshake cache to allow caching
+    // of different concurrent connections but without causing a significant memory leak
+    private final static int maxCachedHandshakes = 10;
+
     // the certificate pinner to use for pinning that may be rebuilt if there is a change
     // in the pinning configuration
     private CertificatePinner certificatePinner;
 
-    // set of TLS handshakes that are known to be valid
+    // set of TLS handshakes that are known to be valid constrained to a size of maxCachedHandshakes
+    // to prevent a memory leak for long running apps
     private Set<Handshake> knownValidHandshakes;
 
     /**
@@ -1129,18 +1134,21 @@ class ApproovPinningInterceptor implements Interceptor {
      * negotiations on different domains as required.
      *
      * @param handshake ot be checked
-     * @return true if the handsgake is known valid, false otherwise
+     * @return true if the handshake is known valid, false otherwise
      */
     synchronized private boolean isValidHandshake(Handshake handshake) {
         return knownValidHandshakes.contains(handshake);
     }
 
     /**
-     * Adds a valid handshake to the cached set.
+     * Adds a valid handshake to the cached set, clearing the cache if that would exceed
+     * the maximum size.
      *
      * @param handshake to be added as known valid
      */
     synchronized private void addValidHandshake(Handshake handshake) {
+        if (knownValidHandshakes.size() >= maxCachedHandshakes)
+            knownValidHandshakes.clear();
         knownValidHandshakes.add(handshake);
     }
 
