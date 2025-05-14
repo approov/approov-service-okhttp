@@ -145,7 +145,7 @@ public class ApproovService {
             // initialize the Approov SDK
             try {
                 if (!config.isEmpty())
-                    Approov.initialize(context, config, "auto", comment);
+                    Approov.initialize(context.getApplicationContext(), config, "auto", comment);
             } catch (IllegalArgumentException e) {
                 Log.e(TAG, "Approov initialization failed: " + e.getMessage());
                 throw e;
