@@ -14,8 +14,8 @@ CURRENT_TAG=$(echo "$GITHUB_REF" | sed 's|refs/tags/||')
 
 # Check if the extracted tag matches the expected format (e.g., x.y.z)
 if [[ ! "$CURRENT_TAG" =~ ^[0-9]+\.[0-9]+\.[0-9]+$ ]]; then
-    echo "Error: Current Git tag ($CURRENT_TAG) does not match the required format (x.y.z)."
-    exit 1
+    echo "Error: Current Git tag ($CURRENT_TAG) does not match the required format (x.y.z) ,using 0.0.0"
+    CURRENT_TAG="0.0.0"
 fi
 
 # The version of the package that will be build and will be visible in maven central
