@@ -17,17 +17,22 @@
 
 package io.approov.service.okhttp;
 
-import java.io.IOException;
+import okhttp3.Request;
 
-// ApproovException is thrown if there is an error from Approov.
-public class ApproovException extends IOException {
+/**
+ * ApproovInterceptorExtensions provides an interface for handling callbacks during
+ * the processing of network requests by Approov. It allows further modifications
+ * to requests after Approov has applied its changes.
+ */
+public interface ApproovInterceptorExtensions {
 
     /**
-     * Constructs an exception due to an Approov error.
+     * Called after Approov has processed a network request, allowing further modifications.
      *
-     * @param message is the basic information about the exception cause
+     * @param request the processed request
+     * @param changes the mutations applied to the request by Approov
+     * @return the modified request
+     * @throws ApproovException if there is an error during processing
      */
-    public ApproovException(String message) {
-        super(message);
-    }
+    Request processedRequest(Request request, ApproovRequestMutations changes) throws ApproovException;
 }
