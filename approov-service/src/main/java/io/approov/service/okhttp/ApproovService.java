@@ -120,7 +120,7 @@ public class ApproovService {
      * @param config the configuration string, or empty for no SDK initialization
      * @param comment the comment string, or empty for no comment
      */
-    public static void initialize(Context context, String config, String comment) {
+    public static synchronized void initialize(Context context, String config, String comment) {
         // check if the Approov SDK is already initialized
         if (isInitialized && !comment.startsWith("reinit")) {
             if (!config.equals(configString)) {
