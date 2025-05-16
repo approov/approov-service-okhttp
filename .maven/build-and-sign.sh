@@ -81,7 +81,13 @@ if [ ! -f ${POM_FILE_PATH} ]; then
 fi
 
 # Place the package version in the correct pom file location replacing VERSION_PLACEHOLDER string
-sed -i "s/VERSION_PLACEHOLDER/${VERSION}/g" "$POM_FILE_PATH"
+if [[ "$OSTYPE" == "darwin"* ]]; then
+  # macOS (BSD sed requires a backup suffix with -i)
+  sed -i '' "s/VERSION_PLACEHOLDER/${VERSION}/g" "$POM_FILE_PATH"
+else
+  # Linux (GNU sed allows -i without a suffix)
+  sed -i "s/VERSION_PLACEHOLDER/${VERSION}/g" "$POM_FILE_PATH"
+fi
 
 # The destination directory to place all the files
 DESTINATION_DIR="${PACKAGE_DIR_STRUCTURE}/${VERSION}"
