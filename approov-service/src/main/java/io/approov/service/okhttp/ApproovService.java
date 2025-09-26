@@ -871,12 +871,10 @@ class ApproovTokenInterceptor implements Interceptor {
         // check if the URL matches one of the exclusion regexs and just proceed
         ApproovRequestMutations changes = new ApproovRequestMutations();
         Request request = chain.request();
-        String url = request.url().toString(); // we should allow users to decide based on request if we should proceed, they will not be able to change the requets but nothing wrong will happen in case they do in other service layers because request can be modyfied before and after main approov logic 
-        for (Pattern pattern: ApproovService.getExclusionURLRegexs().values()) {
-            Matcher matcher = pattern.matcher(url);
-            if (matcher.find()) {
-                return chain.proceed(request);
-            }
+
+        if(!ApproovService.getDecisionMaker().handleInterceptorActionBasedOnRequest(request)){
+            // we are not to proceed with any Approov processing so just continue
+            return chain.proceed(request);
         }
 
         // update the data hash based on any token binding header (presence is optional)
@@ -910,15 +908,15 @@ class ApproovTokenInterceptor implements Interceptor {
             aChange = true;
             setTokenHeaderKey = ApproovService.getApproovTokenHeader();
             setTokenHeaderValue = ApproovService.getApproovTokenPrefix() + approovResults.getToken();
-        }
-
-        // we only continue additional processing if we had a valid status from Approov, to prevent additional delays
-        // by trying to fetch from Approov again and this also protects against header substitutions in domains not
-        // protected by Approov and therefore potential subject to a MitM
-        if ((approovResults.getStatus() != Approov.TokenFetchStatus.SUCCESS) &&
-                (approovResults.getStatus() != Approov.TokenFetchStatus.UNPROTECTED_URL))
+        }else{
+            // we only continue additional processing if we had a valid status from Approov, to prevent additional delays
+            // by trying to fetch from Approov again and this also protects against header substitutions in domains not
+            // protected by Approov and therefore potential subject to a MitM
             // setTokenHeaderKey and setTokenHeaderValue must be null
             return chain.proceed(request);
+        }
+
+
 
         // we now deal with any header substitutions, which may require further fetches but these
         // should be using cached results

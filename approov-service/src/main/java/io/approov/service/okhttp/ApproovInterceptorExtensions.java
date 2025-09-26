@@ -19,6 +19,8 @@ package io.approov.service.okhttp;
 
 import com.criticalblue.approovsdk.Approov;
 import okhttp3.Request;
+import java.util.regex.Pattern;
+import java.util.regex.Matcher;
 
 /**
  * ApproovInterceptorExtensions provides an interface for handling callbacks during
@@ -117,7 +119,6 @@ public interface ApproovInterceptorExtensions {
         Approov.TokenFetchStatus status = approovResults.getStatus();
         String arc = approovResults.getArc();
         String rejectionReasons = approovResults.getRejectionReasons();
-
         switch (status) {
             case REJECTED:
                 throw new ApproovRejectionException("fetchCustomJWT: " + status.toString() + ": " + arc + " " + rejectionReasons, arc, rejectionReasons);
@@ -126,8 +127,7 @@ public interface ApproovInterceptorExtensions {
             case MITM_DETECTED:
                 throw new ApproovNetworkException("fetchCustomJWT: " + status.toString());
             case SUCCESS:
-                 return approovResuls.getToken();
-                break;
+                return approovResults.getToken();
             default:
                 throw new ApproovException("fetchCustomJWT: " + status.toString());
         }
@@ -153,7 +153,7 @@ public interface ApproovInterceptorExtensions {
                 return false;
             case NO_APPROOV_SERVICE:
             case UNKNOWN_URL:
-            case UNPROTECTED_URL:
+            case UNPROTECTED_URL: // Continue without token for unprotected URLs
                 return false;
             default:
                 throw new ApproovException("Approov token fetch for " + host + ": " + status.toString());
@@ -216,5 +216,23 @@ public interface ApproovInterceptorExtensions {
             default:
                 throw new ApproovException("Query parameter substitution for " + queryKey + ": " + status.toString());
         }
+    }
+    /**
+     * Decides how to handle whether to process the request in the interceptor.
+     *
+     * @param request the original request
+     * @return true if the request should be processed by Approov based on request, false if it should proceed unchanged
+     * @throws ApproovException if there is an error during processing
+     */
+    default boolean handleInterceptorActionBasedOnRequest(Request request) throws ApproovException {
+        String url = request.url().toString();
+
+            for (Pattern pattern: ApproovService.getExclusionURLRegexs().values()) {
+            Matcher matcher = pattern.matcher(url);
+            if (matcher.find()) {
+                return true;
+            }
+        }
+        return false;
     }
 }
