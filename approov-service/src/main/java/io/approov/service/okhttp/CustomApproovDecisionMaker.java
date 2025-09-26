@@ -34,7 +34,10 @@ public class CustomApproovDecisionMaker implements ApproovInterceptorExtensions 
     }
 
     @Override
-    public void handlePrecheckStatus(Approov.TokenFetchStatus status, String arc, String rejectionReasons) throws ApproovException {
+    public void handlePrecheckStatus(Approov.TokenFetchResult approovResults) throws ApproovException {
+        Approov.TokenFetchStatus status = approovResults.getStatus();
+        String arc = approovResults.getARC();
+        String rejectionReasons = approovResults.getRejectionReasons();
         switch (status) {
             case REJECTED:
                 throw new ApproovRejectionException("precheck: " + status.toString() + ": " + arc + " " + rejectionReasons, arc, rejectionReasons);
