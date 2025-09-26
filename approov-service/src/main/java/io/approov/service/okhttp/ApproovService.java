@@ -74,6 +74,9 @@ public class ApproovService {
     // Approov token
     private static boolean proceedOnNetworkFail = false;
 
+    // true if Approov protection is enabled (server-controlled off switch)
+    private static boolean approovEnabled = true;
+
     // the Approov pinning interceptor to be used for all requests
     private static ApproovPinningInterceptor pinningInterceptor = null;
 
@@ -163,6 +166,7 @@ public class ApproovService {
             // setup for creating clients
             isInitialized = false;
             proceedOnNetworkFail = false;
+            approovEnabled = true;
             okHttpBuilders = new HashMap<>();
             okHttpBuilders.put(DEFAULT_BUILDER_NAME, new OkHttpClient.Builder());
             okHttpClients =  new HashMap<>();
@@ -225,6 +229,31 @@ public class ApproovService {
      */
     public static synchronized boolean getProceedOnNetworkFail() {
         return proceedOnNetworkFail;
+    }
+
+    /**
+     * Sets whether Approov protection is enabled. When disabled, requests will use
+     * plain OkHttp without Approov tokens or pinning. This can be controlled by the server
+     * to allow graceful degradation.
+     *
+     * @param enabled true to enable Approov protection, false to disable
+     */
+    public static synchronized void setApproovEnabled(boolean enabled) {
+        Log.d(TAG, "setApproovEnabled " + enabled);
+        if (approovEnabled != enabled) {
+            approovEnabled = enabled;
+            // clear cached clients to force rebuild with/without interceptors
+            okHttpClients.clear();
+        }
+    }
+
+    /**
+     * Gets whether Approov protection is currently enabled.
+     *
+     * @return true if Approov protection is enabled, false otherwise
+     */
+    public static synchronized boolean isApproovEnabled() {
+        return approovEnabled;
     }
 
     /**
@@ -787,7 +816,7 @@ public class ApproovService {
                 okHttpBuilder = new OkHttpClient.Builder();
             }
             // build a new OkHttpClient on demand
-            if (isInitialized) {
+            if (isInitialized && approovEnabled) {
                 // remove any existing ApproovTokenInterceptor from the builder
                 List<Interceptor> interceptors = okHttpBuilder.interceptors();
                 Iterator<Interceptor> iter = interceptors.iterator();
@@ -813,8 +842,11 @@ public class ApproovService {
                         .addInterceptor(tokenInterceptor)
                         .addNetworkInterceptor(pinningInterceptor).build();
             } else {
-                // if the ApproovService was not initialized then we can't add Approov capabilities
-                Log.e(TAG, "Cannot build Approov OkHttpClient as not initialized");
+                // if the ApproovService was not initialized or Approov is disabled, build plain client
+                if (!isInitialized)
+                    Log.e(TAG, "Cannot build Approov OkHttpClient as not initialized");
+                else
+                    Log.d(TAG, "Building plain OkHttpClient as Approov is disabled");
                 okHttpClient = okHttpBuilder.build();
             }
             // cache the client for future usages
@@ -868,6 +900,11 @@ class ApproovTokenInterceptor implements Interceptor {
 
     @Override
     public Response intercept(Chain chain) throws IOException {
+        // if Approov is disabled, proceed without any processing
+        if (!ApproovService.isApproovEnabled()) {
+            return chain.proceed(chain.request());
+        }
+
         // check if the URL matches one of the exclusion regexs and just proceed
         ApproovRequestMutations changes = new ApproovRequestMutations();
         Request request = chain.request();
