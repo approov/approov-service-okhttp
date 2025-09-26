@@ -109,12 +109,15 @@ public interface ApproovInterceptorExtensions {
     /**
      * Decides how to handle token fetch status in fetchCustomJWT operations.
      *
-     * @param status the TokenFetchStatus from Approov
-     * @param arc the ARC value if available
-     * @param rejectionReasons the rejection reasons if available
+     * @param approovResults the TokenFetchStatus from Approov
+     * @return the fetched JWT token
      * @throws ApproovException if the status should result in an exception
      */
-    default void handleCustomJWTStatus(Approov.TokenFetchStatus status, String arc, String rejectionReasons) throws ApproovException {
+    default String handleCustomJWTStatus(Approov.TokenFetchResult approovResults) throws ApproovException {
+        Approov.TokenFetchStatus status = approovResults.getStatus();
+        String arc = approovResults.getArc();
+        String rejectionReasons = approovResults.getRejectionReasons();
+
         switch (status) {
             case REJECTED:
                 throw new ApproovRejectionException("fetchCustomJWT: " + status.toString() + ": " + arc + " " + rejectionReasons, arc, rejectionReasons);
@@ -123,6 +126,7 @@ public interface ApproovInterceptorExtensions {
             case MITM_DETECTED:
                 throw new ApproovNetworkException("fetchCustomJWT: " + status.toString());
             case SUCCESS:
+                 return approovResuls.getToken();
                 break;
             default:
                 throw new ApproovException("fetchCustomJWT: " + status.toString());

@@ -730,8 +730,7 @@ public class ApproovService {
         }
 
         // process the returned Approov status using decision maker
-        getDecisionMaker().handleCustomJWTStatus(approovResults.getStatus(), approovResults.getARC(), approovResults.getRejectionReasons());
-        return approovResults.getToken();
+        return getDecisionMaker().handleCustomJWTStatus(approovResults);
     }
 
     /**
