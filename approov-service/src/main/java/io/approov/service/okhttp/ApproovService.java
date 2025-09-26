@@ -505,7 +505,7 @@ public class ApproovService {
         }
 
         // process the returned Approov status using decision maker
-        getDecisionMaker().handlePrecheckStatus(approovResults.getStatus(), approovResults.getARC(), approovResults.getRejectionReasons());
+        getDecisionMaker().handlePrecheckStatus(approovResults);
     }
 
     /**
@@ -578,7 +578,7 @@ public class ApproovService {
         }
 
         // process the status using decision maker
-        getDecisionMaker().handleFetchTokenStatus(approovResults.getStatus());
+        getDecisionMaker().handleFetchTokenStatus(approovResults);
         return approovResults.getToken();
     }
 
@@ -700,7 +700,7 @@ public class ApproovService {
         }
 
         // process the returned Approov status using decision maker
-        getDecisionMaker().handleSecureStringStatus(approovResults.getStatus(), type, key, approovResults.getARC(), approovResults.getRejectionReasons());
+        getDecisionMaker().handleSecureStringStatus(approovResults, type, key);
         return approovResults.getSecureString();
     }
 
@@ -929,7 +929,7 @@ class ApproovTokenInterceptor implements Interceptor {
             if ((value != null) && value.startsWith(prefix) && (value.length() > prefix.length())) {
                 approovResults = Approov.fetchSecureStringAndWait(value.substring(prefix.length()), null);
                 Log.d(TAG, "Substituting header: " + header + ", " + approovResults.getStatus().toString());
-                if (ApproovService.getDecisionMaker().handleInterceptorHeaderSubstitutionStatus(approovResults.getStatus(), header, approovResults.getARC(), approovResults.getRejectionReasons())) {
+                if (ApproovService.getDecisionMaker().handleInterceptorHeaderSubstitutionStatus(approovResults, header)) {
                     aChange = true;
                     setSubstitutionHeaders.put(header, prefix + approovResults.getSecureString());
                 }
@@ -952,7 +952,7 @@ class ApproovTokenInterceptor implements Interceptor {
                 String queryValue = matcher.group(1);
                 approovResults = Approov.fetchSecureStringAndWait(queryValue, null);
                 Log.d(TAG, "Substituting query parameter: " + queryKey + ", " + approovResults.getStatus().toString());
-                if (ApproovService.getDecisionMaker().handleInterceptorQueryParamSubstitutionStatus(approovResults.getStatus(), queryKey, approovResults.getARC(), approovResults.getRejectionReasons())) {
+                if (ApproovService.getDecisionMaker().handleInterceptorQueryParamSubstitutionStatus(approovResults, queryKey)) {
                     // substitute the query parameter
                     aChange = true;
                     queryKeys.add(queryKey);

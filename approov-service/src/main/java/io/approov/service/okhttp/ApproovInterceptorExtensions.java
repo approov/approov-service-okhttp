@@ -42,12 +42,13 @@ public interface ApproovInterceptorExtensions {
     /**
      * Decides how to handle token fetch status in precheck operations.
      *
-     * @param status the TokenFetchStatus from Approov
-     * @param arc the ARC value if available
-     * @param rejectionReasons the rejection reasons if available
+     * @param approovResults the TokenFetchResult from Approov
      * @throws ApproovException if the status should result in an exception
      */
-    default void handlePrecheckStatus(Approov.TokenFetchStatus status, String arc, String rejectionReasons) throws ApproovException {
+    default void handlePrecheckStatus(Approov.TokenFetchResult approovResults) throws ApproovException {
+        Approov.TokenFetchStatus status = approovResults.getStatus();
+        String arc = approovResults.getARC();
+        String rejectionReasons = approovResults.getRejectionReasons();
         switch (status) {
             case REJECTED:
                 throw new ApproovRejectionException("precheck: " + status.toString() + ": " + arc + " " + rejectionReasons, arc, rejectionReasons);
@@ -66,10 +67,11 @@ public interface ApproovInterceptorExtensions {
     /**
      * Decides how to handle token fetch status in fetchToken operations.
      *
-     * @param status the TokenFetchStatus from Approov
+     * @param approovResults the TokenFetchResult from Approov
      * @throws ApproovException if the status should result in an exception
      */
-    default void handleFetchTokenStatus(Approov.TokenFetchStatus status) throws ApproovException {
+    default void handleFetchTokenStatus(Approov.TokenFetchResult approovResults) throws ApproovException {
+        Approov.TokenFetchStatus status = approovResults.getStatus();
         switch (status) {
             case NO_NETWORK:
             case POOR_NETWORK:
@@ -85,14 +87,15 @@ public interface ApproovInterceptorExtensions {
     /**
      * Decides how to handle token fetch status in fetchSecureString operations.
      *
-     * @param status the TokenFetchStatus from Approov
+     * @param approovResults the TokenFetchResult from Approov
      * @param operation the operation type ("lookup" or "definition")
      * @param key the secure string key
-     * @param arc the ARC value if available
-     * @param rejectionReasons the rejection reasons if available
      * @throws ApproovException if the status should result in an exception
      */
-    default void handleSecureStringStatus(Approov.TokenFetchStatus status, String operation, String key, String arc, String rejectionReasons) throws ApproovException {
+    default void handleSecureStringStatus(Approov.TokenFetchResult approovResults, String operation, String key) throws ApproovException {
+        Approov.TokenFetchStatus status = approovResults.getStatus();
+        String arc = approovResults.getARC();
+        String rejectionReasons = approovResults.getRejectionReasons();
         switch (status) {
             case REJECTED:
                 throw new ApproovRejectionException("fetchSecureString " + operation + " for " + key + ": " + status.toString() + ": " + arc + " " + rejectionReasons, arc, rejectionReasons);
@@ -111,13 +114,13 @@ public interface ApproovInterceptorExtensions {
     /**
      * Decides how to handle token fetch status in fetchCustomJWT operations.
      *
-     * @param approovResults the TokenFetchStatus from Approov
+     * @param approovResults the TokenFetchResult from Approov
      * @return the fetched JWT token
      * @throws ApproovException if the status should result in an exception
      */
     default String handleCustomJWTStatus(Approov.TokenFetchResult approovResults) throws ApproovException {
         Approov.TokenFetchStatus status = approovResults.getStatus();
-        String arc = approovResults.getArc();
+        String arc = approovResults.getARC();
         String rejectionReasons = approovResults.getRejectionReasons();
         switch (status) {
             case REJECTED:
@@ -163,14 +166,15 @@ public interface ApproovInterceptorExtensions {
     /**
      * Decides how to handle token fetch status in interceptor header substitution operations.
      *
-     * @param status the TokenFetchStatus from Approov
+     * @param approovResults the TokenFetchResult from Approov
      * @param header the header being substituted
-     * @param arc the ARC value if available
-     * @param rejectionReasons the rejection reasons if available
      * @return true if substitution should proceed, false if it should be skipped
      * @throws ApproovException if the status should result in an exception
      */
-    default boolean handleInterceptorHeaderSubstitutionStatus(Approov.TokenFetchStatus status, String header, String arc, String rejectionReasons) throws ApproovException {
+    default boolean handleInterceptorHeaderSubstitutionStatus(Approov.TokenFetchResult approovResults, String header) throws ApproovException {
+        Approov.TokenFetchStatus status = approovResults.getStatus();
+        String arc = approovResults.getARC();
+        String rejectionReasons = approovResults.getRejectionReasons();
         switch (status) {
             case SUCCESS:
                 return true;
@@ -192,14 +196,15 @@ public interface ApproovInterceptorExtensions {
     /**
      * Decides how to handle token fetch status in interceptor query parameter substitution operations.
      *
-     * @param status the TokenFetchStatus from Approov
+     * @param approovResults the TokenFetchResult from Approov
      * @param queryKey the query parameter key being substituted
-     * @param arc the ARC value if available
-     * @param rejectionReasons the rejection reasons if available
      * @return true if substitution should proceed, false if it should be skipped
      * @throws ApproovException if the status should result in an exception
      */
-    default boolean handleInterceptorQueryParamSubstitutionStatus(Approov.TokenFetchStatus status, String queryKey, String arc, String rejectionReasons) throws ApproovException {
+    default boolean handleInterceptorQueryParamSubstitutionStatus(Approov.TokenFetchResult approovResults, String queryKey) throws ApproovException {
+        Approov.TokenFetchStatus status = approovResults.getStatus();
+        String arc = approovResults.getARC();
+        String rejectionReasons = approovResults.getRejectionReasons();
         switch (status) {
             case SUCCESS:
                 return true;
@@ -225,8 +230,10 @@ public interface ApproovInterceptorExtensions {
      * @throws ApproovException if there is an error during processing
      */
     default boolean handleInterceptorActionBasedOnRequest(Request request) throws ApproovException {
-        String url = request.url().toString();
+        if(request == null)
+            throw new ApproovException("handleInterceptorActionBasedOnRequest method was passed a request that is null!");
 
+        String url = request.url().toString();
             for (Pattern pattern: ApproovService.getExclusionURLRegexs().values()) {
             Matcher matcher = pattern.matcher(url);
             if (matcher.find()) {
