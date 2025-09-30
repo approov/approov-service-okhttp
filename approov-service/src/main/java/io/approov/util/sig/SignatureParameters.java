@@ -5,6 +5,7 @@ import androidx.annotation.NonNull;
 import java.util.ArrayList;
 import java.util.LinkedHashMap;
 import java.util.List;
+import java.util.Locale;
 import java.util.Map;
 
 import io.approov.util.http.sfv.Dictionary;
@@ -253,7 +254,7 @@ public class SignatureParameters implements Cloneable {
 	 */
 	public SignatureParameters addComponentIdentifier(String identifier) {
 		if (!identifier.startsWith("@")) {
-			componentIdentifiers.add(StringItem.valueOf(identifier.toLowerCase()));
+			componentIdentifiers.add(StringItem.valueOf(identifier.toLowerCase(Locale.US)));
 		} else {
 			componentIdentifiers.add(StringItem.valueOf(identifier));
 		}
