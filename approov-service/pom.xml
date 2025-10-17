@@ -46,7 +46,7 @@
     <dependency>
       <groupId>io.approov</groupId>
       <artifactId>approov-android-sdk</artifactId>
-      <version>3.5.0</version>
+      <version>3.5.1</version>
       <scope>runtime</scope>
     </dependency>
   </dependencies>
