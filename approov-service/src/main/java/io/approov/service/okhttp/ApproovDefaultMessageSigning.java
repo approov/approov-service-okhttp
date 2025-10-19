@@ -53,7 +53,7 @@ import okio.ByteString;
  * message signatures to HTTP requests based on specified parameters and
  * algorithms.
  */
-public class ApproovDefaultMessageSigning implements ApproovInterceptorExtensions {
+public class ApproovDefaultMessageSigning implements ApproovServiceMutator {
     // logging tag
     private static final String TAG = "ApproovMsgSign";
 
@@ -173,6 +173,19 @@ public class ApproovDefaultMessageSigning implements ApproovInterceptorExtension
      * @throws ApproovException If an error occurs during processing.
      */
     @Override
+    Request handleInterceptorProcessedRequest(Request request, ApproovRequestMutations changes) throws ApproovException {
+        return processedRequest(request, changes);
+    }
+
+    /**
+     * @deprecated Use ApproovServiceMutator.handleInterceptorProcessedRequest
+     *             instead.
+     *
+     *             Currently the method is implemented to maintain backwards
+     *             compatibility. A future release will move the implementation
+     *             to the ApproovServiceMutator class.
+     */
+    @Deprecated
     public Request processedRequest(Request request, ApproovRequestMutations changes) throws ApproovException {
         if (changes == null || changes.getTokenHeaderKey() == null) {
             // the request doesn't have an Approov token, so we don't need to sign it
