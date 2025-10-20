@@ -21,24 +21,80 @@ import java.io.IOException;
 
 // ApproovException is thrown if there is an error from Approov.
 public class ApproovException extends IOException {
+    private final int errorCode;
 
     /**
      * Constructs an exception due to an Approov error.
      *
+     * @param errorCode identifies the specific Approov error condition
      * @param message is the basic information about the exception cause
      */
-    public ApproovException(String message) {
-        super(message);
+    public ApproovException(int errorCode, String message) {
+        super(formatMessage(errorCode, message));
+        this.errorCode = errorCode;
     }
 
     /**
-     * Constructs an exception due to an Approov error while wrapping the cause
+     * Constructs an exception due to an Approov error while wrapping the cause.
      *
+     * @param errorCode identifies the specific Approov error condition
      * @param message is the basic information about the exception cause
      * @param cause is the underlying cause of the exception
      */
-    public ApproovException(String message, Throwable cause) {
-        super(message, cause);
+    public ApproovException(int errorCode, String message, Throwable cause) {
+        super(formatMessage(errorCode, message), cause);
+        this.errorCode = errorCode;
     }
 
+    /**
+     * Constructs an exception due to an Approov error (legacy signature).
+     *
+     * @param message is the basic information about the exception cause
+     * @deprecated Use {@link #ApproovException(int, String)} instead to provide a structured error code.
+     */
+    @Deprecated
+    public ApproovException(String message) {
+        this(ApproovErrorCodes.LEGACY_GENERAL_ERROR, message);
+    }
+
+    /**
+     * Constructs an exception due to an Approov error while wrapping the cause (legacy signature).
+     *
+     * @param message is the basic information about the exception cause
+     * @param cause is the underlying cause of the exception
+     * @deprecated Use {@link #ApproovException(int, String, Throwable)} instead to provide a structured error code.
+     */
+    @Deprecated
+    public ApproovException(String message, Throwable cause) {
+        this(ApproovErrorCodes.LEGACY_GENERAL_ERROR, message, cause);
+    }
+
+    /**
+     * Returns the structured error code associated with the exception.
+     *
+     * @return the Approov error code
+     */
+    public int getErrorCode() {
+        return errorCode;
+    }
+
+    /**
+     * Returns a human readable description for the error code.
+     *
+     * @return the description for the error code, or a generic message if unknown
+     */
+    public String getErrorDescription() {
+        return ApproovErrorCodes.describe(errorCode);
+    }
+
+    private static String formatMessage(int errorCode, String message) {
+        StringBuilder builder = new StringBuilder("[");
+        builder.append(errorCode).append("] ");
+        if (message != null) {
+            builder.append(message);
+        } else {
+            builder.append("Approov error");
+        }
+        return builder.toString();
+    }
 }

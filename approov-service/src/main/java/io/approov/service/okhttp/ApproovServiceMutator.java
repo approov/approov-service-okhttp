@@ -51,16 +51,19 @@ public interface ApproovServiceMutator {
         String rejectionReasons = approovResults.getRejectionReasons();
         switch (status) {
             case REJECTED:
-                throw new ApproovRejectionException("precheck: " + status.toString() + ": " + arc + " " + rejectionReasons, arc, rejectionReasons);
+                throw new ApproovRejectionException(ApproovErrorCodes.REJECTION_PRECHECK,
+                        "precheck: " + status.toString() + ": " + arc + " " + rejectionReasons, arc, rejectionReasons);
             case NO_NETWORK:
             case POOR_NETWORK:
             case MITM_DETECTED:
-                throw new ApproovNetworkException("precheck: " + status.toString());
+                throw new ApproovNetworkException(ApproovErrorCodes.NETWORK_PRECHECK_FAILURE,
+                        "precheck: " + status.toString());
             case SUCCESS:
             case UNKNOWN_KEY:
                 break;
             default:
-                throw new ApproovException("precheck:" + status.toString());
+                throw new ApproovException(ApproovErrorCodes.MUTATOR_PRECHECK_UNEXPECTED_STATUS,
+                        "precheck:" + status.toString());
         }
     }
 
@@ -80,11 +83,13 @@ public interface ApproovServiceMutator {
             case NO_NETWORK:
             case POOR_NETWORK:
             case MITM_DETECTED:
-                throw new ApproovNetworkException("fetchToken: " + status.toString());
+                throw new ApproovNetworkException(ApproovErrorCodes.NETWORK_FETCH_TOKEN_FAILURE,
+                        "fetchToken: " + status.toString());
             case SUCCESS:
                 break;
             default:
-                throw new ApproovException("fetchToken: " + status.toString());
+                throw new ApproovException(ApproovErrorCodes.MUTATOR_FETCH_TOKEN_UNEXPECTED_STATUS,
+                        "fetchToken: " + status.toString());
         }
     }
 
@@ -109,16 +114,20 @@ public interface ApproovServiceMutator {
         String rejectionReasons = approovResults.getRejectionReasons();
         switch (status) {
             case REJECTED:
-                throw new ApproovRejectionException("fetchSecureString " + operation + " for " + key + ": " + status.toString() + ": " + arc + " " + rejectionReasons, arc, rejectionReasons);
+                throw new ApproovRejectionException(ApproovErrorCodes.REJECTION_FETCH_SECURE_STRING,
+                        "fetchSecureString " + operation + " for " + key + ": " + status.toString() + ": " + arc + " " + rejectionReasons,
+                        arc, rejectionReasons);
             case NO_NETWORK:
             case POOR_NETWORK:
             case MITM_DETECTED:
-                throw new ApproovNetworkException("fetchSecureString " + operation + " for " + key + ":" + status.toString());
+                throw new ApproovNetworkException(ApproovErrorCodes.NETWORK_FETCH_SECURE_STRING_FAILURE,
+                        "fetchSecureString " + operation + " for " + key + ":" + status.toString());
             case SUCCESS:
             case UNKNOWN_KEY:
                 break;
             default:
-                throw new ApproovException("fetchSecureString " + operation + " for " + key + ":" + status.toString());
+                throw new ApproovException(ApproovErrorCodes.MUTATOR_FETCH_SECURE_STRING_UNEXPECTED_STATUS,
+                        "fetchSecureString " + operation + " for " + key + ":" + status.toString());
         }
     }
 
@@ -138,15 +147,18 @@ public interface ApproovServiceMutator {
         String rejectionReasons = approovResults.getRejectionReasons();
         switch (status) {
             case REJECTED:
-                throw new ApproovRejectionException("fetchCustomJWT: " + status.toString() + ": " + arc + " " + rejectionReasons, arc, rejectionReasons);
+                throw new ApproovRejectionException(ApproovErrorCodes.REJECTION_FETCH_CUSTOM_JWT,
+                        "fetchCustomJWT: " + status.toString() + ": " + arc + " " + rejectionReasons, arc, rejectionReasons);
             case NO_NETWORK:
             case POOR_NETWORK:
             case MITM_DETECTED:
-                throw new ApproovNetworkException("fetchCustomJWT: " + status.toString());
+                throw new ApproovNetworkException(ApproovErrorCodes.NETWORK_FETCH_CUSTOM_JWT_FAILURE,
+                        "fetchCustomJWT: " + status.toString());
             case SUCCESS:
                 break;
             default:
-                throw new ApproovException("fetchCustomJWT: " + status.toString());
+                throw new ApproovException(ApproovErrorCodes.MUTATOR_FETCH_CUSTOM_JWT_UNEXPECTED_STATUS,
+                        "fetchCustomJWT: " + status.toString());
         }
     }
 
@@ -162,8 +174,9 @@ public interface ApproovServiceMutator {
      *                          encoding the cause of the failure
      */
     default boolean handleInterceptorShouldProcessRequest(Request request) throws ApproovException {
-        if(request == null)
-            throw new ApproovException("handleInterceptorShouldProcessRequest method was passed a request that is null!");
+        if (request == null)
+            throw new ApproovException(ApproovErrorCodes.MUTATOR_INTERCEPTOR_NULL_REQUEST,
+                    "handleInterceptorShouldProcessRequest method was passed a request that is null!");
 
         // check if the URL matches one of the exclusion regexs and skip interceptor
         // processing in these cases
@@ -198,14 +211,16 @@ public interface ApproovServiceMutator {
             case POOR_NETWORK:
             case MITM_DETECTED:
                 if (!ApproovService.getProceedOnNetworkFail())
-                    throw new ApproovNetworkException("Approov token fetch for " + url + ": " + status.toString());
+                    throw new ApproovNetworkException(ApproovErrorCodes.NETWORK_INTERCEPTOR_FETCH_TOKEN_FAILURE,
+                            "Approov token fetch for " + url + ": " + status.toString());
                 return false;
             case NO_APPROOV_SERVICE:
             case UNKNOWN_URL:
             case UNPROTECTED_URL: // Continue without token for unprotected URLs
                 return false;
             default:
-                throw new ApproovException("Approov token fetch for " + url + ": " + status.toString());
+                throw new ApproovException(ApproovErrorCodes.MUTATOR_INTERCEPTOR_FETCH_TOKEN_UNEXPECTED_STATUS,
+                        "Approov token fetch for " + url + ": " + status.toString());
         }
     }
 
@@ -231,17 +246,21 @@ public interface ApproovServiceMutator {
             case SUCCESS:
                 return true;
             case REJECTED:
-                throw new ApproovRejectionException("Header substitution for " + header + ": " + status.toString() + ": " + arc + " " + rejectionReasons, arc, rejectionReasons);
+                throw new ApproovRejectionException(ApproovErrorCodes.REJECTION_HEADER_SUBSTITUTION,
+                        "Header substitution for " + header + ": " + status.toString() + ": " + arc + " " + rejectionReasons,
+                        arc, rejectionReasons);
             case NO_NETWORK:
             case POOR_NETWORK:
             case MITM_DETECTED:
                 if (!ApproovService.getProceedOnNetworkFail())
-                    throw new ApproovNetworkException("Header substitution for " + header + ": " + status.toString());
+                    throw new ApproovNetworkException(ApproovErrorCodes.NETWORK_HEADER_SUBSTITUTION_FAILURE,
+                            "Header substitution for " + header + ": " + status.toString());
                 return false;
             case UNKNOWN_KEY:
                 return false;
             default:
-                throw new ApproovException("Header substitution for " + header + ": " + status.toString());
+                throw new ApproovException(ApproovErrorCodes.MUTATOR_HEADER_SUBSTITUTION_UNEXPECTED_STATUS,
+                        "Header substitution for " + header + ": " + status.toString());
         }
     }
 
@@ -267,17 +286,21 @@ public interface ApproovServiceMutator {
             case SUCCESS:
                 return true;
             case REJECTED:
-                throw new ApproovRejectionException("Query parameter substitution for " + queryKey + ": " + status.toString() + ": " + arc + " " + rejectionReasons, arc, rejectionReasons);
+                throw new ApproovRejectionException(ApproovErrorCodes.REJECTION_QUERY_SUBSTITUTION,
+                        "Query parameter substitution for " + queryKey + ": " + status.toString() + ": " + arc + " " + rejectionReasons,
+                        arc, rejectionReasons);
             case NO_NETWORK:
             case POOR_NETWORK:
             case MITM_DETECTED:
                 if (!ApproovService.getProceedOnNetworkFail())
-                    throw new ApproovNetworkException("Query parameter substitution for " + queryKey + ": " + status.toString());
+                    throw new ApproovNetworkException(ApproovErrorCodes.NETWORK_QUERY_SUBSTITUTION_FAILURE,
+                            "Query parameter substitution for " + queryKey + ": " + status.toString());
                 return false;
             case UNKNOWN_KEY:
                 return false;
             default:
-                throw new ApproovException("Query parameter substitution for " + queryKey + ": " + status.toString());
+                throw new ApproovException(ApproovErrorCodes.MUTATOR_QUERY_SUBSTITUTION_UNEXPECTED_STATUS,
+                        "Query parameter substitution for " + queryKey + ": " + status.toString());
         }
     }
 

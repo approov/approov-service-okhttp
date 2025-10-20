@@ -28,14 +28,28 @@ public class ApproovRejectionException extends ApproovException {
     /**
      * Constructs an exception if the app is rejected by Approov.
      *
+     * @param errorCode identifies the rejection scenario
      * @param message is the basic information about the exception cause
      * @param arc is the code that can be used for support purposes
      * @param rejectionReasons may provide a comma separated list of rejection reasons
      */
-    public ApproovRejectionException(String message, String arc, String rejectionReasons) {
-        super(message);
+    public ApproovRejectionException(int errorCode, String message, String arc, String rejectionReasons) {
+        super(errorCode, message);
         this.arc = arc;
         this.rejectionReasons = rejectionReasons;
+    }
+
+    /**
+     * Constructs an exception if the app is rejected by Approov (legacy signature).
+     *
+     * @param message is the basic information about the exception cause
+     * @param arc is the code that can be used for support purposes
+     * @param rejectionReasons may provide a comma separated list of rejection reasons
+     * @deprecated Use {@link #ApproovRejectionException(int, String, String, String)} instead to provide a structured error code.
+     */
+    @Deprecated
+    public ApproovRejectionException(String message, String arc, String rejectionReasons) {
+        this(ApproovErrorCodes.LEGACY_REJECTION_ERROR, message, arc, rejectionReasons);
     }
 
     /**

@@ -40,19 +40,22 @@ public class CustomApproovDecisionMaker implements ApproovInterceptorExtensions 
         String rejectionReasons = approovResults.getRejectionReasons();
         switch (status) {
             case REJECTED:
-                throw new ApproovRejectionException("precheck: " + status.toString() + ": " + arc + " " + rejectionReasons, arc, rejectionReasons);
+                throw new ApproovRejectionException(ApproovErrorCodes.REJECTION_PRECHECK,
+                        "precheck: " + status.toString() + ": " + arc + " " + rejectionReasons, arc, rejectionReasons);
             case NO_NETWORK:
             case POOR_NETWORK:
                 // Custom behavior: log warning but don't throw exception for network issues in precheck
                 Log.w(TAG, "Network issue during precheck: " + status.toString());
                 break;
             case MITM_DETECTED:
-                throw new ApproovNetworkException("precheck: " + status.toString());
+                throw new ApproovNetworkException(ApproovErrorCodes.NETWORK_PRECHECK_FAILURE,
+                        "precheck: " + status.toString());
             case SUCCESS:
             case UNKNOWN_KEY:
                 break;
             default:
-                throw new ApproovException("precheck:" + status.toString());
+                throw new ApproovException(ApproovErrorCodes.MUTATOR_PRECHECK_UNEXPECTED_STATUS,
+                        "precheck:" + status.toString());
         }
     }
 
@@ -69,14 +72,16 @@ public class CustomApproovDecisionMaker implements ApproovInterceptorExtensions 
                 return false;
             case MITM_DETECTED:
                 if (!ApproovService.getProceedOnNetworkFail())
-                    throw new ApproovNetworkException("Approov token fetch for " + url + ": " + status.toString());
+                    throw new ApproovNetworkException(ApproovErrorCodes.NETWORK_INTERCEPTOR_FETCH_TOKEN_FAILURE,
+                            "Approov token fetch for " + url + ": " + status.toString());
                 return false;
             case NO_APPROOV_SERVICE:
             case UNKNOWN_URL:
             case UNPROTECTED_URL:
                 return false;
             default:
-                throw new ApproovException("Approov token fetch for " + url + ": " + status.toString());
+                throw new ApproovException(ApproovErrorCodes.MUTATOR_INTERCEPTOR_FETCH_TOKEN_UNEXPECTED_STATUS,
+                        "Approov token fetch for " + url + ": " + status.toString());
         }
     }
 }
