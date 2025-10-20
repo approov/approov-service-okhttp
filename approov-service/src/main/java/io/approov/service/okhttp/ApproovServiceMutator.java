@@ -103,7 +103,7 @@ public interface ApproovServiceMutator {
      *                          action or throw an ApproovException encoding
      *                          the cause of the failure
      */
-    default void handleSecureStringResult(Approov.TokenFetchResult approovResults, String operation, String key) throws ApproovException {
+    default void handleFetchSecureStringResult(Approov.TokenFetchResult approovResults, String operation, String key) throws ApproovException {
         Approov.TokenFetchStatus status = approovResults.getStatus();
         String arc = approovResults.getARC();
         String rejectionReasons = approovResults.getRejectionReasons();
@@ -132,7 +132,7 @@ public interface ApproovServiceMutator {
      *                          action or throw an ApproovException encoding
      *                          the cause of the failure
      */
-    default void handleCustomJWTResult(Approov.TokenFetchResult approovResults) throws ApproovException {
+    default void handleFetchCustomJWTResult(Approov.TokenFetchResult approovResults) throws ApproovException {
         Approov.TokenFetchStatus status = approovResults.getStatus();
         String arc = approovResults.getARC();
         String rejectionReasons = approovResults.getRejectionReasons();

@@ -29,6 +29,7 @@ import java.util.HashMap;
 import java.util.HashSet;
 import java.util.Iterator;
 import java.util.LinkedHashMap;
+import java.util.LinkedHashSet;
 import java.util.List;
 import java.util.Map;
 import java.util.Set;
@@ -299,7 +300,7 @@ public class ApproovService {
     }
 
     /**
-     * @deprecated Use setApproovServiceMutator instead
+     * @deprecated Use setServiceMutator instead
      */
     @Deprecated
     public static void setApproovInterceptorExtensions(ApproovServiceMutator mutator) {
@@ -319,7 +320,7 @@ public class ApproovService {
      * Gets the interceptor extensions callback handlers.
      *
      * @return the interceptor extensions callback handlers or null if none set
-     * @deprecated Use getApproovServiceMutator instead
+     * @deprecated Use getServiceMutator instead
      */
     @Deprecated
     public static ApproovServiceMutator getApproovInterceptorExtensions() {
@@ -694,7 +695,7 @@ public class ApproovService {
         }
 
         // process the returned Approov status using decision maker
-        getServiceMutator().handleSecureStringResult(approovResults, type, key);
+        getServiceMutator().handleFetchSecureStringResult(approovResults, type, key);
         return approovResults.getSecureString();
     }
 
@@ -724,7 +725,7 @@ public class ApproovService {
         }
 
         // process the returned Approov status using decision maker
-        getServiceMutator().handleCustomJWTResult(approovResults);
+        getServiceMutator().handleFetchCustomJWTResult(approovResults);
         return approovResults.getToken();
     }
 
@@ -867,7 +868,7 @@ class ApproovTokenInterceptor implements Interceptor {
         Request request = chain.request();
         // cache the mutator for the duration of the interceptor to make sure
         // it is not changed mid-flight
-        ApproovServiceMutator mutator = ApproovService.getApproovServiceMutator();
+        ApproovServiceMutator mutator = ApproovService.getServiceMutator();
         // first check if we are to proceed with any Approov processing
         if(!mutator.handleInterceptorShouldProcessRequest(request)){
             // we are not to proceed with any Approov processing so just continue
@@ -900,12 +901,11 @@ class ApproovTokenInterceptor implements Interceptor {
         String setTokenHeaderKey = null;
         String setTokenHeaderValue = null;
         
-        if (mutator.handleInterceptorFetchTokenResult(approovResults, url)) {
+        if (mutator.handleInterceptorFetchTokenResult(approovResults, url.toString())) {
             // we successfully obtained a token so add it to the header for the request
             aChange = true;
             setTokenHeaderKey = ApproovService.getApproovTokenHeader();
             setTokenHeaderValue = ApproovService.getApproovTokenPrefix() + approovResults.getToken();
-            // add trace id header too (if it is available)
         } else {
             // we only continue additional processing if we had a valid status from Approov, to prevent additional delays
             // by trying to fetch from Approov again and this also protects against header substitutions in domains not
@@ -1084,7 +1084,7 @@ class ApproovPinningInterceptor implements Interceptor {
     public Response intercept(Chain chain) throws IOException {
         Request request = chain.request();
         // first check if we are to proceed with any pinning processing
-        if(!ApproovService.getApproovServiceMutator().handlePinningShouldProcessRequest(request)){
+        if(!ApproovService.getServiceMutator().handlePinningShouldProcessRequest(request)){
             // we are not to proceed with any pinning processing so just continue
             return chain.proceed(request);
         }

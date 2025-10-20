@@ -173,7 +173,7 @@ public class ApproovDefaultMessageSigning implements ApproovServiceMutator {
      * @throws ApproovException If an error occurs during processing.
      */
     @Override
-    Request handleInterceptorProcessedRequest(Request request, ApproovRequestMutations changes) throws ApproovException {
+    public Request handleInterceptorProcessedRequest(Request request, ApproovRequestMutations changes) throws ApproovException {
         return processedRequest(request, changes);
     }
 

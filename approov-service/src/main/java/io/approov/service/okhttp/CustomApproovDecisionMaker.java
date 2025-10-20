@@ -34,7 +34,7 @@ public class CustomApproovDecisionMaker implements ApproovInterceptorExtensions 
     }
 
     @Override
-    public void handlePrecheckStatus(Approov.TokenFetchResult approovResults) throws ApproovException {
+    public void handlePrecheckResult(Approov.TokenFetchResult approovResults) throws ApproovException {
         Approov.TokenFetchStatus status = approovResults.getStatus();
         String arc = approovResults.getARC();
         String rejectionReasons = approovResults.getRejectionReasons();
@@ -57,25 +57,26 @@ public class CustomApproovDecisionMaker implements ApproovInterceptorExtensions 
     }
 
     @Override
-    public boolean handleInterceptorTokenStatus(Approov.TokenFetchStatus status, String host) throws ApproovException {
+    public boolean handleInterceptorFetchTokenResult(Approov.TokenFetchResult approovResults, String url) throws ApproovException {
+        Approov.TokenFetchStatus status = approovResults.getStatus();
         switch (status) {
             case SUCCESS:
                 return true;
             case NO_NETWORK:
             case POOR_NETWORK:
                 // Custom behavior: always proceed on network failures for this example
-                Log.w(TAG, "Network issue during token fetch for " + host + ", proceeding without token");
+                Log.w(TAG, "Network issue during token fetch for " + url + ", proceeding without token");
                 return false;
             case MITM_DETECTED:
                 if (!ApproovService.getProceedOnNetworkFail())
-                    throw new ApproovNetworkException("Approov token fetch for " + host + ": " + status.toString());
+                    throw new ApproovNetworkException("Approov token fetch for " + url + ": " + status.toString());
                 return false;
             case NO_APPROOV_SERVICE:
             case UNKNOWN_URL:
             case UNPROTECTED_URL:
                 return false;
             default:
-                throw new ApproovException("Approov token fetch for " + host + ": " + status.toString());
+                throw new ApproovException("Approov token fetch for " + url + ": " + status.toString());
         }
     }
 }
