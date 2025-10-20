@@ -37,6 +37,7 @@ import java.util.List;
 import java.util.Map;
 
 import io.approov.util.http.sfv.ByteSequenceItem;
+import io.approov.util.http.sfv.StringItem;
 import io.approov.util.http.sfv.Dictionary;
 import io.approov.util.sig.ComponentProvider;
 import io.approov.util.sig.SignatureBaseBuilder;
@@ -240,9 +241,12 @@ public class ApproovDefaultMessageSigning implements ApproovServiceMutator {
                 throw new IllegalStateException("Unsupported algorithm identifier: " + params.getAlg());
         }
 
-        // Calculate the signature and message descriptor headers
+        // Calculate the signature and message descriptor headers. Note that the signatures are
+        // added as strings (as required by the spec) instead of byte sequences which would better
+        // fit the data.
+        String signatureBase64 = Base64.encodeToString(signature, Base64.NO_WRAP);
         String sigHeader = Dictionary.valueOf(Map.of(
-                sigId, ByteSequenceItem.valueOf(signature))).serialize();
+                sigId, StringItem.valueOf(signatureBase64))).serialize();
         String sigInputHeader = Dictionary.valueOf(Map.of(
                 sigId, params.toComponentValue())).serialize();
 
