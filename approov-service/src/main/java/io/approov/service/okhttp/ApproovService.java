@@ -58,6 +58,9 @@ public class ApproovService {
     // default header that will be added to Approov enabled requests
     private static final String APPROOV_TOKEN_HEADER = "Approov-Token";
 
+    // default header that will carry any Approov TraceID value from the SDK
+    private static final String APPROOV_TRACE_ID_HEADER = "Approov-TraceID";
+
     // default prefix to be added before the Approov token by default
     private static final String APPROOV_TOKEN_PREFIX = "";
 
@@ -85,6 +88,9 @@ public class ApproovService {
 
     // header to be used to send Approov tokens
     private static String approovTokenHeader = null;
+
+    // header used to send any Approov TraceID provided by the SDK
+    private static String approovTraceIDHeader = null;
 
     // any prefix String to be added before the transmitted Approov token
     private static String approovTokenPrefix = null;
@@ -136,6 +142,7 @@ public class ApproovService {
             okHttpBuilders.put(DEFAULT_BUILDER_NAME, new OkHttpClient.Builder());
             okHttpClients =  new HashMap<>();
             approovTokenHeader = APPROOV_TOKEN_HEADER;
+            approovTraceIDHeader = APPROOV_TRACE_ID_HEADER;
             approovTokenPrefix = APPROOV_TOKEN_PREFIX;
             bindingHeader = null;
             substitutionHeaders = new HashMap<>();
@@ -235,12 +242,32 @@ public class ApproovService {
     }
 
     /**
+     * Sets the header that any Approov TraceID is added on. By default the TraceID is provided on
+     * "Approov-TraceID". Passing null disables adding the TraceID header.
+     *
+     * @param header is the header to place the Approov TraceID on, or null to disable the header
+     */
+    public static synchronized void setApproovTraceIDHeader(String header) {
+        Log.d(TAG, "setApproovTraceIDHeader " + header);
+        approovTraceIDHeader = header;
+    }
+
+    /**
      * Gets the header that is used to add the Approov token.
      *
      * @return String of the header used for the Approov token
      */
     public static synchronized String getApproovTokenHeader() {
         return approovTokenHeader;
+    }
+
+    /**
+     * Gets the header that is used to add the Approov TraceID.
+     *
+     * @return String of the header used for the Approov TraceID, or null if disabled
+     */
+    public static synchronized String getApproovTraceIDHeader() {
+        return approovTraceIDHeader;
     }
 
     /**
@@ -542,7 +569,7 @@ public class ApproovService {
      * the returned token should NEVER be cached by your app, you should call this function when
      * it is needed.
      *
-     * @param url is the URL giving the domain for the token fetch
+     * @param url is the full URL (including path) for the token fetch
      * @return String of the fetched token
      * @throws ApproovException if there was a problem
      */
@@ -907,9 +934,9 @@ class ApproovTokenInterceptor implements Interceptor {
         if ((bindingHeader != null) && request.headers().names().contains(bindingHeader))
             Approov.setDataHashInToken(request.header(bindingHeader));
 
-        // request an Approov token for the domain
+        // request an Approov token for the request URL
         String host = request.url().host();
-        Approov.TokenFetchResult approovResults = Approov.fetchApproovTokenAndWait(host);
+        Approov.TokenFetchResult approovResults = Approov.fetchApproovTokenAndWait(url);
 
         // provide information about the obtained token or error (note "approov token -check" can
         // be used to check the validity of the token and if you use token annotations they
@@ -927,11 +954,19 @@ class ApproovTokenInterceptor implements Interceptor {
         boolean aChange = false;
         String setTokenHeaderKey = null;
         String setTokenHeaderValue = null;
+        String setTraceIDHeaderKey = null;
+        String setTraceIDHeaderValue = null;
         if (approovResults.getStatus() == Approov.TokenFetchStatus.SUCCESS) {
             // we successfully obtained a token so add it to the header for the request
             aChange = true;
             setTokenHeaderKey = ApproovService.getApproovTokenHeader();
             setTokenHeaderValue = ApproovService.getApproovTokenPrefix() + approovResults.getToken();
+            String traceIDHeader = ApproovService.getApproovTraceIDHeader();
+            String traceID = approovResults.getTraceID();
+            if ((traceIDHeader != null) && (traceID != null) && !traceID.isEmpty()) {
+                setTraceIDHeaderKey = traceIDHeader;
+                setTraceIDHeaderValue = traceID;
+            }
         } else if ((approovResults.getStatus() == Approov.TokenFetchStatus.NO_NETWORK) ||
                  (approovResults.getStatus() == Approov.TokenFetchStatus.POOR_NETWORK) ||
                  (approovResults.getStatus() == Approov.TokenFetchStatus.MITM_DETECTED)) {
@@ -1041,6 +1076,10 @@ class ApproovTokenInterceptor implements Interceptor {
             if (setTokenHeaderKey != null) {
                 builder.header(setTokenHeaderKey, setTokenHeaderValue);
                 changes.setTokenHeaderKey(setTokenHeaderKey);
+            }
+            if (setTraceIDHeaderKey != null) {
+                builder.header(setTraceIDHeaderKey, setTraceIDHeaderValue);
+                changes.setTraceIDHeaderKey(setTraceIDHeaderKey);
             }
             if (!setSubstitutionHeaders.isEmpty()) {
                 for (Map.Entry<String, String> entry : setSubstitutionHeaders.entrySet()) {

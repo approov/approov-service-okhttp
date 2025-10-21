@@ -25,6 +25,7 @@ import java.util.List;
  */
 public class ApproovRequestMutations {
     private String tokenHeaderKey;
+    private String traceIDHeaderKey;
     private List<String> substitutionHeaderKeys;
     private String originalURL;
     private List<String> substitutionQueryParamKeys;
@@ -45,6 +46,24 @@ public class ApproovRequestMutations {
      */
     public void setTokenHeaderKey(String tokenHeaderKey) {
         this.tokenHeaderKey = tokenHeaderKey;
+    }
+
+    /**
+     * Gets the header key used for the Approov TraceID.
+     *
+     * @return the Approov TraceID header key
+     */
+    public String getTraceIDHeaderKey() {
+        return traceIDHeaderKey;
+    }
+
+    /**
+     * Sets the header key used for the Approov TraceID.
+     *
+     * @param traceIDHeaderKey the Approov TraceID header key
+     */
+    public void setTraceIDHeaderKey(String traceIDHeaderKey) {
+        this.traceIDHeaderKey = traceIDHeaderKey;
     }
 
     /**
