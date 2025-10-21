@@ -214,10 +214,10 @@ public class ApproovService {
             Log.d(TAG, "setDevKey");
         }
         catch (IllegalStateException e) {
-            throw new ApproovException(ApproovErrorCodes.SDK_SET_DEV_KEY_ILLEGAL_STATE, "IllegalState: " + e.getMessage(), e);
+            throw new ApproovException("IllegalState: " + e.getMessage(), e);
         }
         catch (IllegalArgumentException e) {
-            throw new ApproovException(ApproovErrorCodes.SDK_SET_DEV_KEY_ILLEGAL_ARGUMENT, "IllegalArgument: " + e.getMessage(), e);
+            throw new ApproovException("IllegalArgument: " + e.getMessage(), e);
         }
     }
 
@@ -491,10 +491,10 @@ public class ApproovService {
             Log.d(TAG, "precheck: " + approovResults.getStatus().toString());
         }
         catch (IllegalStateException e) {
-            throw new ApproovException(ApproovErrorCodes.SDK_PRECHECK_ILLEGAL_STATE, "IllegalState: " + e.getMessage(), e);
+            throw new ApproovException("IllegalState: " + e.getMessage(), e);
         }
         catch (IllegalArgumentException e) {
-            throw new ApproovException(ApproovErrorCodes.SDK_PRECHECK_ILLEGAL_ARGUMENT, "IllegalArgument: " + e.getMessage(), e);
+            throw new ApproovException("IllegalArgument: " + e.getMessage(), e);
         }
 
         // process the returned Approov status using decision maker
@@ -516,7 +516,7 @@ public class ApproovService {
             return deviceID;
         }
         catch (IllegalStateException e) {
-            throw new ApproovException(ApproovErrorCodes.SDK_GET_DEVICE_ID_ILLEGAL_STATE, "IllegalState: " + e.getMessage(), e);
+            throw new ApproovException("IllegalState: " + e.getMessage(), e);
         }
     }
 
@@ -536,10 +536,10 @@ public class ApproovService {
             Log.d(TAG, "setDataHashInToken");
         }
         catch (IllegalStateException e) {
-            throw new ApproovException(ApproovErrorCodes.SDK_SET_DATA_HASH_ILLEGAL_STATE, "IllegalState: " + e.getMessage());
+            throw new ApproovException("IllegalState: " + e.getMessage());
         }
         catch (IllegalArgumentException e) {
-            throw new ApproovException(ApproovErrorCodes.SDK_SET_DATA_HASH_ILLEGAL_ARGUMENT, "IllegalArgument: " + e.getMessage());
+            throw new ApproovException("IllegalArgument: " + e.getMessage());
         }
     }
 
@@ -564,10 +564,10 @@ public class ApproovService {
             Log.d(TAG, "fetchToken: " + approovResults.getStatus().toString());
         }
         catch (IllegalStateException e) {
-            throw new ApproovException(ApproovErrorCodes.SDK_FETCH_TOKEN_ILLEGAL_STATE, "IllegalState: " + e.getMessage());
+            throw new ApproovException("IllegalState: " + e.getMessage());
         }
         catch (IllegalArgumentException e) {
-            throw new ApproovException(ApproovErrorCodes.SDK_FETCH_TOKEN_ILLEGAL_ARGUMENT, "IllegalArgument: " + e.getMessage());
+            throw new ApproovException("IllegalArgument: " + e.getMessage());
         }
 
         // process the status using decision maker
@@ -613,14 +613,14 @@ public class ApproovService {
             String signature = Approov.getAccountMessageSignature(message);
             Log.d(TAG, "getAccountMessageSignature");
             if (signature == null)
-                throw new ApproovException(ApproovErrorCodes.ACCOUNT_SIGNATURE_UNAVAILABLE, "no account signature available");
+                throw new ApproovException("no account signature available");
             return signature;
         }
         catch (IllegalStateException e) {
-            throw new ApproovException(ApproovErrorCodes.SDK_GET_ACCOUNT_SIGNATURE_ILLEGAL_STATE, "IllegalState: " + e.getMessage());
+            throw new ApproovException("IllegalState: " + e.getMessage());
         }
         catch (IllegalArgumentException e) {
-            throw new ApproovException(ApproovErrorCodes.SDK_GET_ACCOUNT_SIGNATURE_ILLEGAL_ARGUMENT, "IllegalArgument: " + e.getMessage());
+            throw new ApproovException("IllegalArgument: " + e.getMessage());
         }
     }
 
@@ -646,14 +646,14 @@ public class ApproovService {
             String signature = Approov.getInstallMessageSignature(message);
             Log.d(TAG, "getInstallMessageSignature");
             if (signature == null)
-                throw new ApproovException(ApproovErrorCodes.INSTALL_SIGNATURE_UNAVAILABLE, "no device signature available");
+                throw new ApproovException("no device signature available");
             return signature;
         }
         catch (IllegalStateException e) {
-            throw new ApproovException(ApproovErrorCodes.SDK_GET_INSTALL_SIGNATURE_ILLEGAL_STATE, "IllegalState: " + e.getMessage());
+            throw new ApproovException("IllegalState: " + e.getMessage());
         }
         catch (IllegalArgumentException e) {
-            throw new ApproovException(ApproovErrorCodes.SDK_GET_INSTALL_SIGNATURE_ILLEGAL_ARGUMENT, "IllegalArgument: " + e.getMessage());
+            throw new ApproovException("IllegalArgument: " + e.getMessage());
         }
     }
 
@@ -688,10 +688,10 @@ public class ApproovService {
             Log.d(TAG, "fetchSecureString " + type + ": " + key + ", " + approovResults.getStatus().toString());
         }
         catch (IllegalStateException e) {
-            throw new ApproovException(ApproovErrorCodes.SDK_FETCH_SECURE_STRING_ILLEGAL_STATE, "IllegalState: " + e.getMessage());
+            throw new ApproovException("IllegalState: " + e.getMessage());
         }
         catch (IllegalArgumentException e) {
-            throw new ApproovException(ApproovErrorCodes.SDK_FETCH_SECURE_STRING_ILLEGAL_ARGUMENT, "IllegalArgument: " + e.getMessage());
+            throw new ApproovException("IllegalArgument: " + e.getMessage());
         }
 
         // process the returned Approov status using decision maker
@@ -718,10 +718,10 @@ public class ApproovService {
             Log.d(TAG, "fetchCustomJWT: " + approovResults.getStatus().toString());
         }
         catch (IllegalStateException e) {
-            throw new ApproovException(ApproovErrorCodes.SDK_FETCH_CUSTOM_JWT_ILLEGAL_STATE, "IllegalState: " + e.getMessage());
+            throw new ApproovException("IllegalState: " + e.getMessage());
         }
         catch (IllegalArgumentException e) {
-            throw new ApproovException(ApproovErrorCodes.SDK_FETCH_CUSTOM_JWT_ILLEGAL_ARGUMENT, "IllegalArgument: " + e.getMessage());
+            throw new ApproovException("IllegalArgument: " + e.getMessage());
         }
 
         // process the returned Approov status using decision maker
@@ -1094,8 +1094,7 @@ class ApproovPinningInterceptor implements Interceptor {
         Connection connection = chain.connection();
         Handshake handshake = (connection != null) ? connection.handshake() : null;
         if (handshake == null)
-            throw new ApproovNetworkException(ApproovErrorCodes.NETWORK_PINNING_NO_CONNECTION_INFO,
-                    "network interceptor has no connection information");
+            throw new ApproovNetworkException("network interceptor has no connection information");
         if (!isValidHandshake(handshake)) {
             // if we haven't seen this handshake and pins combination before then we
             // need to check it

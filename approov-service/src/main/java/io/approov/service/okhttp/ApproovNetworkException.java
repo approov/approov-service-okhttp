@@ -24,44 +24,9 @@ public class ApproovNetworkException extends ApproovException {
     /**
      * Constructs an Approov networking exception.
      *
-     * @param errorCode identifies the specific network failure scenario
      * @param message is the basic information about the exception cause
      */
-    public ApproovNetworkException(int errorCode, String message) {
-        super(errorCode, message);
-    }
-
-    /**
-     * Constructs an Approov networking exception while wrapping the cause.
-     *
-     * @param errorCode identifies the specific network failure scenario
-     * @param message is the basic information about the exception cause
-     * @param cause is the underlying cause of the exception
-     */
-    public ApproovNetworkException(int errorCode, String message, Throwable cause) {
-        super(errorCode, message, cause);
-    }
-
-    /**
-     * Constructs an Approov networking exception (legacy signature).
-     *
-     * @param message is the basic information about the exception cause
-     * @deprecated Use {@link #ApproovNetworkException(int, String)} instead to provide a structured error code.
-     */
-    @Deprecated
     public ApproovNetworkException(String message) {
-        this(ApproovErrorCodes.LEGACY_NETWORK_ERROR, message);
-    }
-
-    /**
-     * Constructs an Approov networking exception while wrapping the cause (legacy signature).
-     *
-     * @param message is the basic information about the exception cause
-     * @param cause is the underlying cause of the exception
-     * @deprecated Use {@link #ApproovNetworkException(int, String, Throwable)} instead to provide a structured error code.
-     */
-    @Deprecated
-    public ApproovNetworkException(String message, Throwable cause) {
-        this(ApproovErrorCodes.LEGACY_NETWORK_ERROR, message, cause);
+        super(message);
     }
 }
