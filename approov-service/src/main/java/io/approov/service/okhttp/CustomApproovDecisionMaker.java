@@ -47,12 +47,12 @@ public class CustomApproovDecisionMaker implements ApproovInterceptorExtensions 
                 Log.w(TAG, "Network issue during precheck: " + status.toString());
                 break;
             case MITM_DETECTED:
-                throw new ApproovNetworkException("precheck: " + status.toString());
+                throw new ApproovNetworkException(status, "precheck: " + status.toString());
             case SUCCESS:
             case UNKNOWN_KEY:
                 break;
             default:
-                throw new ApproovException("precheck:" + status.toString());
+                throw new ApproovException(status, "precheck:" + status.toString());
         }
     }
 
@@ -69,14 +69,14 @@ public class CustomApproovDecisionMaker implements ApproovInterceptorExtensions 
                 return false;
             case MITM_DETECTED:
                 if (!ApproovService.getProceedOnNetworkFail())
-                    throw new ApproovNetworkException("Approov token fetch for " + url + ": " + status.toString());
+                    throw new ApproovNetworkException(status, "Approov token fetch for " + url + ": " + status.toString());
                 return false;
             case NO_APPROOV_SERVICE:
             case UNKNOWN_URL:
             case UNPROTECTED_URL:
                 return false;
             default:
-                throw new ApproovException("Approov token fetch for " + url + ": " + status.toString());
+                throw new ApproovException(status, "Approov token fetch for " + url + ": " + status.toString());
         }
     }
 }

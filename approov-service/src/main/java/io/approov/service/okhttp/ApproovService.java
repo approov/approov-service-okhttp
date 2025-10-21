@@ -214,10 +214,10 @@ public class ApproovService {
             Log.d(TAG, "setDevKey");
         }
         catch (IllegalStateException e) {
-            throw new ApproovException("IllegalState: " + e.getMessage(), e);
+            throw new ApproovException(ApproovException.ERROR_ILLEGAL_STATE, "IllegalState: " + e.getMessage(), e);
         }
         catch (IllegalArgumentException e) {
-            throw new ApproovException("IllegalArgument: " + e.getMessage(), e);
+            throw new ApproovException(ApproovException.ERROR_ILLEGAL_ARGUMENT, "IllegalArgument: " + e.getMessage(), e);
         }
     }
 
@@ -491,10 +491,10 @@ public class ApproovService {
             Log.d(TAG, "precheck: " + approovResults.getStatus().toString());
         }
         catch (IllegalStateException e) {
-            throw new ApproovException("IllegalState: " + e.getMessage(), e);
+            throw new ApproovException(ApproovException.ERROR_ILLEGAL_STATE, "IllegalState: " + e.getMessage(), e);
         }
         catch (IllegalArgumentException e) {
-            throw new ApproovException("IllegalArgument: " + e.getMessage(), e);
+            throw new ApproovException(ApproovException.ERROR_ILLEGAL_ARGUMENT, "IllegalArgument: " + e.getMessage(), e);
         }
 
         // process the returned Approov status using decision maker
@@ -516,7 +516,7 @@ public class ApproovService {
             return deviceID;
         }
         catch (IllegalStateException e) {
-            throw new ApproovException("IllegalState: " + e.getMessage(), e);
+            throw new ApproovException(ApproovException.ERROR_ILLEGAL_STATE, "IllegalState: " + e.getMessage(), e);
         }
     }
 
@@ -536,10 +536,10 @@ public class ApproovService {
             Log.d(TAG, "setDataHashInToken");
         }
         catch (IllegalStateException e) {
-            throw new ApproovException("IllegalState: " + e.getMessage());
+            throw new ApproovException(ApproovException.ERROR_ILLEGAL_STATE, "IllegalState: " + e.getMessage(), e);
         }
         catch (IllegalArgumentException e) {
-            throw new ApproovException("IllegalArgument: " + e.getMessage());
+            throw new ApproovException(ApproovException.ERROR_ILLEGAL_ARGUMENT, "IllegalArgument: " + e.getMessage(), e);
         }
     }
 
@@ -564,10 +564,12 @@ public class ApproovService {
             Log.d(TAG, "fetchToken: " + approovResults.getStatus().toString());
         }
         catch (IllegalStateException e) {
-            throw new ApproovException("IllegalState: " + e.getMessage());
+        catch (IllegalStateException e) {
+            throw new ApproovException(ApproovException.ERROR_ILLEGAL_STATE, "IllegalState: " + e.getMessage(), e);
         }
         catch (IllegalArgumentException e) {
-            throw new ApproovException("IllegalArgument: " + e.getMessage());
+            throw new ApproovException(ApproovException.ERROR_ILLEGAL_ARGUMENT, "IllegalArgument: " + e.getMessage(), e);
+        }
         }
 
         // process the status using decision maker
@@ -613,14 +615,14 @@ public class ApproovService {
             String signature = Approov.getAccountMessageSignature(message);
             Log.d(TAG, "getAccountMessageSignature");
             if (signature == null)
-                throw new ApproovException("no account signature available");
+                throw new ApproovException(ApproovException.ERROR_MISSING_VALUE, "no account signature available");
             return signature;
         }
         catch (IllegalStateException e) {
-            throw new ApproovException("IllegalState: " + e.getMessage());
+            throw new ApproovException(ApproovException.ERROR_ILLEGAL_STATE, "IllegalState: " + e.getMessage(), e);
         }
         catch (IllegalArgumentException e) {
-            throw new ApproovException("IllegalArgument: " + e.getMessage());
+            throw new ApproovException(ApproovException.ERROR_ILLEGAL_ARGUMENT, "IllegalArgument: " + e.getMessage(), e);
         }
     }
 
@@ -646,14 +648,14 @@ public class ApproovService {
             String signature = Approov.getInstallMessageSignature(message);
             Log.d(TAG, "getInstallMessageSignature");
             if (signature == null)
-                throw new ApproovException("no device signature available");
+                throw new ApproovException(ApproovException.ERROR_MISSING_VALUE,"no device signature available");
             return signature;
         }
         catch (IllegalStateException e) {
-            throw new ApproovException("IllegalState: " + e.getMessage());
+            throw new ApproovException(ApproovException.ERROR_ILLEGAL_STATE, "IllegalState: " + e.getMessage(), e);
         }
         catch (IllegalArgumentException e) {
-            throw new ApproovException("IllegalArgument: " + e.getMessage());
+            throw new ApproovException(ApproovException.ERROR_ILLEGAL_ARGUMENT, "IllegalArgument: " + e.getMessage(), e);
         }
     }
 

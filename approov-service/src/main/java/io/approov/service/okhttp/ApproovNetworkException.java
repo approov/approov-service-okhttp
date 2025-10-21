@@ -17,6 +17,8 @@
 
 package io.approov.service.okhttp;
 
+import com.criticalblue.approovsdk.Approov;
+
 // ApproovNetworkException indicates an exception caused by networking conditions which is likely to be
 // temporary so a user initiated retry should be performed
 public class ApproovNetworkException extends ApproovException {
@@ -27,6 +29,26 @@ public class ApproovNetworkException extends ApproovException {
      * @param message is the basic information about the exception cause
      */
     public ApproovNetworkException(String message) {
-        super(message);
+        super(ApproovException.ERROR_TOKEN_FETCH_UNKNOWN_FAILURE, message);
+    }
+
+    /**
+     * Constructs an Approov networking exception with a specific token fetch status.
+     *
+     * @param status provides the token fetch status that triggered the error
+     * @param message is the basic information about the exception cause
+     */
+    public ApproovNetworkException(Approov.TokenFetchStatus status, String message) {
+        super(ApproovException.mapTokenFetchStatus(status), message);
+    }
+
+    /**
+     * Constructs an Approov networking exception with a specific error code.
+     *
+     * @param errorCode provides a machine readable reason for the failure
+     * @param message is the basic information about the exception cause
+     */
+    public ApproovNetworkException(int errorCode, String message) {
+        super(errorCode, message);
     }
 }

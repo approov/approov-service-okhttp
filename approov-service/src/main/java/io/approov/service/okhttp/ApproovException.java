@@ -17,18 +17,47 @@
 
 package io.approov.service.okhttp;
 
+import com.criticalblue.approovsdk.Approov;
 import java.io.IOException;
 
 // ApproovException is thrown if there is an error from Approov.
 public class ApproovException extends IOException {
 
+// =====================
+// Approov Error Codes
+// =====================
+
+// General errors (0–99)
+public static final int ERROR_UNKNOWN = 0;
+public static final int ERROR_ILLEGAL_STATE = 1;
+public static final int ERROR_ILLEGAL_ARGUMENT = 2;
+public static final int ERROR_MISSING_VALUE = 3;
+public static final int ERROR_NULL_REQUEST = 4;
+public static final int ERROR_NETWORK_NO_CONNECTION_INFO = 5;
+public static final int ERROR_LEGACY = 6;
+
+// Token fetch errors (100–199)
+public static final int ERROR_TOKEN_FETCH_FAILED = 100;
+public static final int ERROR_TOKEN_FETCH_REJECTED = 101;
+public static final int ERROR_TOKEN_FETCH_NO_NETWORK = 102;
+public static final int ERROR_TOKEN_FETCH_POOR_NETWORK = 103;
+public static final int ERROR_TOKEN_FETCH_MITM_DETECTED = 104;
+public static final int ERROR_TOKEN_FETCH_NO_SERVICE = 105;
+public static final int ERROR_TOKEN_FETCH_UNKNOWN_URL = 106;
+public static final int ERROR_TOKEN_FETCH_UNPROTECTED_URL = 107;
+public static final int ERROR_TOKEN_FETCH_TIMEOUT = 108;
+public static final int ERROR_TOKEN_FETCH_UNKNOWN_FAILURE = 199;
+// ==========================================
+
+private final int errorCode;
     /**
      * Constructs an exception due to an Approov error.
      *
      * @param message is the basic information about the exception cause
+     * @Depriciated use ApproovException(int errorCode, String message) instead.
      */
     public ApproovException(String message) {
-        super(message);
+        this(ERROR_LEGACY, message);
     }
 
     /**
@@ -36,9 +65,93 @@ public class ApproovException extends IOException {
      *
      * @param message is the basic information about the exception cause
      * @param cause is the underlying cause of the exception
+     * @Depriciated use ApproovException(int errorCode, String message, Throwable cause) instead.
      */
     public ApproovException(String message, Throwable cause) {
+        this(ERROR_LEGACY, message, cause);
+    }
+
+    /**
+     * Constructs an exception with a specific error code and message.
+     *
+     * @param errorCode provides a machine readable reason for the failure
+     * @param message is the basic information about the exception cause
+     */
+    public ApproovException(int errorCode, String message) {
+        this(errorCode, message, null);
+    }
+
+    /**
+     * Constructs an exception with an error code and cause.
+     *
+     * @param errorCode provides a machine readable reason for the failure
+     * @param message is the basic information about the exception cause
+     * @param cause is the underlying cause of the exception
+     */
+    public ApproovException(int errorCode, String message, Throwable cause) {
         super(message, cause);
+        this.errorCode = errorCode;
+    }
+
+    /**
+     * Constructs an exception with a TokenFetchStatus and message.
+     *
+     * @param status TokenFetchStatus that triggered the error
+     * @param message is the basic information about the exception cause
+     * */
+    public ApproovException(Approov.TokenFetchStatus status, String message) {
+        super(message, null);
+        this.errorCode = mapTokenFetchStatus(status);
+    }
+    /**
+     * Constructs an exception with TokenFetchStatus, message and Throwable cause .
+     *
+     * @param status TokenFetchStatus that triggered the error
+     * @param message is the basic information about the exception cause
+     * @param cause is the underlying cause of the exception
+     */
+    public ApproovException(Approov.TokenFetchStatus status, String message, Throwable cause) {
+        super(message, cause);
+        this.errorCode = mapTokenFetchStatus(status);
+    }
+
+    /**
+     * Gets the error code associated with the exception.
+     *
+     * @return integer error code
+     */
+    public int getErrorCode() {
+        return errorCode;
+    }
+
+    /**
+     * Maps a token fetch status to a well known error code.
+     *
+     * @param status the token fetch status
+     * @return matching error code
+     */
+    public static int mapTokenFetchStatus(Approov.TokenFetchStatus status) {
+        if (status == null) {
+            return ERROR_UNKNOWN;
+        }
+        switch (status) {
+            case REJECTED:
+                return ERROR_TOKEN_FETCH_REJECTED;
+            case NO_NETWORK:
+                return ERROR_TOKEN_FETCH_NO_NETWORK;
+            case POOR_NETWORK:
+                return ERROR_TOKEN_FETCH_POOR_NETWORK;
+            case MITM_DETECTED:
+                return ERROR_TOKEN_FETCH_MITM_DETECTED;
+            case NO_APPROOV_SERVICE:
+                return ERROR_TOKEN_FETCH_NO_SERVICE;
+            case UNKNOWN_URL:
+                return ERROR_TOKEN_FETCH_UNKNOWN_URL;
+            case UNPROTECTED_URL:
+                return ERROR_TOKEN_FETCH_UNPROTECTED_URL;
+            default:
+                return ERROR_TOKEN_FETCH_UNKNOWN_FAILURE;
+        }
     }
 
 }

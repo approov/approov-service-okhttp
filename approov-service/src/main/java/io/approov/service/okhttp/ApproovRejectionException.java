@@ -17,6 +17,8 @@
 
 package io.approov.service.okhttp;
 
+import com.criticalblue.approovsdk.Approov;
+
 // ApproovRejectionException provides additional information if the app has been rejected by Approov
 public class ApproovRejectionException extends ApproovException {
     // provides a code of the app state for support purposes
@@ -33,7 +35,7 @@ public class ApproovRejectionException extends ApproovException {
      * @param rejectionReasons may provide a comma separated list of rejection reasons
      */
     public ApproovRejectionException(String message, String arc, String rejectionReasons) {
-        super(message);
+        super(ApproovException.ERROR_TOKEN_FETCH_REJECTED, message);
         this.arc = arc;
         this.rejectionReasons = rejectionReasons;
     }
