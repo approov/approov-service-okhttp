@@ -29,7 +29,7 @@ public class ApproovNetworkException extends ApproovException {
      * @param message is the basic information about the exception cause
      */
     public ApproovNetworkException(String message) {
-        super(ApproovException.ERROR_TOKEN_FETCH_UNKNOWN_FAILURE, message);
+        super(ApproovException.ERROR_UNKNOWN, message);
     }
 
     /**
@@ -39,7 +39,7 @@ public class ApproovNetworkException extends ApproovException {
      * @param message is the basic information about the exception cause
      */
     public ApproovNetworkException(Approov.TokenFetchStatus status, String message) {
-        super(ApproovException.mapTokenFetchStatus(status), message);
+        super(status, message);
     }
 
     /**

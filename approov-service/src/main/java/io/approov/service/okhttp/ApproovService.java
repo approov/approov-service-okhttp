@@ -564,12 +564,10 @@ public class ApproovService {
             Log.d(TAG, "fetchToken: " + approovResults.getStatus().toString());
         }
         catch (IllegalStateException e) {
-        catch (IllegalStateException e) {
             throw new ApproovException(ApproovException.ERROR_ILLEGAL_STATE, "IllegalState: " + e.getMessage(), e);
         }
         catch (IllegalArgumentException e) {
             throw new ApproovException(ApproovException.ERROR_ILLEGAL_ARGUMENT, "IllegalArgument: " + e.getMessage(), e);
-        }
         }
 
         // process the status using decision maker
