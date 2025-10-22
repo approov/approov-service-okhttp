@@ -934,9 +934,9 @@ class ApproovTokenInterceptor implements Interceptor {
         if ((bindingHeader != null) && request.headers().names().contains(bindingHeader))
             Approov.setDataHashInToken(request.header(bindingHeader));
 
-        // request an Approov token for the request host
+        // request an Approov token for the request URL
         String host = request.url().host();
-        Approov.TokenFetchResult approovResults = Approov.fetchApproovTokenAndWait(host);
+        Approov.TokenFetchResult approovResults = Approov.fetchApproovTokenAndWait(url);
 
         // provide information about the obtained token or error (note "approov token -check" can
         // be used to check the validity of the token and if you use token annotations they
