@@ -27,6 +27,8 @@ public class ApproovException extends IOException {
 // Approov Error Codes
 // =====================
 
+// Reserved range for error codes up to 9999
+// ==========================================
 // General errors (0–99)
 public static final int ERROR_UNKNOWN = 0;
 public static final int ERROR_ILLEGAL_STATE = 1;
@@ -37,15 +39,20 @@ public static final int ERROR_NETWORK_NO_CONNECTION_INFO = 5;
 public static final int ERROR_LEGACY = 6;
 
 // Token fetch errors (100–199)
-public static final int ERROR_TOKEN_FETCH_FAILED = 100;
-public static final int ERROR_TOKEN_FETCH_REJECTED = 101;
-public static final int ERROR_TOKEN_FETCH_NO_NETWORK = 102;
+public static final int ERROR_TOKEN_FETCH_SUCCESS = 100; // added for completeness
+public static final int ERROR_TOKEN_FETCH_NO_NETWORK = 101;
+public static final int ERROR_TOKEN_FETCH_MITM_DETECTED = 102;
 public static final int ERROR_TOKEN_FETCH_POOR_NETWORK = 103;
-public static final int ERROR_TOKEN_FETCH_MITM_DETECTED = 104;
-public static final int ERROR_TOKEN_FETCH_NO_SERVICE = 105;
+public static final int ERROR_TOKEN_FETCH_NO_APPROOV_SERVICE = 104;
+public static final int ERROR_TOKEN_FETCH_BAD_URL = 105;
 public static final int ERROR_TOKEN_FETCH_UNKNOWN_URL = 106;
 public static final int ERROR_TOKEN_FETCH_UNPROTECTED_URL = 107;
-public static final int ERROR_TOKEN_FETCH_TIMEOUT = 108;
+public static final int ERROR_TOKEN_FETCH_NO_NETWORK_PERMISSION = 108;
+public static final int ERROR_TOKEN_FETCH_MISSING_LIB_DEPENDENCY = 109;
+public static final int ERROR_TOKEN_FETCH_INTERNAL_ERROR = 110;
+public static final int ERROR_TOKEN_FETCH_REJECTED = 111;
+public static final int ERROR_TOKEN_FETCH_DISABLED = 112;
+public static final int ERROR_TOKEN_FETCH_UNKNOWN_KEY = 113;
 public static final int ERROR_TOKEN_FETCH_UNKNOWN_FAILURE = 199;
 // ==========================================
 
@@ -57,18 +64,7 @@ private final int errorCode;
      * @Depriciated use ApproovException(int errorCode, String message) instead.
      */
     public ApproovException(String message) {
-        this(ERROR_LEGACY, message);
-    }
-
-    /**
-     * Constructs an exception due to an Approov error while wrapping the cause
-     *
-     * @param message is the basic information about the exception cause
-     * @param cause is the underlying cause of the exception
-     * @Depriciated use ApproovException(int errorCode, String message, Throwable cause) instead.
-     */
-    public ApproovException(String message, Throwable cause) {
-        this(ERROR_LEGACY, message, cause);
+        this(ERROR_UNKNOWN, message);
     }
 
     /**
@@ -103,17 +99,6 @@ private final int errorCode;
         super(message, null);
         this.errorCode = mapTokenFetchStatus(status);
     }
-    /**
-     * Constructs an exception with TokenFetchStatus, message and Throwable cause .
-     *
-     * @param status TokenFetchStatus that triggered the error
-     * @param message is the basic information about the exception cause
-     * @param cause is the underlying cause of the exception
-     */
-    public ApproovException(Approov.TokenFetchStatus status, String message, Throwable cause) {
-        super(message, cause);
-        this.errorCode = mapTokenFetchStatus(status);
-    }
 
     /**
      * Gets the error code associated with the exception.
@@ -135,20 +120,34 @@ private final int errorCode;
             return ERROR_UNKNOWN;
         }
         switch (status) {
-            case REJECTED:
-                return ERROR_TOKEN_FETCH_REJECTED;
+            case SUCCESS:
+                return ERROR_TOKEN_FETCH_SUCCESS;
             case NO_NETWORK:
                 return ERROR_TOKEN_FETCH_NO_NETWORK;
-            case POOR_NETWORK:
-                return ERROR_TOKEN_FETCH_POOR_NETWORK;
             case MITM_DETECTED:
                 return ERROR_TOKEN_FETCH_MITM_DETECTED;
+            case POOR_NETWORK:
+                return ERROR_TOKEN_FETCH_POOR_NETWORK;
             case NO_APPROOV_SERVICE:
-                return ERROR_TOKEN_FETCH_NO_SERVICE;
+                return ERROR_TOKEN_FETCH_NO_APPROOV_SERVICE;
+            case BAD_URL:
+                return ERROR_TOKEN_FETCH_BAD_URL;
             case UNKNOWN_URL:
                 return ERROR_TOKEN_FETCH_UNKNOWN_URL;
             case UNPROTECTED_URL:
                 return ERROR_TOKEN_FETCH_UNPROTECTED_URL;
+            case NO_NETWORK_PERMISSION:
+                return ERROR_TOKEN_FETCH_NO_NETWORK_PERMISSION;
+            case MISSING_LIB_DEPENDENCY:
+                return ERROR_TOKEN_FETCH_MISSING_LIB_DEPENDENCY;
+            case INTERNAL_ERROR:
+                return ERROR_TOKEN_FETCH_INTERNAL_ERROR;
+            case REJECTED:
+                return ERROR_TOKEN_FETCH_REJECTED;
+            case DISABLED:
+                return ERROR_TOKEN_FETCH_DISABLED;
+            case UNKNOWN_KEY:
+                return ERROR_TOKEN_FETCH_UNKNOWN_KEY;
             default:
                 return ERROR_TOKEN_FETCH_UNKNOWN_FAILURE;
         }
