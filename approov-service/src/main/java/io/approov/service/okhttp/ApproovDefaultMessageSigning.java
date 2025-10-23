@@ -299,6 +299,7 @@ public class ApproovDefaultMessageSigning implements ApproovInterceptorExtension
                 .setAddCreated(true)
                 .setExpiresLifetime(defaultExpiresLifetime)
                 .setAddApproovTokenHeader(true)
+                .setAddApproovTraceIDHeader(true)
                 .addOptionalHeaders("Authorization", "Content-Length", "Content-Type")
                 .setBodyDigestConfig(DIGEST_SHA256, false)
                 ;
@@ -318,6 +319,7 @@ public class ApproovDefaultMessageSigning implements ApproovInterceptorExtension
         protected boolean addCreated;
         protected long expiresLifetime;
         protected boolean addApproovTokenHeader;
+        protected boolean addApproovTraceIDHeader;
         protected List<String> optionalHeaders;
 
         /**
@@ -404,6 +406,18 @@ public class ApproovDefaultMessageSigning implements ApproovInterceptorExtension
          */
         public SignatureParametersFactory setAddApproovTokenHeader(boolean addApproovTokenHeader) {
             this.addApproovTokenHeader = addApproovTokenHeader;
+            return this;
+        }
+
+        /**
+         * Sets whether the optional Approov traceID header should be added to the signature
+         * parameters.
+         *
+         * @param addApproovTraceIDHeader Whether to add the Approov traceID header.
+         * @return The current instance for method chaining.
+         */
+        public SignatureParametersFactory setAddApproovTraceIDHeader(boolean addApproovTraceIDHeader) {
+            this.addApproovTraceIDHeader = addApproovTraceIDHeader;
             return this;
         }
 
@@ -510,6 +524,9 @@ public class ApproovDefaultMessageSigning implements ApproovInterceptorExtension
             }
             if (addApproovTokenHeader) {
                 requestParameters.addComponentIdentifier(changes.getTokenHeaderKey());
+            }
+            if (addApproovTraceIDHeader && changes.getTraceIDHeaderKey() != null) {
+                requestParameters.addComponentIdentifier(changes.getTraceIDHeaderKey());
             }
             for (String headerName: optionalHeaders) {
                 if (provider.hasField(headerName)) {
