@@ -58,7 +58,7 @@ public class ApproovService {
     // default header that will be added to Approov enabled requests
     private static final String APPROOV_TOKEN_HEADER = "Approov-Token";
 
-    // default header that will carry any Approov TraceID value from the SDK
+    // default header that will carry any optional Approov TraceID debug value from the SDK
     private static final String APPROOV_TRACE_ID_HEADER = "Approov-TraceID";
 
     // default prefix to be added before the Approov token by default
@@ -89,7 +89,7 @@ public class ApproovService {
     // header to be used to send Approov tokens
     private static String approovTokenHeader = null;
 
-    // header used to send any Approov TraceID provided by the SDK
+    // header used to send any optional Approov TraceID debug value provided by the SDK
     private static String approovTraceIDHeader = null;
 
     // any prefix String to be added before the transmitted Approov token
@@ -242,10 +242,12 @@ public class ApproovService {
     }
 
     /**
-     * Sets the header that any Approov TraceID is added on. By default the TraceID is provided on
-     * "Approov-TraceID". Passing null disables adding the TraceID header.
+     * Sets the header name that is used to pass any optional Approov TraceID debug
+     * value. By default the TraceID is provided on "Approov-TraceID" if one is
+     * available. Passing null disables adding the TraceID header.
      *
-     * @param header is the header to place the Approov TraceID on, or null to disable the header
+     * @param header is the name of the header on which to place the Approov
+     *               TraceID, or null to disable the header
      */
     public static synchronized void setApproovTraceIDHeader(String header) {
         Log.d(TAG, "setApproovTraceIDHeader " + header);
@@ -262,9 +264,11 @@ public class ApproovService {
     }
 
     /**
-     * Gets the header that is used to add the Approov TraceID.
+     * Gets the name of the header that is used to hold the optional Approov
+     * TraceID.
      *
-     * @return String of the header used for the Approov TraceID, or null if disabled
+     * @return String the name of the header used for the Approov TraceID, or
+     *         null if disabled
      */
     public static synchronized String getApproovTraceIDHeader() {
         return approovTraceIDHeader;

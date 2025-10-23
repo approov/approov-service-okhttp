@@ -49,16 +49,17 @@ public class ApproovRequestMutations {
     }
 
     /**
-     * Gets the header key used for the Approov TraceID.
+     * Gets the header key used for the optional Approov TraceID debug header.
      *
-     * @return the Approov TraceID header key
+     * @return the Approov TraceID header key. Null if the TraceID header was
+     *         not used.
      */
     public String getTraceIDHeaderKey() {
         return traceIDHeaderKey;
     }
 
     /**
-     * Sets the header key used for the Approov TraceID.
+     * Sets the header key used for the optional Approov TraceID debug header.
      *
      * @param traceIDHeaderKey the Approov TraceID header key
      */
