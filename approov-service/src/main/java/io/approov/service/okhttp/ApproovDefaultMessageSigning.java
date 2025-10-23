@@ -184,7 +184,8 @@ public class ApproovDefaultMessageSigning implements ApproovServiceMutator {
      *
      *             Currently the method is implemented to maintain backwards
      *             compatibility. A future release will move the implementation
-     *             to the ApproovServiceMutator class.
+     *             to the ApproovServiceMutator.handleInterceptorProcessedRequest
+     *             method.
      */
     @Deprecated
     public Request processedRequest(Request request, ApproovRequestMutations changes) throws ApproovException {
