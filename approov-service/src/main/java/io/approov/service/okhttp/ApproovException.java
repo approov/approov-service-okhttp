@@ -52,6 +52,6 @@ public class ApproovException extends IOException {
      * @param cause underlying cause of the exception
      */
     public ApproovException(Throwable cause) {
-        super(cause == null ? null : cause.getMessage(), cause);
+        super(cause);
     }
 }
