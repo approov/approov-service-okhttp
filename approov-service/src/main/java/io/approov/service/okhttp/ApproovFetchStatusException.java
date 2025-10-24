@@ -22,7 +22,7 @@ import com.criticalblue.approovsdk.Approov;
 /**
  * Exception raised when an Approov token fetch returns a status other than success.
  */
-public class TokenFetchStatusException extends ApproovException {
+public class ApproovFetchStatusException extends ApproovException {
 
     private final Approov.TokenFetchStatus tokenFetchStatus;
 
@@ -32,7 +32,7 @@ public class TokenFetchStatusException extends ApproovException {
      * @param status status returned by the Approov SDK, may be {@code null} if unavailable
      * @param message information describing the exception cause
      */
-    public TokenFetchStatusException(Approov.TokenFetchStatus status, String message) {
+    public ApproovFetchStatusException(Approov.TokenFetchStatus status, String message) {
         super(message);
         this.tokenFetchStatus = status;
     }

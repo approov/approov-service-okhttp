@@ -20,11 +20,11 @@ package io.approov.service.okhttp;
 import com.criticalblue.approovsdk.Approov;
 
 /**
- * @deprecated Use {@link TokenFetchStatusException} instead. This subtype is retained only to avoid
+ * @deprecated Use {@link ApproovFetchStatusException} instead. This subtype is retained only to avoid
  *             breaking existing call sites; migrate any explicit catches to the base exception.
  */
 @Deprecated
-public class ApproovNetworkException extends TokenFetchStatusException {
+public class ApproovNetworkException extends ApproovFetchStatusException {
 
     /**
      * Constructs an Approov networking exception.
@@ -44,5 +44,4 @@ public class ApproovNetworkException extends TokenFetchStatusException {
     public ApproovNetworkException(Approov.TokenFetchStatus status, String message) {
         super(status, message);
     }
-
 }

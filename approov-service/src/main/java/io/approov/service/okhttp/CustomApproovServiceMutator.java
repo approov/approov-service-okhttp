@@ -22,19 +22,22 @@ import com.criticalblue.approovsdk.Approov;
 import okhttp3.Request;
 
 /**
- * Example custom decision maker that demonstrates how to override default TokenFetchStatus handling behavior.
- * This example shows more lenient handling of network issues in certain scenarios.
+ * Example custom ApproovServiceMutator that demonstrates how to override default TokenFetchStatus handling behavior.
+ * This example implements a more lenient handling of network issues in certain scenarios.
  */
-public class CustomApproovDecisionMaker implements ApproovInterceptorExtensions {
-    private static final String TAG = "CustomApproovDecisionMaker";
+public class CustomApproovServiceMutator implements ApproovServiceMutator {
+    private static final String TAG = "CustomApproovServiceMutator";
 
     @Override
-    public Request processedRequest(Request request, ApproovRequestMutations changes) throws ApproovException {
-        return request;
+    public String toString() {
+        return TAG;
     }
 
+    /**
+     * Custom implementation that ignores network issues during precheck by logging
+     * a warning instead of throwing an exception.
+     */
     @Override
-    @SuppressWarnings("deprecation")
     public void handlePrecheckResult(Approov.TokenFetchResult approovResults) throws ApproovException {
         Approov.TokenFetchStatus status = approovResults.getStatus();
         String arc = approovResults.getARC();
@@ -48,17 +51,20 @@ public class CustomApproovDecisionMaker implements ApproovInterceptorExtensions 
                 Log.w(TAG, "Network issue during precheck: " + status.toString());
                 break;
             case MITM_DETECTED:
-                throw new TokenFetchStatusException(status, "precheck: " + status.toString());
+                throw new ApproovFetchStatusException(status, "precheck: " + status.toString());
             case SUCCESS:
             case UNKNOWN_KEY:
                 break;
             default:
-                throw new TokenFetchStatusException(status, "precheck:" + status.toString());
+                throw new ApproovFetchStatusException(status, "precheck:" + status.toString());
         }
     }
 
+    /**
+     * Custom implementation that ignores network issues during interceptor token fetches by logging
+     * a warning and proceeding without an Approov token.
+     */
     @Override
-    @SuppressWarnings("deprecation")
     public boolean handleInterceptorFetchTokenResult(Approov.TokenFetchResult approovResults, String url) throws ApproovException {
         Approov.TokenFetchStatus status = approovResults.getStatus();
         switch (status) {
@@ -71,14 +77,14 @@ public class CustomApproovDecisionMaker implements ApproovInterceptorExtensions 
                 return false;
             case MITM_DETECTED:
                 if (!ApproovService.getProceedOnNetworkFail())
-                    throw new TokenFetchStatusException(status, "Approov token fetch for " + url + ": " + status.toString());
+                    throw new ApproovFetchStatusException(status, "Approov token fetch for " + url + ": " + status.toString());
                 return false;
             case NO_APPROOV_SERVICE:
             case UNKNOWN_URL:
             case UNPROTECTED_URL:
                 return false;
             default:
-                throw new TokenFetchStatusException(status, "Approov token fetch for " + url + ": " + status.toString());
+                throw new ApproovFetchStatusException(status, "Approov token fetch for " + url + ": " + status.toString());
         }
     }
 }

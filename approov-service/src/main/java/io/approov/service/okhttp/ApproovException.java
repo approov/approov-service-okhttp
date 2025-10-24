@@ -22,7 +22,7 @@ import java.io.IOException;
 /**
  * Base exception indicating an error while using the Approov SDK.
  * <p>
- * For token fetch failures prefer using {@link TokenFetchStatusException}, which preserves the
+ * For token fetch failures prefer using {@link ApproovFetchStatusException}, which preserves the
  * {@link com.criticalblue.approovsdk.Approov.TokenFetchStatus} reported by the SDK.
  */
 public class ApproovException extends IOException {
@@ -52,6 +52,6 @@ public class ApproovException extends IOException {
      * @param cause underlying cause of the exception
      */
     public ApproovException(Throwable cause) {
-        super(cause);
+        super("Wrapped " + cause.getClass().getName() + ": " + cause.getMessage(), cause);
     }
 }

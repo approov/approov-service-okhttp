@@ -19,7 +19,7 @@ package io.approov.service.okhttp;
 
 import com.criticalblue.approovsdk.Approov;
 
-public class ApproovRejectionException extends TokenFetchStatusException {
+public class ApproovRejectionException extends ApproovFetchStatusException {
     // provides a code of the app state for support purposes
     private final String arc;
     // provides a comma separated list of rejection reasons (if the feature is enabled in Approov)

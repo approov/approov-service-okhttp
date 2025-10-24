@@ -97,7 +97,7 @@ public class ApproovService {
     // The mutator instance used to control ApproovService behavior at key points in the flow.
     // Unless set using the ApproovService.setApproovServiceMutator() method, the default
     // behaviour defined in the default implementation of ApproovServiceMutator will be used.
-    private static ApproovServiceMutator serviceMutator = new ApproovServiceMutator() {};
+    private static ApproovServiceMutator serviceMutator = ApproovServiceMutator.DEFAULT;
 
     // map of headers that should have their values substituted for secure strings, mapped to their
     // required prefixes
@@ -214,10 +214,10 @@ public class ApproovService {
             Log.d(TAG, "setDevKey");
         }
         catch (IllegalStateException e) {
-            throw new ApproovException("IllegalState: " + e.getMessage(), e);
+            throw new ApproovException(e);
         }
         catch (IllegalArgumentException e) {
-            throw new ApproovException("IllegalArgument: " + e.getMessage(), e);
+            throw new ApproovException(e);
         }
     }
 
@@ -291,11 +291,9 @@ public class ApproovService {
      */
     public static synchronized void setServiceMutator(ApproovServiceMutator mutator) {
         if (mutator == null) {
-            Log.d(TAG, "Applied default ApproovServiceMutator");
-            mutator = new ApproovServiceMutator() {};
-        } else {
-            Log.d(TAG, "Applied custom ApproovServiceMutator:" + mutator.toString());
+            mutator = ApproovServiceMutator.DEFAULT;
         }
+        Log.d(TAG, "Applied ApproovServiceMutator:" + mutator.toString());
         serviceMutator = mutator;
     }
 
@@ -476,7 +474,7 @@ public class ApproovService {
      * Performs a precheck to determine if the app will pass attestation. This requires secure
      * strings to be enabled for the account, although no strings need to be set up. This will
      * likely require network access so may take some time to complete. It may throw ApproovException
-     * if the precheck fails or if there is some other problem. A TokenFetchStatusException is thrown
+     * if the precheck fails or if there is some other problem. A ApproovFetchStatusException is thrown
      * when the SDK reports a token fetch status. ApproovRejectionException continues to expose the
      * rejection ARC and reasons, while the deprecated ApproovNetworkException remains available for
      * backwards compatibility with retryable network failures.
@@ -491,10 +489,10 @@ public class ApproovService {
             Log.d(TAG, "precheck: " + approovResults.getStatus().toString());
         }
         catch (IllegalStateException e) {
-            throw new ApproovException("IllegalState: " + e.getMessage(), e);
+            throw new ApproovException(e);
         }
         catch (IllegalArgumentException e) {
-            throw new ApproovException("IllegalArgument: " + e.getMessage(), e);
+            throw new ApproovException(e);
         }
 
         // process the returned Approov status using decision maker
@@ -516,7 +514,7 @@ public class ApproovService {
             return deviceID;
         }
         catch (IllegalStateException e) {
-            throw new ApproovException("IllegalState: " + e.getMessage(), e);
+            throw new ApproovException(e);
         }
     }
 
@@ -536,10 +534,10 @@ public class ApproovService {
             Log.d(TAG, "setDataHashInToken");
         }
         catch (IllegalStateException e) {
-            throw new ApproovException("IllegalState: " + e.getMessage(), e);
+            throw new ApproovException(e);
         }
         catch (IllegalArgumentException e) {
-            throw new ApproovException("IllegalArgument: " + e.getMessage(), e);
+            throw new ApproovException(e);
         }
     }
 
@@ -547,7 +545,7 @@ public class ApproovService {
      * Performs an Approov token fetch for the given URL. This should be used in situations where it
      * is not possible to use the networking interception to add the token. This operation will
      * sometimes require network access so may take some time to complete. If the attestation fails
-     * for any reason then an ApproovException is thrown. A TokenFetchStatusException encapsulates the
+     * for any reason then an ApproovException is thrown. A ApproovFetchStatusException encapsulates the
      * status reported by the SDK. For backwards compatibility callers may still observe the deprecated
      * ApproovNetworkException subclass for retryable networking issues. Note that the returned token
      * should NEVER be cached by your app, you should call this function when it is needed.
@@ -564,10 +562,10 @@ public class ApproovService {
             Log.d(TAG, "fetchToken: " + approovResults.getStatus().toString());
         }
         catch (IllegalStateException e) {
-            throw new ApproovException("IllegalState: " + e.getMessage(), e);
+            throw new ApproovException(e);
         }
         catch (IllegalArgumentException e) {
-            throw new ApproovException("IllegalArgument: " + e.getMessage(), e);
+            throw new ApproovException(e);
         }
 
         // process the status using decision maker
@@ -617,10 +615,10 @@ public class ApproovService {
             return signature;
         }
         catch (IllegalStateException e) {
-            throw new ApproovException("IllegalState: " + e.getMessage(), e);
+            throw new ApproovException(e);
         }
         catch (IllegalArgumentException e) {
-            throw new ApproovException("IllegalArgument: " + e.getMessage(), e);
+            throw new ApproovException(e);
         }
     }
 
@@ -650,10 +648,10 @@ public class ApproovService {
             return signature;
         }
         catch (IllegalStateException e) {
-            throw new ApproovException("IllegalState: " + e.getMessage(), e);
+            throw new ApproovException(e);
         }
         catch (IllegalArgumentException e) {
-            throw new ApproovException("IllegalArgument: " + e.getMessage(), e);
+            throw new ApproovException(e);
         }
     }
 
@@ -663,7 +661,7 @@ public class ApproovService {
      * new value is returned as the secure string. Use of an empty string for newDef removes
      * the string entry. Note that this call may require network transaction and thus may block
      * for some time, so should not be called from the UI thread. If the attestation fails
-     * for any reason then an ApproovException is thrown. A TokenFetchStatusException encapsulates the
+     * for any reason then an ApproovException is thrown. A ApproovFetchStatusException encapsulates the
      * status reported by the SDK. ApproovRejectionException exposes ARC/rejection metadata, while the
      * deprecated ApproovNetworkException indicates retryable networking issues. Note that the returned
      * string should NEVER be cached by your app, you should call this function when it is needed.
@@ -688,10 +686,10 @@ public class ApproovService {
             Log.d(TAG, "fetchSecureString " + type + ": " + key + ", " + approovResults.getStatus().toString());
         }
         catch (IllegalStateException e) {
-            throw new ApproovException("IllegalState: " + e.getMessage());
+            throw new ApproovException(e);
         }
         catch (IllegalArgumentException e) {
-            throw new ApproovException("IllegalArgument: " + e.getMessage());
+            throw new ApproovException(e);
         }
 
         // process the returned Approov status using decision maker
@@ -702,7 +700,7 @@ public class ApproovService {
     /**
      * Fetches a custom JWT with the given payload. Note that this call will require network
      * transaction and thus will block for some time, so should not be called from the UI thread.
-     * If the attestation fails for any reason then an ApproovException is thrown. A TokenFetchStatusException
+     * If the attestation fails for any reason then an ApproovException is thrown. A ApproovFetchStatusException
      * encapsulates the SDK status, while ApproovRejectionException (ARC/reasons) and the deprecated
      * ApproovNetworkException (retryable networking issues) continue to be emitted for backwards compatibility.
      *
@@ -718,10 +716,10 @@ public class ApproovService {
             Log.d(TAG, "fetchCustomJWT: " + approovResults.getStatus().toString());
         }
         catch (IllegalStateException e) {
-            throw new ApproovException("IllegalState: " + e.getMessage());
+            throw new ApproovException(e);
         }
         catch (IllegalArgumentException e) {
-            throw new ApproovException("IllegalArgument: " + e.getMessage());
+            throw new ApproovException(e);
         }
 
         // process the returned Approov status using decision maker

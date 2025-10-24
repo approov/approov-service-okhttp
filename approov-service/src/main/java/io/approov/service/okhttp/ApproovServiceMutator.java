@@ -36,6 +36,16 @@ import java.util.regex.Matcher;
  */
 public interface ApproovServiceMutator {
     /**
+     * Default mutator that provides standard behavior with no changes.
+     */
+    public static final ApproovServiceMutator DEFAULT = new ApproovServiceMutator() {
+        @Override
+        public String toString() {
+            return "ApproovServiceMutator.DEFAULT";
+        }
+    };
+
+    /**
      * Decides how to handle the token fetch result from an
      * ApproovService.precheck() operation.
      *
@@ -61,7 +71,7 @@ public interface ApproovServiceMutator {
             case UNKNOWN_KEY:
                 break;
             default:
-                throw new TokenFetchStatusException(status, "precheck:" + status.toString());
+                throw new ApproovFetchStatusException(status, "precheck:" + status.toString());
         }
     }
 
@@ -86,7 +96,7 @@ public interface ApproovServiceMutator {
             case SUCCESS:
                 break;
             default:
-                throw new TokenFetchStatusException(status, "fetchToken: " + status.toString());
+                throw new ApproovFetchStatusException(status, "fetchToken: " + status.toString());
         }
     }
 
@@ -121,7 +131,7 @@ public interface ApproovServiceMutator {
             case UNKNOWN_KEY:
                 break;
             default:
-                throw new TokenFetchStatusException(status, "fetchSecureString " + operation + " for " + key + ":" + status.toString());
+                throw new ApproovFetchStatusException(status, "fetchSecureString " + operation + " for " + key + ":" + status.toString());
         }
     }
 
@@ -150,7 +160,7 @@ public interface ApproovServiceMutator {
             case SUCCESS:
                 break;
             default:
-                throw new TokenFetchStatusException(status, "fetchCustomJWT: " + status.toString());
+                throw new ApproovFetchStatusException(status, "fetchCustomJWT: " + status.toString());
         }
     }
 
@@ -210,7 +220,7 @@ public interface ApproovServiceMutator {
             case UNPROTECTED_URL: // Continue without token for unprotected URLs
                 return false;
             default:
-                throw new TokenFetchStatusException(status, "Approov token fetch for " + url + ": " + status.toString());
+                throw new ApproovFetchStatusException(status, "Approov token fetch for " + url + ": " + status.toString());
         }
     }
 
@@ -247,7 +257,7 @@ public interface ApproovServiceMutator {
             case UNKNOWN_KEY:
                 return false;
             default:
-                throw new TokenFetchStatusException(status, "Header substitution for " + header + ": " + status.toString());
+                throw new ApproovFetchStatusException(status, "Header substitution for " + header + ": " + status.toString());
         }
     }
 
@@ -284,7 +294,7 @@ public interface ApproovServiceMutator {
             case UNKNOWN_KEY:
                 return false;
             default:
-                throw new TokenFetchStatusException(status, "Query parameter substitution for " + queryKey + ": " + status.toString());
+                throw new ApproovFetchStatusException(status, "Query parameter substitution for " + queryKey + ": " + status.toString());
         }
     }
 
