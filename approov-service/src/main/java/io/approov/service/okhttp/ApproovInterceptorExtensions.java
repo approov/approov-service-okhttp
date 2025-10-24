@@ -23,16 +23,34 @@ import okhttp3.Request;
  * ApproovInterceptorExtensions provides an interface for handling callbacks during
  * the processing of network requests by Approov. It allows further modifications
  * to requests after Approov has applied its changes.
+ *
+ * @deprecated Replace implementations of this interface with ApproovServiceMutator
+ * while changing the name of the ApproovInterceptorExtensions.processedRequest
+ * method to ApproovServiceMutator.handleInterceptorProcessedRequest.
  */
-public interface ApproovInterceptorExtensions {
+@Deprecated
+public interface ApproovInterceptorExtensions extends ApproovServiceMutator{
 
     /**
-     * Called after Approov has processed a network request, allowing further modifications.
+     * Replace the default implementation of ApproovServiceMutator.handleInterceptorProcessedRequest
+     * to call the now deprecated ApproovInterceptorExtensions.processedRequest method. 
      *
      * @param request the processed request
      * @param changes the mutations applied to the request by Approov
-     * @return the modified request
+     * @return the final request to use to complete the Approov interceptor step.
      * @throws ApproovException if there is an error during processing
      */
-    Request processedRequest(Request request, ApproovRequestMutations changes) throws ApproovException;
+    default Request handleInterceptorProcessedRequest(Request request, ApproovRequestMutations changes) throws ApproovException {
+        // call the deprecated method to maintain backwards compatibility
+        return processedRequest(request, changes);
+    }
+
+    /**
+     * @deprecated Use ApproovServiceMutator.handleInterceptorProcessedRequest instead.
+     */
+    @Deprecated
+    default Request processedRequest(Request request, ApproovRequestMutations changes) throws ApproovException {
+        // No further changes to the request are required
+        return request;
+    }
 }

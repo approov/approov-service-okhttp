@@ -17,41 +17,32 @@
 
 package io.approov.service.okhttp;
 
-import java.io.IOException;
+import com.criticalblue.approovsdk.Approov;
 
 /**
- * Base exception indicating an error while using the Approov SDK.
- * <p>
- * For token fetch failures prefer using {@link ApproovFetchStatusException}, which preserves the
- * {@link com.criticalblue.approovsdk.Approov.TokenFetchStatus} reported by the SDK.
+ * Exception raised when an Approov token fetch returns a status other than success.
  */
-public class ApproovException extends IOException {
+public class ApproovFetchStatusException extends ApproovException {
+
+    private final Approov.TokenFetchStatus tokenFetchStatus;
 
     /**
-     * Constructs an exception due to an Approov error.
+     * Constructs a token fetch status exception with the provided status.
      *
+     * @param status status returned by the Approov SDK, may be {@code null} if unavailable
      * @param message information describing the exception cause
      */
-    public ApproovException(String message) {
+    public ApproovFetchStatusException(Approov.TokenFetchStatus status, String message) {
         super(message);
+        this.tokenFetchStatus = status;
     }
 
     /**
-     * Constructs an exception with an underlying cause.
+     * Retrieves the token fetch status associated with this exception.
      *
-     * @param message information describing the exception cause
-     * @param cause underlying cause of the exception
+     * @return the status returned by the Approov SDK, or {@code null} if not provided
      */
-    public ApproovException(String message, Throwable cause) {
-        super(message, cause);
-    }
-
-    /**
-     * Constructs an exception with an underlying cause, using the cause message when available.
-     *
-     * @param cause underlying cause of the exception
-     */
-    public ApproovException(Throwable cause) {
-        super("Wrapped " + cause.getClass().getName() + ": " + cause.getMessage(), cause);
+    public Approov.TokenFetchStatus getTokenFetchStatus() {
+        return tokenFetchStatus;
     }
 }

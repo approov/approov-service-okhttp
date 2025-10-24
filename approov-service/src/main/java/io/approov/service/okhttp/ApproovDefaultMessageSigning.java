@@ -37,6 +37,7 @@ import java.util.List;
 import java.util.Map;
 
 import io.approov.util.http.sfv.ByteSequenceItem;
+import io.approov.util.http.sfv.StringItem;
 import io.approov.util.http.sfv.Dictionary;
 import io.approov.util.sig.ComponentProvider;
 import io.approov.util.sig.SignatureBaseBuilder;
@@ -53,7 +54,7 @@ import okio.ByteString;
  * message signatures to HTTP requests based on specified parameters and
  * algorithms.
  */
-public class ApproovDefaultMessageSigning implements ApproovInterceptorExtensions {
+public class ApproovDefaultMessageSigning implements ApproovServiceMutator {
     // logging tag
     private static final String TAG = "ApproovMsgSign";
 
@@ -92,6 +93,11 @@ public class ApproovDefaultMessageSigning implements ApproovInterceptorExtension
      */
     public ApproovDefaultMessageSigning() {
         hostFactories = new HashMap<>();
+    }
+
+    @Override
+    public String toString() {
+        return "ApproovDefaultMessageSigning";
     }
 
     /**
@@ -173,6 +179,20 @@ public class ApproovDefaultMessageSigning implements ApproovInterceptorExtension
      * @throws ApproovException If an error occurs during processing.
      */
     @Override
+    public Request handleInterceptorProcessedRequest(Request request, ApproovRequestMutations changes) throws ApproovException {
+        return processedRequest(request, changes);
+    }
+
+    /**
+     * @deprecated Use ApproovServiceMutator.handleInterceptorProcessedRequest
+     *             instead.
+     *
+     *             Currently the method is implemented to maintain backwards
+     *             compatibility. A future release will move the implementation
+     *             to the ApproovServiceMutator.handleInterceptorProcessedRequest
+     *             method.
+     */
+    @Deprecated
     public Request processedRequest(Request request, ApproovRequestMutations changes) throws ApproovException {
         if (changes == null || changes.getTokenHeaderKey() == null) {
             // the request doesn't have an Approov token, so we don't need to sign it
@@ -227,9 +247,12 @@ public class ApproovDefaultMessageSigning implements ApproovInterceptorExtension
                 throw new IllegalStateException("Unsupported algorithm identifier: " + params.getAlg());
         }
 
-        // Calculate the signature and message descriptor headers
+        // Calculate the signature and message descriptor headers. Note that the signatures are
+        // added as strings (as required by the spec) instead of byte sequences which would better
+        // fit the data.
+        String signatureBase64 = Base64.encodeToString(signature, Base64.NO_WRAP);
         String sigHeader = Dictionary.valueOf(Map.of(
-                sigId, ByteSequenceItem.valueOf(signature))).serialize();
+                sigId, StringItem.valueOf(signatureBase64))).serialize();
         String sigInputHeader = Dictionary.valueOf(Map.of(
                 sigId, params.toComponentValue())).serialize();
 
@@ -311,17 +334,34 @@ public class ApproovDefaultMessageSigning implements ApproovInterceptorExtension
      * specific for the request.
      */
     public static class SignatureParametersFactory {
+        // The base parameters that are copied for every new generated message
+        // signature.
         protected SignatureParameters baseParameters;
+        // The algorithm to use for body digests, or null if no body digest is to be
+        // used.
         protected String bodyDigestAlgorithm;
+        // True if a body digest is required; body digests cannot be generated for all
+        // requests - either because they have no body or because the request body is
+        // one shot.
         protected boolean bodyDigestRequired;
+        // True to switch to account message signing, false to use install message
+        // signing.
         protected boolean useAccountMessageSigning;
+        // True to add the "created" timestamp field to the signature parameters.
         protected boolean addCreated;
+        // Expiration lifetime in seconds; if >0 the "expires" field is added to the
+        // signature parameters.
         protected long expiresLifetime;
+        // True to add the Approov token header to the signature parameters. This is
+        // strongly advised.
         protected boolean addApproovTokenHeader;
+        // Lists the headers to add to the message signature if they are present in the
+        // request. (Non-optional headers should be added to the base parameters).
         protected List<String> optionalHeaders;
 
         /**
-         * Sets the base parameters for the factory.
+         * Sets the base parameters for the factory. The base parameters are copied for
+         * every new generated message signature.
          *
          * @param baseParameters The base parameters to set.
          * @return The current instance for method chaining.
@@ -332,10 +372,13 @@ public class ApproovDefaultMessageSigning implements ApproovInterceptorExtension
         }
 
         /**
-         * Configures the body digest settings for the factory.
+         * Configures the body digest settings for the factory. If set, then requests
+         * with bodies will have the digest created and added as a header to the request
+         * with the header included in the request's message signature.
          *
-         * @param bodyDigestAlgorithm The digest algorithm to use, or {@code null} to disable.
-         * @param required Whether the body digest is required.
+         * @param bodyDigestAlgorithm The digest algorithm to use, or {@code null} to
+         *                            disable.
+         * @param required            Whether the body digest is required.
          * @return The current instance for method chaining.
          * @throws IllegalArgumentException If an unsupported algorithm is specified.
          */
@@ -352,7 +395,7 @@ public class ApproovDefaultMessageSigning implements ApproovInterceptorExtension
         }
 
         /**
-         * Configures the factory to use device message signing.
+         * Configures the factory to use install message signing
          *
          * @return The current instance for method chaining.
          */
@@ -373,6 +416,8 @@ public class ApproovDefaultMessageSigning implements ApproovInterceptorExtension
 
         /**
          * Sets whether the "created" field should be added to the signature parameters.
+         * The created field holds the device's timestamp indicating when the request was
+         * created.
          *
          * @param addCreated Whether to add the "created" field.
          * @return The current instance for method chaining.
@@ -385,7 +430,10 @@ public class ApproovDefaultMessageSigning implements ApproovInterceptorExtension
         /**
          * Sets the expiration lifetime for the signature parameters. Only a
          * value >0 will cause the expires attribute to be added to the
-         * SignatureParameters for a request.
+         * SignatureParameters for a request. The expires attribute holds the
+         * timestamp indicating when the message signature will expire. It is
+         * equal to the created timestamp (if included) plus the expiration
+         * lifetime.
          *
          * @param expiresLifetime The expiration lifetime in seconds, if <=0
          * no expiration is added.
