@@ -71,7 +71,7 @@ public interface ApproovServiceMutator {
             case UNKNOWN_KEY:
                 break;
             default:
-                throw new ApproovFetchStatusException(status, "precheck:" + status.toString());
+                throw new ApproovFetchStatusException(status, "precheck: " + status.toString());
         }
     }
 
@@ -107,7 +107,7 @@ public interface ApproovServiceMutator {
      * @param approovResults the TokenFetchResult obtained by
      *                       ApproovService.fetchSecureString()
      * @param operation the operation type ("lookup" or "definition"); "lookup"
-     *                  indicates that an existing value was requesterd, while
+    *                  indicates that an existing value was requested, while
      *                  "definition" indicates that a new value was being added
      *                  or set
      * @param key the secure string key
@@ -126,12 +126,12 @@ public interface ApproovServiceMutator {
             case NO_NETWORK:
             case POOR_NETWORK:
             case MITM_DETECTED:
-                throw new ApproovNetworkException(status, "fetchSecureString " + operation + " for " + key + ":" + status.toString());
+                throw new ApproovNetworkException(status, "fetchSecureString " + operation + " for " + key + ": " + status.toString());
             case SUCCESS:
             case UNKNOWN_KEY:
                 break;
             default:
-                throw new ApproovFetchStatusException(status, "fetchSecureString " + operation + " for " + key + ":" + status.toString());
+                throw new ApproovFetchStatusException(status, "fetchSecureString " + operation + " for " + key + ": " + status.toString());
         }
     }
 

@@ -95,7 +95,7 @@ public class ApproovService {
     private static String bindingHeader = null;
 
     // The mutator instance used to control ApproovService behavior at key points in the flow.
-    // Unless set using the ApproovService.setApproovServiceMutator() method, the default
+    // Unless set using the ApproovService.setServiceMutator() method, the default
     // behaviour defined in the default implementation of ApproovServiceMutator will be used.
     private static ApproovServiceMutator serviceMutator = ApproovServiceMutator.DEFAULT;
 

@@ -17,10 +17,7 @@
 
 package io.approov.service.okhttp;
 
-import com.criticalblue.approovsdk.Approov;
 import okhttp3.Request;
-import java.util.regex.Pattern;
-import java.util.regex.Matcher;
 
 /**
  * ApproovInterceptorExtensions provides an interface for handling callbacks during
