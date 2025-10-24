@@ -34,6 +34,7 @@ public class CustomApproovDecisionMaker implements ApproovInterceptorExtensions 
     }
 
     @Override
+    @SuppressWarnings("deprecation")
     public void handlePrecheckResult(Approov.TokenFetchResult approovResults) throws ApproovException {
         Approov.TokenFetchStatus status = approovResults.getStatus();
         String arc = approovResults.getARC();
@@ -47,16 +48,17 @@ public class CustomApproovDecisionMaker implements ApproovInterceptorExtensions 
                 Log.w(TAG, "Network issue during precheck: " + status.toString());
                 break;
             case MITM_DETECTED:
-                throw new ApproovNetworkException(status, "precheck: " + status.toString());
+                throw new TokenFetchStatusException(status, "precheck: " + status.toString());
             case SUCCESS:
             case UNKNOWN_KEY:
                 break;
             default:
-                throw new ApproovException(status, "precheck:" + status.toString());
+                throw new TokenFetchStatusException(status, "precheck:" + status.toString());
         }
     }
 
     @Override
+    @SuppressWarnings("deprecation")
     public boolean handleInterceptorFetchTokenResult(Approov.TokenFetchResult approovResults, String url) throws ApproovException {
         Approov.TokenFetchStatus status = approovResults.getStatus();
         switch (status) {
@@ -69,14 +71,14 @@ public class CustomApproovDecisionMaker implements ApproovInterceptorExtensions 
                 return false;
             case MITM_DETECTED:
                 if (!ApproovService.getProceedOnNetworkFail())
-                    throw new ApproovNetworkException(status, "Approov token fetch for " + url + ": " + status.toString());
+                    throw new TokenFetchStatusException(status, "Approov token fetch for " + url + ": " + status.toString());
                 return false;
             case NO_APPROOV_SERVICE:
             case UNKNOWN_URL:
             case UNPROTECTED_URL:
                 return false;
             default:
-                throw new ApproovException(status, "Approov token fetch for " + url + ": " + status.toString());
+                throw new TokenFetchStatusException(status, "Approov token fetch for " + url + ": " + status.toString());
         }
     }
 }

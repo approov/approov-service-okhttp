@@ -45,6 +45,7 @@ public interface ApproovServiceMutator {
      *                          action or throw an ApproovException encoding
      *                          the cause of the failure.
      */
+    @SuppressWarnings("deprecation")
     default void handlePrecheckResult(Approov.TokenFetchResult approovResults) throws ApproovException {
         Approov.TokenFetchStatus status = approovResults.getStatus();
         String arc = approovResults.getARC();
@@ -60,7 +61,7 @@ public interface ApproovServiceMutator {
             case UNKNOWN_KEY:
                 break;
             default:
-                throw new ApproovException(status, "precheck:" + status.toString());
+                throw new TokenFetchStatusException(status, "precheck:" + status.toString());
         }
     }
 
@@ -74,6 +75,7 @@ public interface ApproovServiceMutator {
      *                          action or throw an ApproovException encoding
      *                          the cause of the failure.
      */
+    @SuppressWarnings("deprecation")
     default void handleFetchTokenResult(Approov.TokenFetchResult approovResults) throws ApproovException {
         Approov.TokenFetchStatus status = approovResults.getStatus();
         switch (status) {
@@ -84,7 +86,7 @@ public interface ApproovServiceMutator {
             case SUCCESS:
                 break;
             default:
-                throw new ApproovException(status, "fetchToken: " + status.toString());
+                throw new TokenFetchStatusException(status, "fetchToken: " + status.toString());
         }
     }
 
@@ -103,6 +105,7 @@ public interface ApproovServiceMutator {
      *                          action or throw an ApproovException encoding
      *                          the cause of the failure
      */
+    @SuppressWarnings("deprecation")
     default void handleFetchSecureStringResult(Approov.TokenFetchResult approovResults, String operation, String key) throws ApproovException {
         Approov.TokenFetchStatus status = approovResults.getStatus();
         String arc = approovResults.getARC();
@@ -118,7 +121,7 @@ public interface ApproovServiceMutator {
             case UNKNOWN_KEY:
                 break;
             default:
-                throw new ApproovException(status, "fetchSecureString " + operation + " for " + key + ":" + status.toString());
+                throw new TokenFetchStatusException(status, "fetchSecureString " + operation + " for " + key + ":" + status.toString());
         }
     }
 
@@ -132,6 +135,7 @@ public interface ApproovServiceMutator {
      *                          action or throw an ApproovException encoding
      *                          the cause of the failure
      */
+    @SuppressWarnings("deprecation")
     default void handleFetchCustomJWTResult(Approov.TokenFetchResult approovResults) throws ApproovException {
         Approov.TokenFetchStatus status = approovResults.getStatus();
         String arc = approovResults.getARC();
@@ -146,7 +150,7 @@ public interface ApproovServiceMutator {
             case SUCCESS:
                 break;
             default:
-                throw new ApproovException(status, "fetchCustomJWT: " + status.toString());
+                throw new TokenFetchStatusException(status, "fetchCustomJWT: " + status.toString());
         }
     }
 
@@ -163,7 +167,7 @@ public interface ApproovServiceMutator {
      */
     default boolean handleInterceptorShouldProcessRequest(Request request) throws ApproovException {
         if(request == null)
-            throw new ApproovException(ApproovException.ERROR_NULL_REQUEST, "handleInterceptorShouldProcessRequest method was passed a request that is null!");
+            throw new ApproovException("handleInterceptorShouldProcessRequest method was passed a request that is null!");
 
         // check if the URL matches one of the exclusion regexs and skip interceptor
         // processing in these cases
@@ -189,9 +193,10 @@ public interface ApproovServiceMutator {
      *                          action described above or throw an ApproovException
      *                          encoding the cause of the failure
      */
+    @SuppressWarnings("deprecation")
     default boolean handleInterceptorFetchTokenResult(Approov.TokenFetchResult approovResults, String url) throws ApproovException {
             Approov.TokenFetchStatus status = approovResults.getStatus();
-            switch (status) {
+        switch (status) {
             case SUCCESS:
                 return true;
             case NO_NETWORK:
@@ -205,7 +210,7 @@ public interface ApproovServiceMutator {
             case UNPROTECTED_URL: // Continue without token for unprotected URLs
                 return false;
             default:
-                throw new ApproovException(status, "Approov token fetch for " + url + ": " + status.toString());
+                throw new TokenFetchStatusException(status, "Approov token fetch for " + url + ": " + status.toString());
         }
     }
 
@@ -223,6 +228,7 @@ public interface ApproovServiceMutator {
      *                          action described above or throw an ApproovException
      *                          encoding the cause of the failure
      */
+    @SuppressWarnings("deprecation")
     default boolean handleInterceptorHeaderSubstitutionResult(Approov.TokenFetchResult approovResults, String header) throws ApproovException {
         Approov.TokenFetchStatus status = approovResults.getStatus();
         String arc = approovResults.getARC();
@@ -241,7 +247,7 @@ public interface ApproovServiceMutator {
             case UNKNOWN_KEY:
                 return false;
             default:
-                throw new ApproovException(status, "Header substitution for " + header + ": " + status.toString());
+                throw new TokenFetchStatusException(status, "Header substitution for " + header + ": " + status.toString());
         }
     }
 
@@ -259,6 +265,7 @@ public interface ApproovServiceMutator {
      *                          action described above or throw an ApproovException
      *                          encoding the cause of the failure
      */
+    @SuppressWarnings("deprecation")
     default boolean handleInterceptorQueryParamSubstitutionResult(Approov.TokenFetchResult approovResults, String queryKey) throws ApproovException {
         Approov.TokenFetchStatus status = approovResults.getStatus();
         String arc = approovResults.getARC();
@@ -277,7 +284,7 @@ public interface ApproovServiceMutator {
             case UNKNOWN_KEY:
                 return false;
             default:
-                throw new ApproovException(status, "Query parameter substitution for " + queryKey + ": " + status.toString());
+                throw new TokenFetchStatusException(status, "Query parameter substitution for " + queryKey + ": " + status.toString());
         }
     }
 

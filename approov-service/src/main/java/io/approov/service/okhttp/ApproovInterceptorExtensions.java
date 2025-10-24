@@ -28,7 +28,7 @@ import java.util.regex.Matcher;
  * to requests after Approov has applied its changes.
  *
  * @deprecated Replace implementations of this interface with ApproovServiceMutator
- * while changing the the name of the ApproovInterceptorExtensions.processedRequest
+ * while changing the name of the ApproovInterceptorExtensions.processedRequest
  * method to ApproovServiceMutator.handleInterceptorProcessedRequest.
  */
 @Deprecated

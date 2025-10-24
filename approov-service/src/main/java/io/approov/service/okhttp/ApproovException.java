@@ -1,6 +1,6 @@
 //
 // MIT License
-// 
+//
 // Copyright (c) 2016-present, Approov Ltd.
 //
 // Permission is hereby granted, free of charge, to any person obtaining a copy of this software and associated documentation files
@@ -9,7 +9,7 @@
 // subject to the following conditions:
 //
 // The above copyright notice and this permission notice shall be included in all copies or substantial portions of the Software.
-// 
+//
 // THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND, EXPRESS OR IMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF
 // MERCHANTABILITY, FITNESS FOR A PARTICULAR PURPOSE AND NONINFRINGEMENT. IN NO EVENT SHALL THE AUTHORS OR COPYRIGHT HOLDERS BE LIABLE FOR
 // ANY CLAIM, DAMAGES OR OTHER LIABILITY, WHETHER IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING FROM, OUT OF OR IN CONNECTION WITH
@@ -17,140 +17,41 @@
 
 package io.approov.service.okhttp;
 
-import com.criticalblue.approovsdk.Approov;
 import java.io.IOException;
 
-// ApproovException is thrown if there is an error from Approov.
+/**
+ * Base exception indicating an error while using the Approov SDK.
+ * <p>
+ * For token fetch failures prefer using {@link TokenFetchStatusException}, which preserves the
+ * {@link com.criticalblue.approovsdk.Approov.TokenFetchStatus} reported by the SDK.
+ */
 public class ApproovException extends IOException {
 
-// =====================
-// Approov Error Codes
-// =====================
-
-// Reserved range for error codes up to 9999
-// ==========================================
-// General errors (0–99)
-public static final int ERROR_UNKNOWN = 0;
-public static final int ERROR_ILLEGAL_STATE = 1;
-public static final int ERROR_ILLEGAL_ARGUMENT = 2;
-public static final int ERROR_MISSING_VALUE = 3;
-public static final int ERROR_NULL_REQUEST = 4;
-public static final int ERROR_NETWORK_NO_CONNECTION_INFO = 5;
-public static final int ERROR_LEGACY = 6;
-
-// Token fetch errors (100–199)
-public static final int ERROR_TOKEN_FETCH_SUCCESS = 100; // added for completeness
-public static final int ERROR_TOKEN_FETCH_NO_NETWORK = 101;
-public static final int ERROR_TOKEN_FETCH_MITM_DETECTED = 102;
-public static final int ERROR_TOKEN_FETCH_POOR_NETWORK = 103;
-public static final int ERROR_TOKEN_FETCH_NO_APPROOV_SERVICE = 104;
-public static final int ERROR_TOKEN_FETCH_BAD_URL = 105;
-public static final int ERROR_TOKEN_FETCH_UNKNOWN_URL = 106;
-public static final int ERROR_TOKEN_FETCH_UNPROTECTED_URL = 107;
-public static final int ERROR_TOKEN_FETCH_NO_NETWORK_PERMISSION = 108;
-public static final int ERROR_TOKEN_FETCH_MISSING_LIB_DEPENDENCY = 109;
-public static final int ERROR_TOKEN_FETCH_INTERNAL_ERROR = 110;
-public static final int ERROR_TOKEN_FETCH_REJECTED = 111;
-public static final int ERROR_TOKEN_FETCH_DISABLED = 112;
-public static final int ERROR_TOKEN_FETCH_UNKNOWN_KEY = 113;
-public static final int ERROR_TOKEN_FETCH_UNKNOWN_FAILURE = 199;
-// ==========================================
-
-private final int errorCode;
     /**
      * Constructs an exception due to an Approov error.
      *
-     * @param message is the basic information about the exception cause
-     * @Depriciated use ApproovException(int errorCode, String message) instead.
+     * @param message information describing the exception cause
      */
     public ApproovException(String message) {
-        this(ERROR_UNKNOWN, message);
+        super(message);
     }
 
     /**
-     * Constructs an exception with a specific error code and message.
+     * Constructs an exception with an underlying cause.
      *
-     * @param errorCode provides a machine readable reason for the failure
-     * @param message is the basic information about the exception cause
+     * @param message information describing the exception cause
+     * @param cause underlying cause of the exception
      */
-    public ApproovException(int errorCode, String message) {
-        this(errorCode, message, null);
-    }
-
-    /**
-     * Constructs an exception with an error code and cause.
-     *
-     * @param errorCode provides a machine readable reason for the failure
-     * @param message is the basic information about the exception cause
-     * @param cause is the underlying cause of the exception
-     */
-    public ApproovException(int errorCode, String message, Throwable cause) {
+    public ApproovException(String message, Throwable cause) {
         super(message, cause);
-        this.errorCode = errorCode;
     }
 
     /**
-     * Constructs an exception with a TokenFetchStatus and message.
+     * Constructs an exception with an underlying cause, using the cause message when available.
      *
-     * @param status TokenFetchStatus that triggered the error
-     * @param message is the basic information about the exception cause
-     * */
-    public ApproovException(Approov.TokenFetchStatus status, String message) {
-        super(message, null);
-        this.errorCode = mapTokenFetchStatus(status);
-    }
-
-    /**
-     * Gets the error code associated with the exception.
-     *
-     * @return integer error code
+     * @param cause underlying cause of the exception
      */
-    public int getErrorCode() {
-        return errorCode;
+    public ApproovException(Throwable cause) {
+        super(cause == null ? null : cause.getMessage(), cause);
     }
-
-    /**
-     * Maps a token fetch status to a well known error code.
-     *
-     * @param status the token fetch status
-     * @return matching error code
-     */
-    public static int mapTokenFetchStatus(Approov.TokenFetchStatus status) {
-        if (status == null) {
-            return ERROR_UNKNOWN;
-        }
-        switch (status) {
-            case SUCCESS:
-                return ERROR_TOKEN_FETCH_SUCCESS;
-            case NO_NETWORK:
-                return ERROR_TOKEN_FETCH_NO_NETWORK;
-            case MITM_DETECTED:
-                return ERROR_TOKEN_FETCH_MITM_DETECTED;
-            case POOR_NETWORK:
-                return ERROR_TOKEN_FETCH_POOR_NETWORK;
-            case NO_APPROOV_SERVICE:
-                return ERROR_TOKEN_FETCH_NO_APPROOV_SERVICE;
-            case BAD_URL:
-                return ERROR_TOKEN_FETCH_BAD_URL;
-            case UNKNOWN_URL:
-                return ERROR_TOKEN_FETCH_UNKNOWN_URL;
-            case UNPROTECTED_URL:
-                return ERROR_TOKEN_FETCH_UNPROTECTED_URL;
-            case NO_NETWORK_PERMISSION:
-                return ERROR_TOKEN_FETCH_NO_NETWORK_PERMISSION;
-            case MISSING_LIB_DEPENDENCY:
-                return ERROR_TOKEN_FETCH_MISSING_LIB_DEPENDENCY;
-            case INTERNAL_ERROR:
-                return ERROR_TOKEN_FETCH_INTERNAL_ERROR;
-            case REJECTED:
-                return ERROR_TOKEN_FETCH_REJECTED;
-            case DISABLED:
-                return ERROR_TOKEN_FETCH_DISABLED;
-            case UNKNOWN_KEY:
-                return ERROR_TOKEN_FETCH_UNKNOWN_KEY;
-            default:
-                return ERROR_TOKEN_FETCH_UNKNOWN_FAILURE;
-        }
-    }
-
 }
