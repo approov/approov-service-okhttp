@@ -1,6 +1,6 @@
 //
 // MIT License
-// 
+//
 // Copyright (c) 2016-present, Approov Ltd.
 //
 // Permission is hereby granted, free of charge, to any person obtaining a copy of this software and associated documentation files
@@ -9,7 +9,7 @@
 // subject to the following conditions:
 //
 // The above copyright notice and this permission notice shall be included in all copies or substantial portions of the Software.
-// 
+//
 // THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND, EXPRESS OR IMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF
 // MERCHANTABILITY, FITNESS FOR A PARTICULAR PURPOSE AND NONINFRINGEMENT. IN NO EVENT SHALL THE AUTHORS OR COPYRIGHT HOLDERS BE LIABLE FOR
 // ANY CLAIM, DAMAGES OR OTHER LIABILITY, WHETHER IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING FROM, OUT OF OR IN CONNECTION WITH
@@ -17,16 +17,31 @@
 
 package io.approov.service.okhttp;
 
-// ApproovNetworkException indicates an exception caused by networking conditions which is likely to be
-// temporary so a user initiated retry should be performed
-public class ApproovNetworkException extends ApproovException {
+import com.criticalblue.approovsdk.Approov;
+
+/**
+ * @deprecated Use {@link ApproovFetchStatusException} instead. This subtype is retained only to avoid
+ *             breaking existing handlers and call sites; migrate any explicit catches to use the parent class.
+ */
+@Deprecated
+public class ApproovNetworkException extends ApproovFetchStatusException {
 
     /**
      * Constructs an Approov networking exception.
      *
-     * @param message is the basic information about the exception cause
+     * @param message basic information about the exception cause
      */
     public ApproovNetworkException(String message) {
-        super(message);
+        super(null, message);
+    }
+
+    /**
+     * Constructs an Approov networking exception with a specific token fetch status.
+     *
+     * @param status token fetch status that triggered the error
+     * @param message basic information about the exception cause
+     */
+    public ApproovNetworkException(Approov.TokenFetchStatus status, String message) {
+        super(status, message);
     }
 }
