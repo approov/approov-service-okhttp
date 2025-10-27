@@ -21,7 +21,7 @@ import com.criticalblue.approovsdk.Approov;
 
 /**
  * @deprecated Use {@link ApproovFetchStatusException} instead. This subtype is retained only to avoid
- *             breaking existing call sites; migrate any explicit catches to the base exception.
+ *             breaking existing handlers and call sites; migrate any explicit catches to use the parent class.
  */
 @Deprecated
 public class ApproovNetworkException extends ApproovFetchStatusException {
