@@ -762,8 +762,9 @@ public class ApproovService {
      * Gets the last ARC (Attestation Response Code) code.
      *
      * Always resolves with a string (ARC or empty string).
-     *
-     * @return String ARC from last attestation request or empty string
+     * NOTE: You MUST only call this method upon succesfull attestation completion. Any networking
+     * errors returned from the service layer will not return a meaningful ARC code if the method is called!!!
+     * @return String ARC from last attestation request or empty string if network unavailable
      */
     public static String getLastARC() {
         // Get the dynamic pins from Approov
