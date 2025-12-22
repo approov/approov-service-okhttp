@@ -782,19 +782,15 @@ public class ApproovService {
         }
         if (hostname != null) {
             try {
-                Approov.fetchApproovToken(new Approov.TokenFetchCallback() {
-                    @Override
-                    public void approovCallback(Approov.TokenFetchResult result) {
-                        if (result.getToken() != null && !result.getToken().isEmpty()) {
-                            String arc = result.getARC();
-                            if (arc != null) {
-                                return arc;
-                            }
-                        }
-                        Log.i(TAG, "ApproovService: ARC code unavailable");
-                        return "";
+                Approov.TokenFetchResult result = Approov.fetchApproovTokenAndWait(hostname);
+                if (result.getToken() != null && !result.getToken().isEmpty()) {
+                    String arc = result.getARC();
+                    if (arc != null) {
+                        return arc;
                     }
-                }, hostname);
+                }
+                Log.i(TAG, "ApproovService: ARC code unavailable");
+                return "";
             } catch (Exception e) {
                 Log.e(TAG, "ApproovService: error fetching ARC", e);
                 return "";
@@ -803,7 +799,6 @@ public class ApproovService {
             Log.i(TAG, "ApproovService: ARC code unavailable");
             return "";
         }
-        return "";
     }
 
     /**
