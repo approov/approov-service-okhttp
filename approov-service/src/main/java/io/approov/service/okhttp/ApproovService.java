@@ -811,8 +811,7 @@ public class ApproovService {
      *
      * @param attrs is the signed JWT holding the new install attributes
      * @return void
-     * @throws IllegalArgumentException if the attrs parameter is invalid
-     * @throws IllegalStateException if the Approov SDK is not initialized
+     * @throws ApproovException if the attrs parameter is invalid or the SDK is not initialized
      */
     public static void setInstallAttrsInToken(String attrs) {
         try {
@@ -820,8 +819,10 @@ public class ApproovService {
             Log.d(TAG, "setInstallAttrsInToken");
         } catch (IllegalArgumentException e) {
             Log.e(TAG, "setInstallAttrsInToken failed with IllegalArgument: " + e.getMessage());
+            throw new ApproovException(e);
         } catch (IllegalStateException e) {
             Log.e(TAG, "setInstallAttrsInToken failed with IllegalState: " + e.getMessage());
+            throw new ApproovException(e);
         }
     }
 
