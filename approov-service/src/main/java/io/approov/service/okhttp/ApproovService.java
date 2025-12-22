@@ -759,6 +759,77 @@ public class ApproovService {
     }
 
     /**
+     * Gets the last ARC (Attestation Response Code) code.
+     *
+     * Always resolves with a string (ARC or empty string).
+     *
+     * @return String ARC from last attestation request or empty string
+     */
+    public static String getLastARC() {
+        // Get the dynamic pins from Approov
+        Map<String, List<String>> approovPins = Approov.getPins("public-key-sha256");
+        if (approovPins == null || approovPins.isEmpty()) {
+            Log.e(TAG, "ApproovService: no host pinning information available");
+            return "";
+        }
+        // The approovPins contains a map of hostnames to pin strings. Skip '*' and use another hostname if available.
+        String hostname = null;
+        for (String key : approovPins.keySet()) {
+            if (!"*".equals(key)) {
+                hostname = key;
+                break;
+            }
+        }
+        if (hostname != null) {
+            try {
+                Approov.fetchApproovToken(new Approov.TokenFetchCallback() {
+                    @Override
+                    public void approovCallback(Approov.TokenFetchResult result) {
+                        if (result.getToken() != null && !result.getToken().isEmpty()) {
+                            String arc = result.getARC();
+                            if (arc != null) {
+                                return arc;
+                            }
+                        }
+                        Log.i(TAG, "ApproovService: ARC code unavailable");
+                        return "";
+                    }
+                }, hostname);
+            } catch (Exception e) {
+                Log.e(TAG, "ApproovService: error fetching ARC", e);
+                return "";
+            }
+        } else {
+            Log.i(TAG, "ApproovService: ARC code unavailable");
+            return "";
+        }
+        return "";
+    }
+
+    /**
+     * Sets an install attributes token to be sent to the server and associated with this particular
+     * app installation for future Approov token fetches. The token must be signed, within its
+     * expiry time and bound to the correct device ID for it to be accepted by the server.
+     * Calling this method ensures that the next call to fetch an Approov
+     * token will not use a cached version, so that this information can be transmitted to the server.
+     *
+     * @param attrs is the signed JWT holding the new install attributes
+     * @return void
+     * @throws IllegalArgumentException if the attrs parameter is invalid
+     * @throws IllegalStateException if the Approov SDK is not initialized
+     */
+    public static void setInstallAttrsInToken(String attrs) {
+        try {
+            Approov.setInstallAttrsInToken(attrs);
+            Log.d(TAG, "setInstallAttrsInToken");
+        } catch (IllegalArgumentException e) {
+            Log.e(TAG, "setInstallAttrsInToken failed with IllegalArgument: " + e.getMessage());
+        } catch (IllegalStateException e) {
+            Log.e(TAG, "setInstallAttrsInToken failed with IllegalState: " + e.getMessage());
+        }
+    }
+
+    /**
      * Rebuilds the pins in the pinning interceptor after a dynamic configuration change.
      */
     static synchronized void rebuildPins() {
