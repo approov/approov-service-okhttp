@@ -813,7 +813,7 @@ public class ApproovService {
      * @return void
      * @throws ApproovException if the attrs parameter is invalid or the SDK is not initialized
      */
-    public static void setInstallAttrsInToken(String attrs) {
+    public static void setInstallAttrsInToken(String attrs) throws ApproovException {
         try {
             Approov.setInstallAttrsInToken(attrs);
             Log.d(TAG, "setInstallAttrsInToken");
