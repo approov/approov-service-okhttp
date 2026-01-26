@@ -217,7 +217,17 @@ public class ApproovDefaultMessageSigning implements ApproovServiceMutator {
         switch (params.getAlg()) {
             case ALG_ES256: {
                 sigId = "install";
-                String base64 = ApproovService.getInstallMessageSignature(message);
+                String base64;
+                try {
+                    base64 = ApproovService.getInstallMessageSignature(message);
+                } catch (ApproovException e) {
+                    Log.d(TAG, "Failed to get InstallMessageSignature - skipping message signing " + e);
+                    return request;
+                }
+                if (base64.isEmpty()) {
+                    Log.d(TAG, "InstallMessageSignature is empty - skipping message signing");
+                    return request;
+                }
                 signature = Base64.decode(base64, Base64.NO_WRAP);
                 // decode the signature from ASN.1 DER format
                 try (ASN1InputStream asn1InputStream = new ASN1InputStream(signature)) {
