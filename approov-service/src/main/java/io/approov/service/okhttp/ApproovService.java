@@ -580,15 +580,19 @@ public class ApproovService {
     }
 
     /**
-     * Prefetches in the background to lower the effective latency of a subsequent
-     * token fetch or
-     * secure string fetch by starting the operation earlier so the subsequent fetch
-     * may be able to
-     * use cached data.
+     * Allows an Approov fetch operation to be performed as early as possible. This
+     * permits a token or secure strings to be available while an application might
+     * be loading resources or is awaiting user input. Since the initial fetch is
+     * the
+     * most expensive the prefetch can hide the most latency.
+     *
+     * @deprecated This method is now automatically called when the service is
+     *             initialized.
      */
+    @Deprecated
     public static synchronized void prefetch() {
         if (isInitialized)
-            // fetch an Approov token using a placeholder domain
+            // fire and forget the prefetch
             Approov.fetchApproovToken(new PrefetchCallbackHandler(), "approov.io");
     }
 

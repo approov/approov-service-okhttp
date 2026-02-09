@@ -285,7 +285,9 @@ fun removeExclusionURLRegex(urlRegex: String)
 ```
 
 ## prefetch
-Performs a fetch to lower the effective latency of a subsequent token fetch or secure string fetch by starting the operation earlier so the subsequent fetch may be able to use cached data. This initiates the prefetch in a background thread.
+Allows an Approov fetch operation to be performed as early as possible. This permits a token or secure strings to be available while an application might be loading resources or is awaiting user input. Since the initial fetch is the most expensive the prefetch can hide the most latency.
+
+**DEPRECATED**: This method is now automatically called when the service is initialized.
 
 **Java:**
 ```Java
