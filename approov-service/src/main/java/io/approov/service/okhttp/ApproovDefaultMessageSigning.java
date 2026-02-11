@@ -69,12 +69,14 @@ public class ApproovDefaultMessageSigning implements ApproovServiceMutator {
     public static final String DIGEST_SHA512 = "sha-512";
 
     /**
-     * Constant for the ECDSA P-256 with SHA-256 algorithm (used when signing with install private key).
+     * Constant for the ECDSA P-256 with SHA-256 algorithm (used when signing with
+     * install private key).
      */
     public final static String ALG_ES256 = "ecdsa-p256-sha256";
 
     /**
-     * Constant for the HMAC with SHA-256 algorithm (used when signing with the account signing key).
+     * Constant for the HMAC with SHA-256 algorithm (used when signing with the
+     * account signing key).
      */
     public final static String ALG_HS256 = "hmac-sha256";
 
@@ -112,10 +114,11 @@ public class ApproovDefaultMessageSigning implements ApproovServiceMutator {
     }
 
     /**
-     * Associates a specific host with a factory for generating signature parameters.
+     * Associates a specific host with a factory for generating signature
+     * parameters.
      *
      * @param hostName The host name.
-     * @param factory The factory to associate with the host.
+     * @param factory  The factory to associate with the host.
      * @return The current instance for method chaining.
      */
     public ApproovDefaultMessageSigning putHostFactory(String hostName, SignatureParametersFactory factory) {
@@ -127,10 +130,12 @@ public class ApproovDefaultMessageSigning implements ApproovServiceMutator {
      * Builds the signature parameters for a given request.
      *
      * @param provider The component provider for the request.
-     * @param changes The request mutations to apply.
-     * @return The generated {@link SignatureParameters}, or {@code null} if no factory is available.
+     * @param changes  The request mutations to apply.
+     * @return The generated {@link SignatureParameters}, or {@code null} if no
+     *         factory is available.
      */
-    protected SignatureParameters buildSignatureParameters(OkHttpComponentProvider provider, ApproovRequestMutations changes) {
+    protected SignatureParameters buildSignatureParameters(OkHttpComponentProvider provider,
+            ApproovRequestMutations changes) {
         SignatureParametersFactory factory = hostFactories.get(provider.getAuthority());
         if (factory == null) {
             factory = defaultFactory;
@@ -142,12 +147,15 @@ public class ApproovDefaultMessageSigning implements ApproovServiceMutator {
     }
 
     /**
-     * Converts one part, encoded as an ASN1Integer, of an ASN.1 DER encoded ES256 signature to a byte array of
+     * Converts one part, encoded as an ASN1Integer, of an ASN.1 DER encoded ES256
+     * signature to a byte array of
      * exactly 32 bytes. Throws IllegalArgumentException if this is not possible.
      *
      * @param bytesAsASN1Integer The ASN1Integer to convert.
-     * @return A byte array of length 32, containing the raw bytes of the signature part.
-     * @throws IllegalArgumentException if the ASN1Integer is not representing a 32 byte array.
+     * @return A byte array of length 32, containing the raw bytes of the signature
+     *         part.
+     * @throws IllegalArgumentException if the ASN1Integer is not representing a 32
+     *                                  byte array.
      */
     private static byte[] to32ByteArray(ASN1Integer bytesAsASN1Integer) {
         BigInteger bytesAsBigInteger = bytesAsASN1Integer.getValue();
@@ -174,12 +182,14 @@ public class ApproovDefaultMessageSigning implements ApproovServiceMutator {
      * a defined SignatureParameter factory for the request.
      *
      * @param request The original HTTP request.
-     * @param changes The request mutations that were applied by the Approov interceptor.
+     * @param changes The request mutations that were applied by the Approov
+     *                interceptor.
      * @return The processed HTTP request with the signature headers added.
      * @throws ApproovException If an error occurs during processing.
      */
     @Override
-    public Request handleInterceptorProcessedRequest(Request request, ApproovRequestMutations changes) throws ApproovException {
+    public Request handleInterceptorProcessedRequest(Request request, ApproovRequestMutations changes)
+            throws ApproovException {
         return processedRequest(request, changes);
     }
 
@@ -209,7 +219,8 @@ public class ApproovDefaultMessageSigning implements ApproovServiceMutator {
         // Apply the params to get the message
         SignatureBaseBuilder baseBuilder = new SignatureBaseBuilder(params, provider);
         String message = baseBuilder.createSignatureBase();
-        // WARNING never log the message as it contains an Approov token which provides access to your API.
+        // WARNING never log the message as it contains an Approov token which provides
+        // access to your API.
 
         // Generate the signature
         String sigId;
@@ -217,7 +228,17 @@ public class ApproovDefaultMessageSigning implements ApproovServiceMutator {
         switch (params.getAlg()) {
             case ALG_ES256: {
                 sigId = "install";
-                String base64 = ApproovService.getInstallMessageSignature(message);
+                String base64;
+                try {
+                    base64 = ApproovService.getInstallMessageSignature(message);
+                } catch (ApproovException e) {
+                    Log.d(TAG, "Failed to get InstallMessageSignature - skipping message signing " + e);
+                    return request;
+                }
+                if (base64.isEmpty()) {
+                    Log.d(TAG, "InstallMessageSignature is empty - skipping message signing");
+                    return request;
+                }
                 signature = Base64.decode(base64, Base64.NO_WRAP);
                 // decode the signature from ASN.1 DER format
                 try (ASN1InputStream asn1InputStream = new ASN1InputStream(signature)) {
@@ -247,8 +268,10 @@ public class ApproovDefaultMessageSigning implements ApproovServiceMutator {
                 throw new IllegalStateException("Unsupported algorithm identifier: " + params.getAlg());
         }
 
-        // Calculate the signature and message descriptor headers. Note that the signatures are
-        // added as strings (as required by the spec) instead of byte sequences which would better
+        // Calculate the signature and message descriptor headers. Note that the
+        // signatures are
+        // added as strings (as required by the spec) instead of byte sequences which
+        // would better
         // fit the data.
         String signatureBase64 = Base64.encodeToString(signature, Base64.NO_WRAP);
         String sigHeader = Dictionary.valueOf(Map.of(
@@ -257,12 +280,14 @@ public class ApproovDefaultMessageSigning implements ApproovServiceMutator {
                 sigId, params.toComponentValue())).serialize();
 
         // Debugging - log the message and signature-related headers
-        // WARNING never log the message in production code as it contains the Approov token which allows API access
+        // WARNING never log the message in production code as it contains the Approov
+        // token which allows API access
         // Log.d(TAG, "Message Value - Signature Message: " + message);
         // Log.d(TAG, "Message Header - Signature: " + sigHeader);
         // Log.d(TAG, "Message Header Signature-Input: " + sigInputHeader);
 
-        // Update the request from the one held by the component provider as the signature builder
+        // Update the request from the one held by the component provider as the
+        // signature builder
         // may have modified it.
         Request.Builder signedBuilder = provider.getRequest().newBuilder()
                 .addHeader("Signature", sigHeader)
@@ -281,13 +306,15 @@ public class ApproovDefaultMessageSigning implements ApproovServiceMutator {
         }
         Request signed = signedBuilder.build();
 
-        // WARNING never log the full request as it contains an Approov token which provides access to your API
+        // WARNING never log the full request as it contains an Approov token which
+        // provides access to your API
         // Log.d(TAG, "Request String: " + signed.toString());
         return signed;
     }
 
     /**
-     * Generates a default {@link SignatureParametersFactory} with predefined settings.
+     * Generates a default {@link SignatureParametersFactory} with predefined
+     * settings.
      *
      * @return A new instance of {@link SignatureParametersFactory}.
      */
@@ -296,14 +323,15 @@ public class ApproovDefaultMessageSigning implements ApproovServiceMutator {
     }
 
     /**
-     * Generates a default {@link SignatureParametersFactory} with optional base parameters.
+     * Generates a default {@link SignatureParametersFactory} with optional base
+     * parameters.
      *
-     * @param baseParametersOverride The base parameters to override, or {@code null} to use defaults.
+     * @param baseParametersOverride The base parameters to override, or
+     *                               {@code null} to use defaults.
      * @return A new instance of {@link SignatureParametersFactory}.
      */
     public static SignatureParametersFactory generateDefaultSignatureParametersFactory(
-            SignatureParameters baseParametersOverride
-    ) {
+            SignatureParameters baseParametersOverride) {
         // default expiry seconds - must encompass worst case request retry
         // time and clock skew
         long defaultExpiresLifetime = 15;
@@ -313,8 +341,7 @@ public class ApproovDefaultMessageSigning implements ApproovServiceMutator {
         } else {
             baseParameters = new SignatureParameters()
                     .addComponentIdentifier(ComponentProvider.DC_METHOD)
-                    .addComponentIdentifier(ComponentProvider.DC_TARGET_URI)
-                    ;
+                    .addComponentIdentifier(ComponentProvider.DC_TARGET_URI);
         }
         return new SignatureParametersFactory()
                 .setBaseParameters(baseParameters)
@@ -324,8 +351,7 @@ public class ApproovDefaultMessageSigning implements ApproovServiceMutator {
                 .setAddApproovTokenHeader(true)
                 .setAddApproovTraceIDHeader(true)
                 .addOptionalHeaders("Authorization", "Content-Length", "Content-Type")
-                .setBodyDigestConfig(DIGEST_SHA256, false)
-                ;
+                .setBodyDigestConfig(DIGEST_SHA256, false);
     }
 
     /**
@@ -418,7 +444,8 @@ public class ApproovDefaultMessageSigning implements ApproovServiceMutator {
 
         /**
          * Sets whether the "created" field should be added to the signature parameters.
-         * The created field holds the device's timestamp indicating when the request was
+         * The created field holds the device's timestamp indicating when the request
+         * was
          * created.
          *
          * @param addCreated Whether to add the "created" field.
@@ -438,7 +465,7 @@ public class ApproovDefaultMessageSigning implements ApproovServiceMutator {
          * lifetime.
          *
          * @param expiresLifetime The expiration lifetime in seconds, if <=0
-         * no expiration is added.
+         *                        no expiration is added.
          * @return The current instance for method chaining.
          */
         public SignatureParametersFactory setExpiresLifetime(long expiresLifetime) {
@@ -447,7 +474,8 @@ public class ApproovDefaultMessageSigning implements ApproovServiceMutator {
         }
 
         /**
-         * Sets whether the Approov token header should be added to the signature parameters.
+         * Sets whether the Approov token header should be added to the signature
+         * parameters.
          *
          * @param addApproovTokenHeader Whether to add the Approov token header.
          * @return The current instance for method chaining.
@@ -458,7 +486,8 @@ public class ApproovDefaultMessageSigning implements ApproovServiceMutator {
         }
 
         /**
-         * Sets whether the optional Approov traceID header should be added to the signature
+         * Sets whether the optional Approov traceID header should be added to the
+         * signature
          * parameters.
          *
          * @param addApproovTraceIDHeader Whether to add the Approov traceID header.
@@ -478,7 +507,7 @@ public class ApproovDefaultMessageSigning implements ApproovServiceMutator {
          * @param headers The headers to add.
          * @return The current instance for method chaining.
          */
-        public SignatureParametersFactory addOptionalHeaders(String ... headers) {
+        public SignatureParametersFactory addOptionalHeaders(String... headers) {
             if (this.optionalHeaders == null) {
                 this.optionalHeaders = new ArrayList<>(Arrays.asList(headers));
             } else {
@@ -490,19 +519,21 @@ public class ApproovDefaultMessageSigning implements ApproovServiceMutator {
         /**
          * Generates a body digest for the request if possible.
          *
-         * @param provider The component provider for the request.
+         * @param provider          The component provider for the request.
          * @param requestParameters The signature parameters to update.
-         * @return {@code true} if the body digest was successfully generated, {@code false} otherwise.
+         * @return {@code true} if the body digest was successfully generated,
+         *         {@code false} otherwise.
          */
         protected boolean generateBodyDigest(OkHttpComponentProvider provider, SignatureParameters requestParameters) {
             RequestBody body = provider.request.body();
-            // ignore null bodies, one shot bodies, or bodies of unknown length as these will
+            // ignore null bodies, one shot bodies, or bodies of unknown length as these
+            // will
             // likely require more specific knowledge
             if (body == null || body.isOneShot()) {
                 return false;
             } else {
                 try {
-                    if (body.contentLength() <= 0 ) {
+                    if (body.contentLength() <= 0) {
                         return false;
                     }
                 } catch (IOException e) {
@@ -550,11 +581,12 @@ public class ApproovDefaultMessageSigning implements ApproovServiceMutator {
          * Builds the signature parameters for a given request.
          *
          * @param provider The component provider for the request.
-         * @param changes The request mutations to apply.
+         * @param changes  The request mutations to apply.
          * @return The generated {@link SignatureParameters}.
          * @throws IllegalStateException If required parameters cannot be generated.
          */
-        protected SignatureParameters buildSignatureParameters(OkHttpComponentProvider provider, ApproovRequestMutations changes) {
+        protected SignatureParameters buildSignatureParameters(OkHttpComponentProvider provider,
+                ApproovRequestMutations changes) {
             SignatureParameters requestParameters = new SignatureParameters(baseParameters);
             if (useAccountMessageSigning) {
                 requestParameters.setAlg(ALG_HS256);
@@ -576,7 +608,7 @@ public class ApproovDefaultMessageSigning implements ApproovServiceMutator {
             if (addApproovTraceIDHeader && changes.getTraceIDHeaderKey() != null) {
                 requestParameters.addComponentIdentifier(changes.getTraceIDHeaderKey());
             }
-            for (String headerName: optionalHeaders) {
+            for (String headerName : optionalHeaders) {
                 if (provider.hasField(headerName)) {
                     requestParameters.addComponentIdentifier(headerName);
                 }
@@ -591,15 +623,16 @@ public class ApproovDefaultMessageSigning implements ApproovServiceMutator {
     }
 
     /**
-     * OkHttpComponentProvider implements the ComponentProvider interface for OkHttp3 requests.
+     * OkHttpComponentProvider implements the ComponentProvider interface for
+     * OkHttp3 requests.
      */
     protected static final class OkHttpComponentProvider implements ComponentProvider {
         private Request request;
-        
+
         private HttpUrl okURL;
-        
+
         private URI jURI;
-        
+
         /**
          * Constructs an instance of {@code OkHttpComponentProvider}.
          *
@@ -669,9 +702,12 @@ public class ApproovDefaultMessageSigning implements ApproovServiceMutator {
             if (values.isEmpty()) {
                 throw new IllegalArgumentException("Could not find query parameter named " + name);
             } else if (values.size() > 1) {
-                // From Section 2.2.8 of the spec: If a parameter name occurs multiple times in a request, the
-                // named query parameter MUST NOT be included. If multiple parameters are common within
-                // an application, it is RECOMMENDED to sign the entire query string using the @query
+                // From Section 2.2.8 of the spec: If a parameter name occurs multiple times in
+                // a request, the
+                // named query parameter MUST NOT be included. If multiple parameters are common
+                // within
+                // an application, it is RECOMMENDED to sign the entire query string using the
+                // @query
                 // component identifier defined in Section 2.2.7.
 
                 // to indicate that a query param must not be included, we return null
