@@ -48,6 +48,8 @@ fun initialize(context: Context, config: String, comment: String)
 
 ## setApproovInterceptorExtensions
 
+**OBSOLETED**: Use `setServiceMutator` instead.
+
 Sets the interceptor extensions callback handler. This facility supports message signing that is independent from the rest of the attestation flow. The default ApproovService layer issues no callbacks. Provide a non-null handler to add functionality to the attestation flow. The configuration used to control installation message signing is passed in the `callbacks` parameter. The behavior of the provided configuration must remain constant while in use by the ApproovService. Passing `null` to this method will disable message signing.
 
 **Java:**
@@ -147,7 +149,7 @@ void setProceedOnNetworkFail(boolean proceed)
 fun setProceedOnNetworkFail(proceed: Boolean)
 ```
 
-**DEPRECATED**: Use `setServiceMutator` instead to control this behavior.
+**OBSOLETED**: Use `setServiceMutator` instead to control this behavior.
 
 
 Note that this should be used with *CAUTION* because it may allow a connection to be established before any dynamic pins have been received via Approov, thus potentially opening the channel to a MitM.

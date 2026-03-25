@@ -114,6 +114,14 @@ class MyMutator : ApproovServiceMutator {
 ApproovService.setServiceMutator(MyMutator()) // Install custom implementation or pass null to revert to default behaviour
 ```
 
+## Approov Token Fallback Status
+
+If the SDK cannot obtain a valid Approov token (e.g., due to a `NO_NETWORK` or `MITM_DETECTED` state), the request traditionally proceeds without the `Approov-Token` header or fails entirely depending on the current policy. To give your backend visibility into *why* there is no token, you can use `ApproovService.setUseApproovStatusIfNoToken(true)`.
+
+When enabled, the service will inject the Approov fetch status directly into the `Approov-Token` header if the actual token fetch fails or is empty. Your backend can then distinguish between a request that was sent without a token due to an attacker stripping it, versus a legitimate request that encountered a specific failure like `POOR_NETWORK`. 
+
+Please note that this behavior is conditional upon the configuration of your `ApproovServiceMutator`. If your mutator explicitly throws an error or aborts the request entirely for a particular status (for example, throwing an exception on `NO_NETWORK`), the request will never proceed to the server, and this status fallback feature will effectively not be used for that specific case.
+
 ## Message signing
 
 It is possible to sign HTTP requests using Approov to ensure message integrity and authenticity. There are two types of message signing available:
