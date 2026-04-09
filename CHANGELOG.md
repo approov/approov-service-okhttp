@@ -10,9 +10,11 @@ The format is based on Keep a Changelog and this project adheres to Semantic Ver
 - Integrated a localized testing framework for comprehensive service layer verification.
 - Added extensive test coverage for token management, pinning synchronization, and request mutation scenarios.
 - Enhanced internal service components to improve testability.
+- Added `ApproovService.isInitialized()` to expose the service-layer initialization state.
 
 ### Fixed
 - Improved service re-initialization consistency for internal state management.
+- Initializing with an empty config string now keeps the service layer initialized while returning a plain `OkHttpClient` without Approov processing.
 
 ## [3.5.6] - 2026-02-11
 

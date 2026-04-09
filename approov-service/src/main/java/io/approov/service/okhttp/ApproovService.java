@@ -196,6 +196,26 @@ public class ApproovService {
     }
 
     /**
+     * Indicates whether the service layer has been initialized.
+     *
+     * @return true if the service layer has been initialized, false otherwise
+     */
+    public static synchronized boolean isInitialized() {
+        return isInitialized;
+    }
+
+    /**
+     * Indicates whether Approov protection is enabled for this service layer
+     * instance. If initialization used an empty config string then the layer is
+     * initialized but Approov protection is bypassed.
+     *
+     * @return true if Approov protection is enabled, false otherwise
+     */
+    static synchronized boolean isApproovEnabled() {
+        return isInitialized && (configString != null) && !configString.isEmpty();
+    }
+
+    /**
      * Sets a flag indicating if the network interceptor should proceed anyway if it
      * is
      * not possible to obtain an Approov token due to a networking failure. If this
@@ -980,7 +1000,6 @@ public class ApproovService {
             pinningInterceptor.buildPins();
     }
 
-
     /**
      * Gets the current CertificatePinner.
      *
@@ -1049,7 +1068,7 @@ public class ApproovService {
                 okHttpBuilder = new OkHttpClient.Builder();
             }
             // build a new OkHttpClient on demand
-            if (isInitialized) {
+            if (isApproovEnabled()) {
                 // remove any existing ApproovTokenInterceptor from the builder
                 List<Interceptor> interceptors = okHttpBuilder.interceptors();
                 Iterator<Interceptor> iter = interceptors.iterator();
@@ -1075,9 +1094,9 @@ public class ApproovService {
                         .addInterceptor(tokenInterceptor)
                         .addNetworkInterceptor(pinningInterceptor).build();
             } else {
-                // if the ApproovService was not initialized or Approov is disabled, build plain
-                // client
-                Log.e(TAG, "Cannot build Approov OkHttpClient as not initialized");
+                // if the ApproovService was not initialized or Approov is bypassed, build a
+                // plain client
+                Log.d(TAG, "Building plain OkHttpClient for " + builderName);
                 okHttpClient = okHttpBuilder.build();
             }
             // cache the client for future usages

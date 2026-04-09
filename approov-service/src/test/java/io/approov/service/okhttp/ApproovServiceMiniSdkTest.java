@@ -83,6 +83,34 @@ public class ApproovServiceMiniSdkTest {
         }
     }
 
+    /**
+     * §1 Empty Configuration (Valid Comment) / Empty Configuration (Empty Comment)
+     *
+     * Initializing with an empty config should keep the service layer initialized
+     * while making the returned client behave like a plain OkHttp client with no
+     * Approov mutations.
+     */
+    @Test
+    public void testInitializeWithEmptyConfigBuildsPlainClient() throws Exception {
+        reinitializeService(scenarioJson(uniqueCaseName("empty-config"),
+            "\"protectedDomains\": [\"" + getTargetHost() + "\"]"));
+        ApproovService.initialize(context, "", "reinit-empty-config");
+
+        assertTrue(ApproovService.isInitialized());
+
+        OkHttpClient client = ApproovService.getOkHttpClient();
+        Request request = new Request.Builder()
+            .url(getTargetURL())
+            .build();
+
+        try (Response response = client.newCall(request).execute()) {
+            assertTrue(response.isSuccessful());
+            JSONObject reply = new JSONObject(response.body().string());
+            assertNull(getHeader(reply, "Approov-Token"));
+            assertNull(getHeader(reply, "Approov-TraceID"));
+        }
+    }
+
     // ==================================================================================
     // SECTION 2: Request Processing & Token Behaviors
     // TESTING_REQUIREMENTS.md §2

@@ -32,7 +32,7 @@ fun initialize(context: Context, config: String)
 
 The [application context](https://developer.android.com/reference/android/content/Context#getApplicationContext()) must be provided using the `context` parameter.
 
-It is possible to pass an empty `config` string to indicate that no initialization is required. Only do this if you are also using a different Approov service layer in your app (which will use the same underlying Approov SDK) and this will have been initialized first.
+It is possible to pass an empty `config` string to bypass Approov SDK initialization. In that case the service layer still reports itself as initialized, but any `OkHttpClient` obtained from it behaves as a plain client with no Approov token injection, message signing, secure strings, or pinning.
 
 An alternative initialization function allows to provide further options in the `comment` parameter. Please refer to the [Approov SDK documentation](https://approov.io/docs/latest/approov-direct-sdk-integration/#sdk-initialization-options) for details.
 
@@ -45,6 +45,21 @@ void initialize(Context context, String config, String comment)
 ```kotlin
 fun initialize(context: Context, config: String, comment: String)
 ```
+
+## isInitialized
+Returns whether the service layer itself has been initialized.
+
+**Java:**
+```java
+boolean isInitialized()
+```
+
+**Kotlin:**
+```kotlin
+fun isInitialized(): Boolean
+```
+
+This reports the state of the service layer, not whether Approov protection is currently active. If initialization used an empty `config` string then this returns `true`, while the layer still operates as a plain `OkHttpClient` wrapper without Approov features.
 
 ## setApproovInterceptorExtensions
 
