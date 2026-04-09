@@ -4,6 +4,16 @@ All notable changes to this package will be documented in this file.
 
 The format is based on Keep a Changelog and this project adheres to Semantic Versioning.
 
+## [3.5.7] - 2026-04-09
+
+### Added
+- Integrated a localized testing framework for comprehensive service layer verification.
+- Added extensive test coverage for token management, pinning synchronization, and request mutation scenarios.
+- Enhanced internal service components to improve testability.
+
+### Fixed
+- Improved service re-initialization consistency for internal state management.
+
 ## [3.5.6] - 2026-02-11
 
 ### Added

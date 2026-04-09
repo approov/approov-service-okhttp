@@ -19,6 +19,7 @@ package io.approov.service.okhttp;
 
 import android.util.Log;
 import android.content.Context;
+import androidx.annotation.VisibleForTesting;
 
 import com.criticalblue.approovsdk.Approov;
 
@@ -979,6 +980,19 @@ public class ApproovService {
             pinningInterceptor.buildPins();
     }
 
+
+    /**
+     * Gets the current CertificatePinner.
+     *
+     * @return the current CertificatePinner
+     */
+    @VisibleForTesting
+    static synchronized CertificatePinner getCertificatePinner() {
+        if (pinningInterceptor != null)
+            return pinningInterceptor.getCertificatePinner();
+        return new CertificatePinner.Builder().build();
+    }
+
     /**
      * Sets the OkHttpClient.Builder to be used for constructing the Approov
      * OkHttpClient for a
@@ -1333,7 +1347,7 @@ class ApproovPinningInterceptor implements Interceptor {
      *
      * @return the current CertificatePinner
      */
-    synchronized private CertificatePinner getCertificatePinner() {
+    synchronized CertificatePinner getCertificatePinner() {
         return certificatePinner;
     }
 

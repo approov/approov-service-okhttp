@@ -27,6 +27,18 @@ android {
         sourceCompatibility JavaVersion.VERSION_1_8
         targetCompatibility JavaVersion.VERSION_1_8
     }
+    testOptions {
+        unitTests {
+            includeAndroidResources = false
+            returnDefaultValues = true
+        }
+    }
+}
+
+configurations {
+    testImplementation {
+        exclude group: 'io.approov', module: 'approov-android-sdk'
+    }
 }
 
 dependencies {
@@ -35,4 +47,9 @@ dependencies {
     implementation 'org.bouncycastle:bcprov-jdk15to18:1.80'
     implementation 'androidx.annotation:annotation-jvm:1.9.1'
     testImplementation 'junit:junit:4.13.2'
+    testImplementation project(':approov-sdk')
+    testImplementation project(':test-support')
+    testImplementation 'org.robolectric:robolectric:4.11.1'
+    testImplementation 'org.json:json:20231013'
+    testImplementation 'androidx.test:core:1.6.1'
 }
