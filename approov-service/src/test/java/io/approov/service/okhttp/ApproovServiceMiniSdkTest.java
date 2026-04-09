@@ -12,6 +12,8 @@ import org.junit.After;
 import org.junit.Before;
 import org.junit.Test;
 import org.junit.runner.RunWith;
+import okhttp3.MediaType;
+import okhttp3.RequestBody;
 import org.robolectric.RobolectricTestRunner;
 import org.robolectric.annotation.Config;
  
@@ -240,6 +242,34 @@ public class ApproovServiceMiniSdkTest {
     }
  
     @Test
+    public void testFetchSecureStringEmptyKeyThrowsException() {
+        try {
+            ApproovService.fetchSecureString("", null);
+            fail("Expected ApproovException");
+        } catch (ApproovException e) {
+            // SDK validates key length: "Approov secure string key must be between 1 and 64 characters"
+            assertTrue("Expected key validation message: " + e.getMessage(),
+                e.getMessage().contains("1 and 64") || e.getMessage().toUpperCase().contains("BAD_KEY"));
+        }
+    }
+
+    @Test
+    public void testFetchSecureStringNilKeyThrowsException() {
+        try {
+            ApproovService.fetchSecureString(null, null);
+            fail("Expected ApproovException or IllegalArgumentException");
+        } catch (ApproovException e) {
+            // SDK wraps IllegalArgumentException("Approov key cannot be null")
+            assertTrue("Expected null-related message: " + e.getMessage(),
+                e.getMessage().toLowerCase().contains("null"));
+        } catch (IllegalArgumentException e) {
+            // SDK may throw directly before service layer catches it
+            assertTrue("Expected null-related message: " + e.getMessage(),
+                e.getMessage().toLowerCase().contains("null"));
+        }
+    }
+ 
+    @Test
     public void testFetchCustomJWTReturnsSignedJWT() throws Exception {
         String jwt = ApproovService.fetchCustomJWT("{\"role\":\"tester\"}");
         assertNotNull(jwt);
@@ -248,6 +278,23 @@ public class ApproovServiceMiniSdkTest {
         assertEquals("tester", payload.getString("role"));
         assertFalse(payload.has("exp"));
         assertFalse(payload.has("did"));
+    }
+
+    @Test
+    public void testFetchCustomJWT18KBPayload() throws Exception {
+        StringBuilder sb = new StringBuilder(18 * 1024);
+        for (int i = 0; i < 18 * 1024; i++) {
+            sb.append("A");
+        }
+        String largePayload = sb.toString();
+        
+        JSONObject payloadStruct = new JSONObject();
+        payloadStruct.put("data", largePayload);
+        
+        String jwt = ApproovService.fetchCustomJWT(payloadStruct.toString());
+        assertNotNull(jwt);
+        JSONObject payloadMap = decodeJWTBody(jwt);
+        assertEquals(largePayload, payloadMap.getString("data"));
     }
 
     @Test
@@ -523,6 +570,105 @@ public class ApproovServiceMiniSdkTest {
         MessageDigest digest = MessageDigest.getInstance("SHA-256");
         byte[] hash = digest.digest(data.getBytes(StandardCharsets.UTF_8));
         return Base64.getEncoder().encodeToString(hash);
+    }
+
+    @Test
+    public void testInstallMessageSigningFailsGracefullyIfKeyGenerationFails() throws Exception {
+        String targetHost = getTargetHost();
+        String body = "\"protectedDomains\": [\"" + targetHost + "\"]," +
+                       "\"simulateInstallKeyFailure\": true";
+        reinitializeService(scenarioJson(uniqueCaseName("no-install-key"), body));
+        
+        ApproovDefaultMessageSigning.SignatureParametersFactory factory =
+            ApproovDefaultMessageSigning.generateDefaultSignatureParametersFactory().setUseInstallMessageSigning();
+        ApproovService.setServiceMutator(new ApproovDefaultMessageSigning().setDefaultFactory(factory));
+
+        OkHttpClient client = ApproovService.getOkHttpClient();
+        Request request = new Request.Builder().url(getTargetURL()).get().build();
+        
+        try (Response response = client.newCall(request).execute()) {
+            assertEquals(200, response.code());
+            JSONObject reply = new JSONObject(response.body().string());
+            
+            assertNotNull(getHeader(reply, "Approov-Token"));
+            assertNull(getHeader(reply, "Signature"));
+            assertNull(getHeader(reply, "Signature-Input"));
+        }
+    }
+
+    @Test
+    public void testDigestBodyAppendedForPOSTPUTPATCHRequests() throws Exception {
+        reinitializeServiceWithTargetHost("");
+        
+        ApproovDefaultMessageSigning.SignatureParametersFactory factory = ApproovDefaultMessageSigning.generateDefaultSignatureParametersFactory()
+            .setUseInstallMessageSigning();
+        factory.setBodyDigestConfig(ApproovDefaultMessageSigning.DIGEST_SHA256, true);
+        
+        ApproovService.setServiceMutator(new ApproovDefaultMessageSigning().setDefaultFactory(factory));
+
+        String[] methods = {"POST", "PUT", "PATCH"};
+        for (String method : methods) {
+            OkHttpClient client = ApproovService.getOkHttpClient();
+            RequestBody reqBody = RequestBody.create(MediaType.parse("application/json"), "{\"test\": 1}");
+            Request request = new Request.Builder()
+                .url(getTargetURL())
+                .method(method, reqBody)
+                .build();
+            
+            try (Response response = client.newCall(request).execute()) {
+                assertEquals(200, response.code());
+                JSONObject reply = new JSONObject(response.body().string());
+                
+                assertNotNull(getHeader(reply, "Approov-Token"));
+                String sigInput = getHeader(reply, "Signature-Input");
+                assertNotNull("Missing Signature-Input for " + method, sigInput);
+                assertTrue(sigInput.contains("content-digest"));
+                assertNotNull("Missing Content-Digest for " + method, getHeader(reply, "Content-Digest"));
+            }
+        }
+    }
+
+    @Test
+    public void testServiceMutatorOverridesFailClosedBehavior() throws Exception {
+        reinitializeServiceWithTargetHost("");
+        
+        setDirective("{" +
+            "  \"operation\": \"fetchApproovToken\"," +
+            "  \"response\": {" +
+            "    \"status\": \"MITM_DETECTED\"" +
+            "  }" +
+            "}");
+            
+        ApproovService.setServiceMutator(new ApproovServiceMutator() {
+            @Override
+            public boolean handleInterceptorFetchTokenResult(Approov.TokenFetchResult approovResults, String url) throws ApproovException {
+                return false;
+            }
+        });
+
+        OkHttpClient client = ApproovService.getOkHttpClient();
+        Request request = new Request.Builder().url(getTargetURL()).get().build();
+        
+        try (Response response = client.newCall(request).execute()) {
+            assertEquals(200, response.code());
+            JSONObject reply = new JSONObject(response.body().string());
+            assertNull(getHeader(reply, "Approov-Token"));
+        }
+    }
+
+    @Test
+    public void testPinningAcceptAny() throws Exception {
+        reinitializeServiceWithTargetHost("");
+        ApproovService.setServiceMutator(ApproovServiceMutator.DEFAULT);
+        
+        AttesterProxyController.setNextPinningDirectiveJson("{\"operation\": \"getPins\", \"acceptAny\": true}");
+        
+        OkHttpClient client = ApproovService.getOkHttpClient();
+        Request request = new Request.Builder().url(getTargetURL()).get().build();
+        
+        try (Response response = client.newCall(request).execute()) {
+            assertEquals(200, response.code());
+        }
     }
     @Test
     public void testDynamicPinningUpdate() throws Exception {
