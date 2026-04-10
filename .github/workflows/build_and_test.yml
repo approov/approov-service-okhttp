@@ -56,8 +56,9 @@ jobs:
             -H "Content-Type: application/json" \
             -d '{"check":"protected","service":"approov-service-okhttp","status":"pre-flight"}')
           echo "$RESPONSE"
-          # Confirm the worker echoed our body field back
-          echo "$RESPONSE" | grep -q '"check":"protected"' \
+          # Confirm the worker echoed our body back (body is JSON-escaped in the
+          # response, so match an unquoted substring that is uniquely ours)
+          echo "$RESPONSE" | grep -q 'pre-flight' \
             || (echo "ERROR: protected worker did not echo request body" && exit 1)
           echo "Protected worker is UP and echoing correctly."
 
@@ -70,7 +71,7 @@ jobs:
             -H "Content-Type: application/json" \
             -d '{"check":"unprotected","service":"approov-service-okhttp","status":"pre-flight"}')
           echo "$RESPONSE"
-          echo "$RESPONSE" | grep -q '"check":"unprotected"' \
+          echo "$RESPONSE" | grep -q 'pre-flight' \
             || (echo "ERROR: unprotected worker did not echo request body" && exit 1)
           echo "Unprotected worker is UP and echoing correctly."
 
