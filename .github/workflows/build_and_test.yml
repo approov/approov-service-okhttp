@@ -12,9 +12,14 @@ jobs:
       WORKSPACE: "${{ github.workspace }}"
       GIT_BRANCH: "${{ github.ref }}"
       CURRENT_TAG: "${{ github.ref_name }}"
-      # Worker endpoints used by the mini-sdk and test suite
-      TESTING_REPLY_URL: "https://replay.ivol.workers.dev"
-      TESTING_REPLY_URL_UNPROTECTED: "https://replay-unprotected.ivol.workers.dev"
+      # Worker endpoints: consumed from GitHub organisation variables first.
+      # If the org variable is not set the value is an empty string; the probe
+      # step below falls back to the same hardcoded defaults that are baked into
+      # the mini-sdk (MiniAttesterConfig / Approov.m), keeping them in sync.
+      # Worker management (create / redeploy) is the sole responsibility of
+      # core-service-layers-testing — no Cloudflare credentials live here.
+      TESTING_REPLY_URL: ${{ vars.TESTING_REPLY_URL }}
+      TESTING_REPLY_URL_UNPROTECTED: ${{ vars.TESTING_REPLY_URL_UNPROTECTED }}
 
     steps:
       # -----------------------------------------------------------------------
@@ -37,43 +42,76 @@ jobs:
         uses: actions/checkout@v4
         with:
           repository: approov/core-service-layers-testing
-          # Use a PAT stored in repo secrets to access the private repo.
-          # See setup instructions at the bottom of this file.
           token: ${{ secrets.CORE_SERVICE_LAYERS_TESTING_PAT }}
           path: core-service-layers-testing
 
       # -----------------------------------------------------------------------
-      # 3. Verify worker endpoints are reachable and echo the request body
-      #    Both endpoints are Cloudflare Workers that mirror the request back
-      #    as JSON, so we confirm the "body" field matches what we sent.
+      # 3. Verify worker endpoints
+      #
+      #    URLs are resolved with the following precedence (mirrors the mini-sdk
+      #    fallback logic in MiniAttesterConfig / Approov.m):
+      #      1. GitHub org variable  (TESTING_REPLY_URL / _UNPROTECTED)
+      #      2. Mini-SDK hardcoded defaults (replay.ivol.workers.dev / replay-unprotected.ivol.workers.dev)
+      #
+      #    Worker deployment is NOT performed here — that is owned exclusively
+      #    by core-service-layers-testing CI.  If the workers are down this job
+      #    fails fast with a clear message.
       # -----------------------------------------------------------------------
-      - name: Verify protected worker endpoint
+      - name: Verify worker endpoints
         run: |
-          echo "==> POST to $TESTING_REPLY_URL"
-          RESPONSE=$(curl --silent --show-error --fail \
-            --max-time 15 \
-            -X POST "$TESTING_REPLY_URL" \
-            -H "Content-Type: application/json" \
-            -d '{"check":"protected","service":"approov-service-okhttp","status":"pre-flight"}')
-          echo "$RESPONSE"
-          # Confirm the worker echoed our body back (body is JSON-escaped in the
-          # response, so match an unquoted substring that is uniquely ours)
-          echo "$RESPONSE" | grep -q 'pre-flight' \
-            || (echo "ERROR: protected worker did not echo request body" && exit 1)
-          echo "Protected worker is UP and echoing correctly."
+          # ── URL resolution ──────────────────────────────────────────────────
+          # Replicate the mini-sdk fallback: org variable → hardcoded default.
+          PROTECTED_URL="${TESTING_REPLY_URL:-https://replay.ivol.workers.dev}"
+          UNPROTECTED_URL="${TESTING_REPLY_URL_UNPROTECTED:-https://replay-unprotected.ivol.workers.dev}"
 
-      - name: Verify unprotected worker endpoint
-        run: |
-          echo "==> POST to $TESTING_REPLY_URL_UNPROTECTED"
-          RESPONSE=$(curl --silent --show-error --fail \
-            --max-time 15 \
-            -X POST "$TESTING_REPLY_URL_UNPROTECTED" \
-            -H "Content-Type: application/json" \
-            -d '{"check":"unprotected","service":"approov-service-okhttp","status":"pre-flight"}')
-          echo "$RESPONSE"
-          echo "$RESPONSE" | grep -q 'pre-flight' \
-            || (echo "ERROR: unprotected worker did not echo request body" && exit 1)
-          echo "Unprotected worker is UP and echoing correctly."
+          if [ -n "$TESTING_REPLY_URL" ]; then
+            echo "Using org variable TESTING_REPLY_URL: $PROTECTED_URL"
+          else
+            echo "TESTING_REPLY_URL org variable not set — using mini-sdk default: $PROTECTED_URL"
+          fi
+
+          if [ -n "$TESTING_REPLY_URL_UNPROTECTED" ]; then
+            echo "Using org variable TESTING_REPLY_URL_UNPROTECTED: $UNPROTECTED_URL"
+          else
+            echo "TESTING_REPLY_URL_UNPROTECTED org variable not set — using mini-sdk default: $UNPROTECTED_URL"
+          fi
+
+          # Export resolved URLs so subsequent steps (and Gradle tests) pick
+          # them up even when the org variables were not originally set.
+          echo "TESTING_REPLY_URL=$PROTECTED_URL"       >> "$GITHUB_ENV"
+          echo "TESTING_REPLY_URL_UNPROTECTED=$UNPROTECTED_URL" >> "$GITHUB_ENV"
+
+          # ── Probe function ──────────────────────────────────────────────────
+          verify_worker() {
+            local label="$1" url="$2"
+            echo ""
+            echo "==> POST to $label ($url)"
+            RESP=$(curl --silent --show-error --fail --max-time 15 \
+              -X POST "$url" \
+              -H "Content-Type: application/json" \
+              -d '{"check":"verify","service":"approov-service-okhttp","status":"pre-flight"}')
+            echo "$RESP"
+            # The worker JSON-escapes the body inside the response object, so
+            # match a plain substring that is guaranteed to appear verbatim.
+            echo "$RESP" | grep -q 'pre-flight' \
+              || { echo "ERROR: $label did not echo the request body."; return 1; }
+            echo "  OK — $label is up and echoing correctly."
+          }
+
+          FAILED=false
+          verify_worker "protected worker"   "$PROTECTED_URL"   || FAILED=true
+          verify_worker "unprotected worker" "$UNPROTECTED_URL" || FAILED=true
+
+          if $FAILED; then
+            echo ""
+            echo "One or more worker endpoints are unavailable."
+            echo "Worker management is handled by core-service-layers-testing CI."
+            echo "Please check that the workers are deployed and the org variables are correct."
+            exit 1
+          fi
+
+          echo ""
+          echo "All worker endpoints are healthy."
 
       # -----------------------------------------------------------------------
       # 4. Java / Android toolchain setup
