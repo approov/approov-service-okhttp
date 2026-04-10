@@ -122,7 +122,136 @@ jobs:
         run: ./gradlew test
 
       # -----------------------------------------------------------------------
-      # 6. Upload test results for inspection if tests fail
+      # 6. Print test summary to the console and to the Actions Job Summary
+      #    Parses every JUnit XML produced by Gradle and emits:
+      #      • a formatted table in the step log
+      #      • a markdown table in the Job Summary (Actions UI → Summary tab)
+      # -----------------------------------------------------------------------
+      - name: Print test summary
+        if: always()
+        working-directory: approov-service-okhttp
+        run: |
+          python3 - <<'EOF'
+          import os, sys, glob, xml.etree.ElementTree as ET
+          from collections import defaultdict
+
+          PASS  = "\u2705"
+          FAIL  = "\u274c"
+          SKIP  = "\u23ed\ufe0f"
+          ERROR = "\u26a0\ufe0f"
+
+          results_root = "approov-service/build/test-results"
+          xml_files = sorted(glob.glob(f"{results_root}/**/*.xml", recursive=True))
+
+          if not xml_files:
+              print("No test-result XML files found.")
+              sys.exit(0)
+
+          # Group suites by variant directory name (testDebugUnitTest, etc.)
+          by_variant = defaultdict(list)
+          for path in xml_files:
+              variant = os.path.basename(os.path.dirname(path))
+              try:
+                  root = ET.parse(path).getroot()
+              except ET.ParseError:
+                  continue
+              suite = {
+                  "name":     root.get("name", os.path.basename(path)),
+                  "tests":    int(root.get("tests",    0)),
+                  "failures": int(root.get("failures", 0)),
+                  "errors":   int(root.get("errors",   0)),
+                  "skipped":  int(root.get("skipped",  0)),
+                  "time":     float(root.get("time",   0)),
+                  "cases":    [],
+              }
+              for tc in root.findall("testcase"):
+                  status = PASS
+                  detail = ""
+                  if tc.find("failure") is not None:
+                      status = FAIL
+                      detail = (tc.find("failure").get("message") or "").split("\n")[0][:120]
+                  elif tc.find("error") is not None:
+                      status = ERROR
+                      detail = (tc.find("error").get("message") or "").split("\n")[0][:120]
+                  elif tc.find("skipped") is not None:
+                      status = SKIP
+                  suite["cases"].append({
+                      "name":   tc.get("name", "?"),
+                      "time":   float(tc.get("time", 0)),
+                      "status": status,
+                      "detail": detail,
+                  })
+              by_variant[variant].append(suite)
+
+          # ── Console output ──────────────────────────────────────────────────
+          overall_ok = True
+          for variant, suites in sorted(by_variant.items()):
+              total_t = sum(s["tests"] for s in suites)
+              total_f = sum(s["failures"] + s["errors"] for s in suites)
+              total_s = sum(s["skipped"] for s in suites)
+              total_p = total_t - total_f - total_s
+              icon = PASS if total_f == 0 else FAIL
+              if total_f > 0:
+                  overall_ok = False
+              print()
+              print(f"{'='*70}")
+              print(f"  {icon}  {variant}  |  {total_p}/{total_t} passed  "
+                    f"|  {total_f} failed  |  {total_s} skipped")
+              print(f"{'='*70}")
+              for suite in suites:
+                  short = suite["name"].split(".")[-1]
+                  p = suite["tests"] - suite["failures"] - suite["errors"] - suite["skipped"]
+                  f = suite["failures"] + suite["errors"]
+                  print(f"  {PASS if f==0 else FAIL}  {short:<55} {p}/{suite['tests']}  ({suite['time']:.2f}s)")
+                  for case in suite["cases"]:
+                      if case["status"] != PASS:
+                          print(f"       {case['status']}  {case['name']}")
+                          if case["detail"]:
+                              print(f"          {case['detail']}")
+          print()
+
+          # ── GitHub Job Summary (markdown) ───────────────────────────────────
+          summary_path = os.environ.get("GITHUB_STEP_SUMMARY", "")
+          if not summary_path:
+              sys.exit(0 if overall_ok else 1)
+
+          with open(summary_path, "a") as md:
+              md.write("## \U0001f9ea Unit Test Results\n\n")
+              for variant, suites in sorted(by_variant.items()):
+                  total_t = sum(s["tests"] for s in suites)
+                  total_f = sum(s["failures"] + s["errors"] for s in suites)
+                  total_s = sum(s["skipped"] for s in suites)
+                  total_p = total_t - total_f - total_s
+                  badge = "\U0001f7e2 PASSED" if total_f == 0 else "\U0001f534 FAILED"
+                  md.write(f"### {variant} &nbsp; {badge}\n\n")
+                  md.write(f"> **{total_p} passed** &nbsp;|&nbsp; "
+                           f"**{total_f} failed** &nbsp;|&nbsp; "
+                           f"**{total_s} skipped** &nbsp;|&nbsp; "
+                           f"**{total_t} total**\n\n")
+                  md.write("| Status | Test suite | Tests | Failed | Skipped | Time |\n")
+                  md.write("|--------|------------|------:|-------:|--------:|-----:|\n")
+                  for suite in suites:
+                      short = suite["name"].split(".")[-1]
+                      f = suite["failures"] + suite["errors"]
+                      icon = "\U0001f7e2" if f == 0 else "\U0001f534"
+                      md.write(f"| {icon} | `{short}` | {suite['tests']} | {f} | {suite['skipped']} | {suite['time']:.2f}s |\n")
+                  # Expand failures inline
+                  failures = [c for s in suites for c in s["cases"] if c["status"] in (FAIL, ERROR)]
+                  if failures:
+                      md.write("\n<details><summary>Failed tests</summary>\n\n")
+                      for c in failures:
+                          md.write(f"- {c['status']} `{c['name']}`")
+                          if c["detail"]:
+                              md.write(f"  \n  > {c['detail']}")
+                          md.write("\n")
+                      md.write("\n</details>\n")
+                  md.write("\n")
+
+          sys.exit(0 if overall_ok else 1)
+          EOF
+
+      # -----------------------------------------------------------------------
+      # 7. Upload HTML reports as a downloadable artifact
       # -----------------------------------------------------------------------
       - name: Upload test results
         if: always()
