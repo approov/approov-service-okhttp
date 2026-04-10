@@ -1,0 +1,132 @@
+name: Build and Test
+
+on:
+  push:
+  pull_request:
+
+jobs:
+  build-and-test:
+    runs-on: ubuntu-latest
+    timeout-minutes: 45
+    env:
+      WORKSPACE: "${{ github.workspace }}"
+      GIT_BRANCH: "${{ github.ref }}"
+      CURRENT_TAG: "${{ github.ref_name }}"
+      # Worker endpoints used by the mini-sdk and test suite
+      TESTING_REPLY_URL: "https://replay.ivol.workers.dev"
+      TESTING_REPLY_URL_UNPROTECTED: "https://replay-unprotected.ivol.workers.dev"
+
+    steps:
+      # -----------------------------------------------------------------------
+      # 1. Checkout this repository
+      # -----------------------------------------------------------------------
+      - name: Set up Git
+        run: git config --global --add safe.directory '*'
+
+      - name: Checkout approov-service-okhttp
+        uses: actions/checkout@v4
+        with:
+          path: approov-service-okhttp
+
+      # -----------------------------------------------------------------------
+      # 2. Clone core-service-layers-testing as a sibling directory
+      #    settings.gradle expects: ../core-service-layers-testing/...
+      #    so both repos must sit under the same parent ($GITHUB_WORKSPACE).
+      # -----------------------------------------------------------------------
+      - name: Checkout core-service-layers-testing
+        uses: actions/checkout@v4
+        with:
+          repository: approov/core-service-layers-testing
+          # Use a PAT stored in repo secrets to access the private repo.
+          # See setup instructions at the bottom of this file.
+          token: ${{ secrets.CORE_SERVICE_LAYERS_TESTING_PAT }}
+          path: core-service-layers-testing
+
+      # -----------------------------------------------------------------------
+      # 3. Verify worker endpoints are reachable and echo the request body
+      #    Both endpoints are Cloudflare Workers that mirror the request back
+      #    as JSON, so we confirm the "body" field matches what we sent.
+      # -----------------------------------------------------------------------
+      - name: Verify protected worker endpoint
+        run: |
+          echo "==> POST to $TESTING_REPLY_URL"
+          RESPONSE=$(curl --silent --show-error --fail \
+            --max-time 15 \
+            -X POST "$TESTING_REPLY_URL" \
+            -H "Content-Type: application/json" \
+            -d '{"check":"protected","service":"approov-service-okhttp","status":"pre-flight"}')
+          echo "$RESPONSE"
+          # Confirm the worker echoed our body field back
+          echo "$RESPONSE" | grep -q '"check":"protected"' \
+            || (echo "ERROR: protected worker did not echo request body" && exit 1)
+          echo "Protected worker is UP and echoing correctly."
+
+      - name: Verify unprotected worker endpoint
+        run: |
+          echo "==> POST to $TESTING_REPLY_URL_UNPROTECTED"
+          RESPONSE=$(curl --silent --show-error --fail \
+            --max-time 15 \
+            -X POST "$TESTING_REPLY_URL_UNPROTECTED" \
+            -H "Content-Type: application/json" \
+            -d '{"check":"unprotected","service":"approov-service-okhttp","status":"pre-flight"}')
+          echo "$RESPONSE"
+          echo "$RESPONSE" | grep -q '"check":"unprotected"' \
+            || (echo "ERROR: unprotected worker did not echo request body" && exit 1)
+          echo "Unprotected worker is UP and echoing correctly."
+
+      # -----------------------------------------------------------------------
+      # 4. Java / Android toolchain setup
+      # -----------------------------------------------------------------------
+      - name: Set Up Java
+        uses: actions/setup-java@v4
+        with:
+          distribution: 'temurin'
+          java-version: '21'
+
+      - name: Install Android SDK command-line tools
+        run: |
+          sudo apt-get update -q
+          sudo apt-get install -y -q unzip curl
+          mkdir -p "$ANDROID_HOME/cmdline-tools"
+          curl -o android-sdk.zip \
+            https://dl.google.com/android/repository/commandlinetools-linux-9123335_latest.zip
+          unzip -q android-sdk.zip -d "$ANDROID_HOME/cmdline-tools"
+          mv "$ANDROID_HOME/cmdline-tools/cmdline-tools" "$ANDROID_HOME/cmdline-tools/tools"
+          rm android-sdk.zip
+          echo "ANDROID_HOME=$ANDROID_HOME" >> "$GITHUB_ENV"
+          echo "$ANDROID_HOME/cmdline-tools/tools/bin:$ANDROID_HOME/platform-tools:$ANDROID_HOME/emulator" >> "$GITHUB_PATH"
+
+      - name: Accept Android SDK licenses
+        run: yes | sdkmanager --licenses || true
+
+      - name: Install required Android SDK packages
+        run: |
+          sdkmanager "platform-tools" "platforms;android-34" "build-tools;34.0.0"
+
+      # -----------------------------------------------------------------------
+      # 5. Build and run tests
+      #    Gradle is invoked from inside the checked-out service directory.
+      #    The mini-sdk is already available via the sibling path wired into
+      #    settings.gradle — no extra configuration needed here.
+      # -----------------------------------------------------------------------
+      - name: Build AAR
+        working-directory: approov-service-okhttp
+        run: ./gradlew assembleRelease
+
+      - name: Run unit tests
+        working-directory: approov-service-okhttp
+        env:
+          TESTING_REPLY_URL: ${{ env.TESTING_REPLY_URL }}
+          TESTING_REPLY_URL_UNPROTECTED: ${{ env.TESTING_REPLY_URL_UNPROTECTED }}
+        run: ./gradlew test
+
+      # -----------------------------------------------------------------------
+      # 6. Upload test results for inspection if tests fail
+      # -----------------------------------------------------------------------
+      - name: Upload test results
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: test-results-${{ github.run_number }}
+          path: approov-service-okhttp/approov-service/build/reports/tests/
+          retention-days: 14
