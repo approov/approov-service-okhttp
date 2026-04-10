@@ -16,10 +16,13 @@ jobs:
       # If the org variable is not set the value is an empty string; the probe
       # step below falls back to the same hardcoded defaults that are baked into
       # the mini-sdk (MiniAttesterConfig / Approov.m), keeping them in sync.
-      # Worker management (create / redeploy) is the sole responsibility of
-      # core-service-layers-testing — no Cloudflare credentials live here.
+      # Worker management (create / redeploy) logic is centralized in the
+      # core-service-layers-testing script, but invoked here when needed.
       TESTING_REPLY_URL: ${{ vars.TESTING_REPLY_URL }}
       TESTING_REPLY_URL_UNPROTECTED: ${{ vars.TESTING_REPLY_URL_UNPROTECTED }}
+      # Required for the redeploy script invocation on failure
+      CLOUDFLARE_API_TOKEN_WORKERS_DEV: ${{ secrets.CLOUDFLARE_API_TOKEN_WORKERS_DEV }}
+      CLOUDFLARE_ACCOUNT_ID_WORKERS_DEV: ${{ secrets.CLOUDFLARE_ACCOUNT_ID_WORKERS_DEV }}
 
     steps:
       # -----------------------------------------------------------------------
@@ -46,72 +49,54 @@ jobs:
           path: core-service-layers-testing
 
       # -----------------------------------------------------------------------
-      # 3. Verify worker endpoints
+      # 3. Verify worker endpoints (with auto-redeploy)
       #
       #    URLs are resolved with the following precedence (mirrors the mini-sdk
       #    fallback logic in MiniAttesterConfig / Approov.m):
       #      1. GitHub org variable  (TESTING_REPLY_URL / _UNPROTECTED)
-      #      2. Mini-SDK hardcoded defaults (replay.ivol.workers.dev / replay-unprotected.ivol.workers.dev)
+      #      2. Mini-SDK hardcoded defaults (replay.ivol.workers.dev / ...)
       #
-      #    Worker deployment is NOT performed here — that is owned exclusively
-      #    by core-service-layers-testing CI.  If the workers are down this job
-      #    fails fast with a clear message.
+      #    If the workers are unavailable, this step invokes the management
+      #    script in core-service-layers-testing to redeploy them.
       # -----------------------------------------------------------------------
       - name: Verify worker endpoints
         run: |
           # ── URL resolution ──────────────────────────────────────────────────
-          # Replicate the mini-sdk fallback: org variable → hardcoded default.
           PROTECTED_URL="${TESTING_REPLY_URL:-https://replay.ivol.workers.dev}"
           UNPROTECTED_URL="${TESTING_REPLY_URL_UNPROTECTED:-https://replay-unprotected.ivol.workers.dev}"
-
-          if [ -n "$TESTING_REPLY_URL" ]; then
-            echo "Using org variable TESTING_REPLY_URL: $PROTECTED_URL"
-          else
-            echo "TESTING_REPLY_URL org variable not set — using mini-sdk default: $PROTECTED_URL"
-          fi
-
-          if [ -n "$TESTING_REPLY_URL_UNPROTECTED" ]; then
-            echo "Using org variable TESTING_REPLY_URL_UNPROTECTED: $UNPROTECTED_URL"
-          else
-            echo "TESTING_REPLY_URL_UNPROTECTED org variable not set — using mini-sdk default: $UNPROTECTED_URL"
-          fi
-
-          # Export resolved URLs so subsequent steps (and Gradle tests) pick
-          # them up even when the org variables were not originally set.
+          
           echo "TESTING_REPLY_URL=$PROTECTED_URL"       >> "$GITHUB_ENV"
           echo "TESTING_REPLY_URL_UNPROTECTED=$UNPROTECTED_URL" >> "$GITHUB_ENV"
 
           # ── Probe function ──────────────────────────────────────────────────
-          verify_worker() {
-            local label="$1" url="$2"
-            echo ""
-            echo "==> POST to $label ($url)"
-            RESP=$(curl --silent --show-error --fail --max-time 15 \
+          probe_worker() {
+            local url="$1"
+            curl --silent --show-error --fail --max-time 10 \
               -X POST "$url" \
               -H "Content-Type: application/json" \
-              -d '{"check":"verify","service":"approov-service-okhttp","status":"pre-flight"}')
-            echo "$RESP"
-            # The worker JSON-escapes the body inside the response object, so
-            # match a plain substring that is guaranteed to appear verbatim.
-            echo "$RESP" | grep -q 'pre-flight' \
-              || { echo "ERROR: $label did not echo the request body."; return 1; }
-            echo "  OK — $label is up and echoing correctly."
+              -d '{"check":"probe"}' | grep -q '"body"'
           }
 
-          FAILED=false
-          verify_worker "protected worker"   "$PROTECTED_URL"   || FAILED=true
-          verify_worker "unprotected worker" "$UNPROTECTED_URL" || FAILED=true
-
-          if $FAILED; then
-            echo ""
-            echo "One or more worker endpoints are unavailable."
-            echo "Worker management is handled by core-service-layers-testing CI."
-            echo "Please check that the workers are deployed and the org variables are correct."
-            exit 1
+          echo "==> Probing workers..."
+          if probe_worker "$PROTECTED_URL" && probe_worker "$UNPROTECTED_URL"; then
+            echo "    All workers are healthy."
+            exit 0
           fi
 
-          echo ""
-          echo "All worker endpoints are healthy."
+          echo "    WARNING: One or more workers are down. Attempting redeploy..."
+          
+          # ── Invoke redeploy script ──────────────────────────────────────────
+          # The script is in the sibling directory cloned in Step 2.
+          # It uses the CLOUDFLARE_* env variables defined at the job level.
+          ./core-service-layers-testing/cloudflare-workers/redeploy-workers.sh
+
+          echo "==> Verifying after redeploy..."
+          if probe_worker "$PROTECTED_URL" && probe_worker "$UNPROTECTED_URL"; then
+            echo "    Workers successfully restored."
+          else
+            echo "ERROR: Workers are still unreachable after redeployment effort."
+            exit 1
+          fi
 
       # -----------------------------------------------------------------------
       # 4. Java / Android toolchain setup
