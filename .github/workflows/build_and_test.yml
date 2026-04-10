@@ -91,12 +91,18 @@ jobs:
           ./core-service-layers-testing/cloudflare-workers/redeploy-workers.sh
 
           echo "==> Verifying after redeploy..."
-          if probe_worker "$PROTECTED_URL" && probe_worker "$UNPROTECTED_URL"; then
-            echo "    Workers successfully restored."
-          else
-            echo "ERROR: Workers are still unreachable after redeployment effort."
-            exit 1
-          fi
+          # Try up to 3 times with a 5s delay between attempts
+          for i in {1..3}; do
+            if probe_worker "$PROTECTED_URL" && probe_worker "$UNPROTECTED_URL"; then
+              echo "    Workers successfully restored."
+              exit 0
+            fi
+            echo "    Waiting for propagation (attempt $i/3)..."
+            sleep 5
+          done
+
+          echo "ERROR: Workers are still unreachable after redeployment effort."
+          exit 1
 
       # -----------------------------------------------------------------------
       # 4. Java / Android toolchain setup
