@@ -2,6 +2,16 @@
 
 This document describes the features and functionality of the Approov Service for OkHttp. It provides details on how to interact with the service layer and customize its behavior to suit your application's needs, specifically through the `ApproovServiceMutator`. For a basic integration example, please refer to the [Quickstart guide](https://github.com/approov/quickstart-android-kotlin-okhttp).
 
+## Empty Config Initialization
+You can initialize the `ApproovService` with an empty configuration string if you want to use the service layer without active Approov protection. This is useful for apps that remotely activate Approov selectively or when you need the service to function as a standard `OkHttpClient` wrapper without any Approov processing (e.g., during backend maintenance).
+
+> ```java
+> // Initialize with an empty string to operate as a standard OkHttpClient
+> ApproovService.initialize(context, "");
+> ```
+
+When initialized this way, `ApproovService.getOkHttpClient()` returns an `OkHttpClient` instance that behaves exactly like a standard client. It will not perform token injection, message signing, secure string substitution, or dynamic pinning. You can enable full Approov protection later in the application lifecycle by calling `ApproovService.initialize(context, config)` with a valid configuration string.
+
 # Approov Service Mutator
 
 The `ApproovServiceMutator` allows you to customize the behavior of the Approov OkHttp layer at key points in the request lifecycle. You can override specific methods to tailor the handling of attestations and requests while retaining the default behavior for other cases.
@@ -21,7 +31,7 @@ By default, the `ApproovService` processes requests based on the attestation sta
 | Approov Fetch Status | Action | Result |
 | :--- | :--- | :--- |
 | **Success** | Proceed | The request acts as expected and is sent with the `Approov-Token`. |
-| **No Network / Poor Network** | Throw Exception | An `ApproovNetworkException` is thrown. The request should be retried. |
+| **No Network / Poor Network / MITM Detected** | Throw Exception | An `ApproovNetworkException` is thrown. The request should be retried. |
 | **Rejection** | Throw Exception | An `ApproovRejectionException` is thrown. The request is marked as rejected. |
 | **No Approov Service / Unknown URL** | Proceed | The request is sent **without** an `Approov-Token`. |
 
@@ -35,29 +45,41 @@ The standard behavior for statuses like `NO_APPROOV_SERVICE` is to proceed with 
 
 You can use a mutator to enforce this policy by throwing an error or returning `false` for such statuses.
 
-### Example: Enforce Token Presence
+### Example: Proceed on Selected Failure Statuses
 
-Override `handleInterceptorFetchTokenResult` to check for `NO_APPROOV_SERVICE` and prevent the request to your API from continuing; instead log the event. Since `NO_APPROOV_SERVICE` implies the SDK cannot reach the Approov servers, this could be a transient issue (e.g., no DNS server available) or a permanent configuration/network restriction. You might choose to retry the request once to handle transient errors, or if the issue persists, inform the user of a network issue and suggest checking their connection or changing networks.
+The example below shows a custom mutator that:
+- Uses the normal Approov token flow on `SUCCESS`.
+- Allows requests to continue on `MITM_DETECTED` and `NO_APPROOV_SERVICE`.
+- Signs the final outbound request with `ApproovDefaultMessageSigning`.
 
-```kotlin
-import io.approov.service.okhttp.ApproovServiceMutator
-import io.approov.service.okhttp.ApproovNetworkException
-import io.approov.service.okhttp.ApproovServiceMutator.DEFAULT
-import com.criticalblue.approovsdk.Approov
+To send the failure reason in the token header when the request is allowed to continue without a real token, you must also enable `setUseApproovStatusIfNoToken(true)` as shown in the next section.
 
-class EnforceTokenMutator : ApproovServiceMutator {
-    override fun handleInterceptorFetchTokenResult(approovResults: Approov.TokenFetchResult, url: String): Boolean {
-        // If the service is not available (NO_APPROOV_SERVICE), do not proceed.
-        // This could be transient (e.g. no DNS) so we throw a networking error to trigger a retry.
-        if (approovResults.status == Approov.TokenFetchStatus.NO_APPROOV_SERVICE) {
-            throw ApproovNetworkException(approovResults.status, "Network issue. Will attempt connection again.")
-        }
 
-        // For all other statuses, use the default behavior.
-        return DEFAULT.handleInterceptorFetchTokenResult(approovResults, url)
-    }
-}
-```
+> ```java
+> import com.criticalblue.approovsdk.Approov;
+> import io.approov.service.okhttp.ApproovDefaultMessageSigning;
+> import io.approov.service.okhttp.ApproovException;
+> import io.approov.service.okhttp.ApproovService;
+> import io.approov.service.okhttp.ApproovServiceMutator;
+> 
+> public class ProceedOnSelectedStatusesMutator extends ApproovDefaultMessageSigning {
+> 
+>     @Override
+>     public boolean handleInterceptorFetchTokenResult(Approov.TokenFetchResult result, String url) throws ApproovException {
+>         Approov.TokenFetchStatus status = result.getStatus();
+> 
+>         // Allow SUCCESS, MITM_DETECTED and NO_APPROOV_SERVICE to proceed
+>         if (status == Approov.TokenFetchStatus.SUCCESS ||
+>             status == Approov.TokenFetchStatus.MITM_DETECTED ||
+>             status == Approov.TokenFetchStatus.NO_APPROOV_SERVICE) {
+>             return true;
+>         }
+> 
+>         // For all other statuses, use the default fail-closed behavior.
+>         return super.handleInterceptorFetchTokenResult(result, url);
+>     }
+> }
+> ```
 
 ### Allow Access Without Token (Optional)
 
@@ -102,21 +124,24 @@ class MyMutator : ApproovServiceMutator {
 
 ## How to use a custom mutator in your application
 
-Create a mutator, then install it once during app startup (for example in your Application class or initialization path).
+Register your custom mutator and enable status-to-header injection during app startup:
 
-```kotlin
-import io.approov.service.okhttp.ApproovService
-import io.approov.service.okhttp.ApproovServiceMutator
-
-class MyMutator : ApproovServiceMutator {
-    // Override only the hooks you need.
-}
-ApproovService.setServiceMutator(MyMutator()) // Install custom implementation or pass null to revert to default behaviour
-```
+> ```java
+> import io.approov.service.okhttp.ApproovService;
+> 
+> // 1. Standard Initialization
+> ApproovService.initialize(context, "<your-config-string>");
+> 
+> // 2. Enable status-as-token injection (matches React Native behavior)
+> ApproovService.setUseApproovStatusIfNoToken(true);
+> 
+> // 3. Register your custom mutator logic
+> ApproovService.setServiceMutator(new ProceedOnSelectedStatusesMutator());
+> ```
 
 ## Approov Token Fallback Status
 
-If the SDK cannot obtain a valid Approov token (e.g., due to a `NO_NETWORK` or `MITM_DETECTED` state), the request traditionally proceeds without the `Approov-Token` header or fails entirely depending on the current policy. To give your backend visibility into *why* there is no token, you can use `ApproovService.setUseApproovStatusIfNoToken(true)`.
+If the SDK cannot obtain a valid Approov token (e.g., due to a `NO_NETWORK` or `MITM_DETECTED` state), the request might proceed without the `Approov-Token` header or fail entirely depending on the current policy. To give your backend visibility into *why* there is no token, you can use `ApproovService.setUseApproovStatusIfNoToken(true)`.
 
 When enabled, the service will inject the Approov fetch status directly into the `Approov-Token` header if the actual token fetch fails or is empty. Your backend can then distinguish between a request that was sent without a token due to an attacker stripping it, versus a legitimate request that encountered a specific failure like `POOR_NETWORK`. 
 
@@ -238,22 +263,34 @@ class CustomLogic(
 
 ### Log rejections with ARC + device ID to your telemetry
 
-An important part of your security strategy is to monitor and analyze rejections. Ideally, the server response would be customized to include the ARC and device ID in the response body or headers. However, if this is not possible, you can obtain these values from the `ApproovService` and log them to your telemetry directly from your application code.
+Monitoring and analyzing rejections is a key part of your security strategy. Ideally, your backend should be customized to include the **ARC (Approov Rejection Code)** and **Device ID** in its error responses (e.g., in a JSON body or a custom header) when it rejects a request due to a missing or invalid Approov token.
 
-This example shows how to log rejections with the ARC and device ID. 
+#### Why Server-Side Logging is Preferred
+While you can obtain these values directly from the SDK using `ApproovService.getLastARC()`, it is generally safer and more reliable to log them from the server response for several reasons:
 
-```kotlin
-        val response = client.newCall(request).execute()
-        if (response.isSuccessful) {
-            // Process request
-        } else {
-            // Log rejection: ARC + device ID can be added for correlating a particular request to the failure reason
-            val arc = ApproovService.getLastARC() 
-            val deviceID = ApproovService.getDeviceID()
-            // Log rejection
-            Log.d("StartFragment", "Request rejected with ARC: $arc and device ID: $deviceID; response code: ${response.code}")
-        }
-```
+1.  **Avoid Misleading Network Events**: On poor network connections, a call to `getLastARC()` can inadvertently trigger a background network event that successfully completes a delayed attestation. This might provide an ARC associated with a *successful* attestation that occurred *after* your original request failed, creating confusing telemetry.
+2.  **Corporate Firewall & MITM Bypass**: If your custom mutator allows a request to proceed on `MITM_DETECTED` (a common result of corporate firewalls), the request is sent without a token. In this state, `getLastARC()` will not yet have a rejection code available for that specific attempt.
+3.  **Accuracy and Correlation**: Logging the ARC that the server actually observed and used as the basis for rejection ensures perfect correlation in your monitoring dashboards.
+
+If you must log from the client, ensure you have a fallback strategy for when the server doesn't provide the code.
+
+
+> ```kotlin
+>         val response = client.newCall(request).execute()
+>         if (response.isSuccessful) {
+>             // Process request
+>         } else {
+>             // Preferred: Extract ARC and Device ID from your own server's response
+>             val serverArc = response.header("X-Approov-Error-ARC") 
+>             
+>             // ALTERNATIVE: (DISCOURAGED) Obtain from SDK only if server-side retrieval is impossible.
+>             // Note: This may trigger background network events and return misleading results.
+>             val sdkArc = serverArc ?: ApproovService.getLastARC()
+>             val deviceID = ApproovService.getDeviceID()
+>             
+>             Log.d("Telemetry", "Request rejected. ARC: $sdkArc, DeviceID: $deviceID")
+>         }
+> ```
 
 ## Tips
 

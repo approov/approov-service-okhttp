@@ -65,6 +65,21 @@ fun isInitialized(): Boolean
 
 This reports the state of the service layer, not whether Approov protection is currently active. If initialization used an empty `config` string then this returns `true`, while the layer still operates as a plain `OkHttpClient` wrapper without Approov features.
 
+## isApproovEnabled
+Returns whether Approov protection is currently enabled.
+
+**Java:**
+```java
+boolean isApproovEnabled()
+```
+
+**Kotlin:**
+```kotlin
+fun isApproovEnabled(): Boolean
+```
+
+This returns `true` only if the service layer has been initialized with a valid, non-empty configuration string. If initialized with an empty string, or not initialized at all, it returns `false`.
+
 ## setApproovInterceptorExtensions
 
 **OBSOLETED**: Use `setServiceMutator` instead.
@@ -186,6 +201,34 @@ void setUseApproovStatusIfNoToken(boolean shouldUse)
 fun setUseApproovStatusIfNoToken(shouldUse: Boolean)
 ```
 
+## setServiceMutator
+Sets the `ApproovServiceMutator` instance to handle callbacks from the ApproovService implementation. This facility enables customization of ApproovService operations at key points in the configuration and attestation flows.
+
+**Java:**
+```java
+void setServiceMutator(ApproovServiceMutator mutator)
+```
+
+**Kotlin:**
+```kotlin
+fun setServiceMutator(mutator: ApproovServiceMutator?)
+```
+
+Passing `null` (or omitting the parameter in Java) reinstates the default behavior.
+
+## getServiceMutator
+Gets the active service mutator instance.
+
+**Java:**
+```java
+ApproovServiceMutator getServiceMutator()
+```
+
+**Kotlin:**
+```kotlin
+fun getServiceMutator(): ApproovServiceMutator
+```
+
 ## setDevKey
 [Sets a development key](https://approov.io/docs/latest/approov-usage-documentation/#using-a-development-key) in order to force an app to be passed. This can be used if the app has to be resigned in a test environment and would thus fail attestation otherwise.
 
@@ -210,6 +253,58 @@ void setApproovHeader(String header, String prefix)
 **Kotlin:**
 ```kotlin
 fun setApproovHeader(header: String, prefix: String?)
+```
+
+## getApproovTokenHeader
+Gets the name of the header used to carry the Approov token.
+
+**Java:**
+```java
+String getApproovTokenHeader()
+```
+
+**Kotlin:**
+```kotlin
+fun getApproovTokenHeader(): String
+```
+
+## getApproovTokenPrefix
+Gets any prefix string (e.g., "Bearer ") being added to the Approov token header value.
+
+**Java:**
+```java
+String getApproovTokenPrefix()
+```
+
+**Kotlin:**
+```kotlin
+fun getApproovTokenPrefix(): String
+```
+
+## setApproovTraceIDHeader
+Sets the header name used to provide the optional Approov TraceID debug value. Passing `null` disables the TraceID header.
+
+**Java:**
+```java
+void setApproovTraceIDHeader(String header)
+```
+
+**Kotlin:**
+```kotlin
+fun setApproovTraceIDHeader(header: String?)
+```
+
+## getApproovTraceIDHeader
+Gets the header name currently used for the Approov TraceID. Returns `null` if disabled.
+
+**Java:**
+```java
+String getApproovTraceIDHeader()
+```
+
+**Kotlin:**
+```kotlin
+fun getApproovTraceIDHeader(): String?
 ```
 
 ## setBindingHeader
@@ -251,6 +346,19 @@ void removeSubstitutionHeader(String header)
 fun removeSubstitutionHeader(header: String)
 ```
 
+## getSubstitutionHeaders
+Gets the map of headers currently subject to secure string substitution, mapped to their required prefixes.
+
+**Java:**
+```java
+Map<String, String> getSubstitutionHeaders()
+```
+
+**Kotlin:**
+```kotlin
+fun getSubstitutionHeaders(): Map<String, String>
+```
+
 ## addSubstitutionQueryParam
 Adds a `key` name for a query parameter that should be subject to [secure strings](https://approov.io/docs/latest/approov-usage-documentation/#secure-strings) substitution. This means that if the query parameter is present in a URL then the value will be used as a key to look up a secure string value which will be substituted as the query parameter value instead. This allows easy migration to the use of secure strings.
 
@@ -275,6 +383,19 @@ void removeSubstitutionQueryParam(String key)
 **Kotlin:**
 ```kotlin
 fun removeSubstitutionQueryParam(key: String)
+```
+
+## getSubstitutionQueryParams
+Gets the set of query parameter keys currently subject to secure string substitution.
+
+**Java:**
+```java
+Set<String> getSubstitutionQueryParams()
+```
+
+**Kotlin:**
+```kotlin
+fun getSubstitutionQueryParams(): Set<String>
 ```
 
 ## addExclusionURLRegex
@@ -303,6 +424,19 @@ void removeExclusionURLRegex(String urlRegex)
 **Kotlin:**
 ```kotlin
 fun removeExclusionURLRegex(urlRegex: String)
+```
+
+## getExclusionURLRegexs
+Gets the current map of exclusion URL regular expressions.
+
+**Java:**
+```java
+Map<String, Pattern> getExclusionURLRegexs()
+```
+
+**Kotlin:**
+```kotlin
+fun getExclusionURLRegexs(): Map<String, Pattern>
 ```
 
 ## prefetch
@@ -476,3 +610,17 @@ fun getLastARC(): String
 ```
 
 In the event of no network available this function returns an empty string. This function should be used with *CAUTION* and instead rely on a customized error response from the server which includes the `ARC` code if one is available. 
+
+## setInstallAttrsInToken
+Sets an [install attributes token](https://approov.io/docs/latest/approov-usage-documentation/#application-installation-attributes) to be sent to the server and associated with this particular app installation for future Approov token fetches.
+
+**Java:**
+```java
+void setInstallAttrsInToken(String attrs) throws ApproovException
+```
+
+**Kotlin:**
+```kotlin
+@Throws(ApproovException::class)
+fun setInstallAttrsInToken(attrs: String)
+```
