@@ -146,7 +146,8 @@ public class ApproovService {
      */
     public static synchronized void initialize(Context context, String config, String comment) {
         // check if the Approov SDK is already initialized
-        if (isInitialized && !comment.startsWith("reinit")) {
+        boolean allowEnableAfterEmptyInitialization = isInitialized && (configString != null) && configString.isEmpty() && !config.isEmpty();
+        if (isInitialized && !comment.startsWith("reinit") && !allowEnableAfterEmptyInitialization) {
             if (!config.equals(configString)) {
                 throw new IllegalStateException("ApproovService layer is already initialized.");
             }
@@ -175,7 +176,8 @@ public class ApproovService {
                 Log.e(TAG, "Approov initialization failed: " + e.getMessage());
                 throw e;
             } catch (IllegalStateException e) {
-                Log.e(TAG, "Approov already intialized: Ignoring native layer exception " + e.getMessage());
+                Log.e(TAG, "Approov initialization failed: " + e.getMessage());
+                throw e;
             }
             pinningInterceptor = new ApproovPinningInterceptor();
             isInitialized = true;

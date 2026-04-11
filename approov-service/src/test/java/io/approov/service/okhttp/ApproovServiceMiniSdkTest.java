@@ -74,7 +74,7 @@ public class ApproovServiceMiniSdkTest {
         ApproovService.initialize(context, validInitialConfig);
  
         // Re-init with different config should throw illegal state
-        String differentConfig = "#stg1006#aprv2stg-attest.api.approov.io#https://dev.approoval.com/token#dpcv6jv45r6LGC4E6ZXSMLhBVLrrhAoDcjizU/t9/Eg=";
+        String differentConfig = "#cb-other#mAxOF0ekJUOC36J5XWmVmVipOcUoEdMjhPSp2FVtyTo=";
         try {
             ApproovService.initialize(context, differentConfig);
             fail("Expected IllegalStateException");
@@ -108,6 +108,42 @@ public class ApproovServiceMiniSdkTest {
             JSONObject reply = new JSONObject(response.body().string());
             assertNull(getHeader(reply, "Approov-Token"));
             assertNull(getHeader(reply, "Approov-TraceID"));
+        }
+    }
+
+    /**
+     * §1 Empty Configuration then Valid Configuration
+     *
+     * Initializing first with an empty config should allow a later valid config to
+     * enable Approov protection at runtime.
+     */
+    @Test
+    public void testInitializeWithEmptyConfigCanLaterEnableApproov() throws Exception {
+        reinitializeService(scenarioJson(uniqueCaseName("empty-then-valid"),
+            "\"protectedDomains\": [\"" + getTargetHost() + "\"]"));
+        ApproovService.initialize(context, "", "reinit-empty-config");
+
+        OkHttpClient plainClient = ApproovService.getOkHttpClient();
+        try (Response response = plainClient.newCall(new Request.Builder().url(getTargetURL()).build()).execute()) {
+            assertTrue(response.isSuccessful());
+            JSONObject reply = new JSONObject(response.body().string());
+            assertNull(getHeader(reply, "Approov-Token"));
+            assertNull(getHeader(reply, "Approov-TraceID"));
+        }
+
+        assertTrue(ApproovService.isInitialized());
+        assertFalse(ApproovService.isApproovEnabled());
+
+        ApproovService.initialize(context, validInitialConfig);
+
+        assertTrue(ApproovService.isInitialized());
+        assertTrue(ApproovService.isApproovEnabled());
+
+        OkHttpClient protectedClient = ApproovService.getOkHttpClient();
+        try (Response response = protectedClient.newCall(new Request.Builder().url(getTargetURL()).build()).execute()) {
+            assertTrue(response.isSuccessful());
+            JSONObject reply = new JSONObject(response.body().string());
+            assertNotNull(getHeader(reply, "Approov-Token"));
         }
     }
 
@@ -881,7 +917,7 @@ public class ApproovServiceMiniSdkTest {
     private void setDirective(String json) {
         AttesterProxyController.setNextAttestationDirectiveJson(json);
     }
- 
+
     private String uniqueCaseName(String prefix) {
         return prefix + "-" + UUID.randomUUID().toString().toLowerCase();
     }

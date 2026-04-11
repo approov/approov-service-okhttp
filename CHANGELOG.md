@@ -15,6 +15,7 @@ The format is based on Keep a Changelog and this project adheres to Semantic Ver
 ### Fixed
 - Improved service re-initialization consistency for internal state management.
 - Initializing with an empty config string now keeps the service layer initialized while returning a plain `OkHttpClient` without Approov processing.
+- Initializing first with an empty config string and later with a valid non-empty config string now enables Approov at runtime instead of being rejected as a different-config reinitialization.
 
 ## [3.5.6] - 2026-02-11
 
