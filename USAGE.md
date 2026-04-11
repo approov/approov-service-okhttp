@@ -172,7 +172,7 @@ To disable signing, remove the signer (`setServiceMutator(null)`) or return `nul
 
 ## Token Binding
 
-[Token Binding](https://ext.approov.io/docs/latest/approov-usage-documentation/#token-binding) allows you to bind the Approov token to a specific piece of data, such as an OAuth token or a user session identifier. This adds an extra layer of security by ensuring that the Approov token can only be used in conjunction with the bound data. The `ApproovService` calculates a hash of the binding data locally and includes this hash in the Approov token claims. It is important to note that the actual binding data is never sent to the Approov cloud service; only the hash is transmitted.
+[Token Binding](https://ext.approov.io/docs/latest/approov-usage-documentation/#token-binding) allows you to bind the Approov token to a specific piece of data, such as an OAuth token or a user session identifier. This adds an extra layer of security by ensuring that the Approov token can only be used in conjunction with the bound data. The `ApproovService` calculates a hash of the binding data locally and supplies that hash to Approov so the resulting token can carry the corresponding `pay` claim. It is important to note that the actual binding data is never sent to the Approov cloud service; only the hash is transmitted.
 
 To set up token binding, you specify a header name. The value of this header in your requests will be used for the binding.
 
