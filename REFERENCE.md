@@ -135,7 +135,8 @@ fun setOkHttpClientBuilder(builderName: String, builder: OkHttpClient.Builder)
 ```
 
 ## setProceedOnNetworkFail
-If the provided `proceed` value is `true` then this indicates that the network interceptor should proceed anyway if it is not possible to obtain an Approov token due to a networking failure. If this is called then the backend API can receive calls without the expected Approov token header being added, or without header/query parameter substitutions being made. This should only ever be used if there is some particular reason, perhaps due to local network conditions, that you believe that traffic to the Approov cloud service will be particularly problematic.
+
+> **OBSOLETE:** This legacy configuration is now a functional no-op do-nothing method. Use `ApproovServiceMutator` to manually bypass exceptions for network failures if required.
 
 **Java:**
 ```Java
@@ -146,11 +147,6 @@ void setProceedOnNetworkFail(boolean proceed)
 ```kotlin
 fun setProceedOnNetworkFail(proceed: Boolean)
 ```
-
-**DEPRECATED**: Use `setServiceMutator` instead to control this behavior.
-
-
-Note that this should be used with *CAUTION* because it may allow a connection to be established before any dynamic pins have been received via Approov, thus potentially opening the channel to a MitM.
 
 ## setUseApproovStatusIfNoToken
 If the provided `shouldUse` value is `true` then this indicates that the Approov fetch status (e.g. "NO_NETWORK", "MITM_DETECTED") should be used as the token header value if the actual token fetch fails or returns an empty token. This allows passing error condition information to the backend via the Approov-Token header, which might otherwise be empty or missing.

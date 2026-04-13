@@ -18,5 +18,5 @@ The format is based on Keep a Changelog and this project adheres to Semantic Ver
 - Prevented exceptions when key-pair generation fails. The service now logs an error and continues without the install message signature, allowing the backend to decide whether to reject the request.
 ### Deprecated
 - ApproovInterceptorExtensions in favor of ApproovServiceMutator.
-- setProceedOnNetworkFail() and getProceedOnNetworkFail() in favor of ApproovServiceMutator.
+- setProceedOnNetworkFail() and getProceedOnNetworkFail() are now obsolete no-ops. Mutator defaults dynamically enforce exceptions upon network drops.
 - prefetch() is now automatically called when the service is initialized.
