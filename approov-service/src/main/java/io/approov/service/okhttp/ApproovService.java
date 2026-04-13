@@ -80,9 +80,6 @@ public class ApproovService {
     // the config string used for initialization
     private static String configString;
 
-    // true if the interceptor should proceed on network failures and not add an
-    // Approov token
-    private static boolean proceedOnNetworkFail = false;
 
     // true if the Approov fetch status should be used as the token header value if
     // the
@@ -155,7 +152,7 @@ public class ApproovService {
         } else {
             // setup for creating clients
             isInitialized = false;
-            proceedOnNetworkFail = false;
+
             useApproovStatusIfNoToken = false;
             okHttpBuilders = new HashMap<>();
             okHttpBuilders.put(DEFAULT_BUILDER_NAME, new OkHttpClient.Builder());
@@ -238,7 +235,6 @@ public class ApproovService {
     @Deprecated
     public static synchronized void setProceedOnNetworkFail(boolean proceed) {
         Log.d(TAG, "setProceedOnNetworkFail " + proceed);
-        proceedOnNetworkFail = proceed;
     }
 
     /**
@@ -252,7 +248,7 @@ public class ApproovService {
      */
     @Deprecated
     public static synchronized boolean getProceedOnNetworkFail() {
-        return proceedOnNetworkFail;
+        return false;
     }
 
     /**
