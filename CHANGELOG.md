@@ -12,6 +12,9 @@ The format is based on Keep a Changelog and this project adheres to Semantic Ver
 - Enhanced internal service components to improve testability.
 - Added `ApproovService.isInitialized()` to expose the service-layer initialization state.
 
+### Changed
+- `setProceedOnNetworkFail()` and `getProceedOnNetworkFail()` are now obsolete no-ops. Mutator defaults dynamically enforce exceptions upon network drops.
+
 ### Fixed
 - Improved service re-initialization consistency for internal state management.
 - Initializing with an empty config string now keeps the service layer initialized while returning a plain `OkHttpClient` without Approov processing.
@@ -31,5 +34,5 @@ The format is based on Keep a Changelog and this project adheres to Semantic Ver
 - Prevented exceptions when key-pair generation fails. The service now logs an error and continues without the install message signature, allowing the backend to decide whether to reject the request.
 ### Deprecated
 - ApproovInterceptorExtensions in favor of ApproovServiceMutator.
-- setProceedOnNetworkFail() and getProceedOnNetworkFail() are now obsolete no-ops. Mutator defaults dynamically enforce exceptions upon network drops.
+- setProceedOnNetworkFail() and getProceedOnNetworkFail() in favor of ApproovServiceMutator.
 - prefetch() is now automatically called when the service is initialized.
