@@ -230,7 +230,7 @@ public class ApproovService {
      * Returns a cached failure result if one exists and hasn't expired.
      * Returns null if no cache exists or it has expired (caller should fetch from SDK).
      */
-    private static Approov.TokenFetchResult getCachedFailure() {
+    static Approov.TokenFetchResult getCachedFailure() {
         synchronized (failureCacheLock) {
             if (cachedFailureResult != null && (System.currentTimeMillis() - cachedFailureTimeMs) < FAILURE_CACHE_TTL_MS) {
                 return cachedFailureResult;
@@ -245,7 +245,7 @@ public class ApproovService {
     /**
      * Caches a failure result. Only failure statuses are cached; success is never cached.
      */
-    private static void cacheFailureIfNeeded(Approov.TokenFetchResult result) {
+    static void cacheFailureIfNeeded(Approov.TokenFetchResult result) {
         switch (result.getStatus()) {
             case NO_NETWORK:
             case POOR_NETWORK:
@@ -1221,7 +1221,7 @@ class ApproovTokenInterceptor implements Interceptor {
         // Check for a cached failure before calling the platform SDK. This avoids redundant
         // SDK calls when the platform is in a sustained failure state.
         Approov.TokenFetchResult approovResults;
-        Approov.TokenFetchResult cached = getCachedFailure();
+        Approov.TokenFetchResult cached = ApproovService.getCachedFailure();
         if (cached != null) {
             approovResults = cached;
             Log.d(TAG, "Using cached failure: " + cached.getStatus().toString());
@@ -1229,7 +1229,7 @@ class ApproovTokenInterceptor implements Interceptor {
             // request an Approov token for the request URL
             approovResults = Approov.fetchApproovTokenAndWait(url.toString());
             // Cache the result if it is a failure
-            cacheFailureIfNeeded(approovResults);
+            ApproovService.cacheFailureIfNeeded(approovResults);
         }
 
         // provide information about the obtained token or error (note "approov token
