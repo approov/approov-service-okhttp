@@ -128,6 +128,14 @@ public class ApproovService {
     // to the compiled Pattern
     private static Map<String, Pattern> exclusionURLRegexs = null;
 
+    // Cached failure result from the last Approov token fetch that returned a failure status.
+    // Protected by failureCacheLock for thread-safe access. This avoids redundant ~1s SDK calls
+    // when the platform is in a sustained failure state (e.g. no network, MITM detected).
+    private static final Object failureCacheLock = new Object();
+    private static Approov.TokenFetchResult cachedFailureResult = null;
+    private static long cachedFailureTimeMs = 0;
+    private static final long FAILURE_CACHE_TTL_MS = 500; // 0.5 seconds
+
     /**
      * Construction is disallowed as this is a static only class.
      */
@@ -164,6 +172,10 @@ public class ApproovService {
             substitutionHeaders = new HashMap<>();
             substitutionQueryParams = new HashMap<>();
             exclusionURLRegexs = new HashMap<>();
+            synchronized (failureCacheLock) {
+                cachedFailureResult = null;
+                cachedFailureTimeMs = 0;
+            }
 
             // initialize the Approov SDK
             try {
@@ -212,6 +224,42 @@ public class ApproovService {
      */
     static synchronized boolean isApproovEnabled() {
         return isInitialized && (configString != null) && !configString.isEmpty();
+    }
+
+    /**
+     * Returns a cached failure result if one exists and hasn't expired.
+     * Returns null if no cache exists or it has expired (caller should fetch from SDK).
+     */
+    private static Approov.TokenFetchResult getCachedFailure() {
+        synchronized (failureCacheLock) {
+            if (cachedFailureResult != null && (System.currentTimeMillis() - cachedFailureTimeMs) < FAILURE_CACHE_TTL_MS) {
+                return cachedFailureResult;
+            }
+            // Cache miss or expired — clear and allow a fresh SDK call
+            cachedFailureResult = null;
+            cachedFailureTimeMs = 0;
+            return null;
+        }
+    }
+
+    /**
+     * Caches a failure result. Only failure statuses are cached; success is never cached.
+     */
+    private static void cacheFailureIfNeeded(Approov.TokenFetchResult result) {
+        switch (result.getStatus()) {
+            case NO_NETWORK:
+            case POOR_NETWORK:
+            case MITM_DETECTED:
+            case NO_APPROOV_SERVICE:
+                synchronized (failureCacheLock) {
+                    cachedFailureResult = result;
+                    cachedFailureTimeMs = System.currentTimeMillis();
+                }
+                break;
+            default:
+                // Success and other statuses are never cached
+                break;
+        }
     }
 
     /**
@@ -1170,8 +1218,19 @@ class ApproovTokenInterceptor implements Interceptor {
 
         HttpUrl url = request.url();
 
-        // request an Approov token for the request URL
-        Approov.TokenFetchResult approovResults = Approov.fetchApproovTokenAndWait(url.toString());
+        // Check for a cached failure before calling the platform SDK. This avoids redundant
+        // SDK calls when the platform is in a sustained failure state.
+        Approov.TokenFetchResult approovResults;
+        Approov.TokenFetchResult cached = getCachedFailure();
+        if (cached != null) {
+            approovResults = cached;
+            Log.d(TAG, "Using cached failure: " + cached.getStatus().toString());
+        } else {
+            // request an Approov token for the request URL
+            approovResults = Approov.fetchApproovTokenAndWait(url.toString());
+            // Cache the result if it is a failure
+            cacheFailureIfNeeded(approovResults);
+        }
 
         // provide information about the obtained token or error (note "approov token
         // -check" can

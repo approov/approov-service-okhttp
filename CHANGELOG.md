@@ -7,6 +7,7 @@ The format is based on Keep a Changelog and this project adheres to Semantic Ver
 ## [3.5.7] - 2026-04-09
 
 ### Added
+- Thread-safe failure mode caching for the interceptor path when the platform SDK returns a failure status (`NO_NETWORK`, `POOR_NETWORK`, `MITM_DETECTED`, `NO_APPROOV_SERVICE`).
 - Integrated a localized testing framework for comprehensive service layer verification.
 - Added extensive test coverage for token management, pinning synchronization, and request mutation scenarios.
 - Enhanced internal service components to improve testability.
