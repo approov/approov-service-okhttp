@@ -1,6 +1,7 @@
 plugins {
     id 'com.android.library'
     id 'maven-publish'
+    id 'com.github.johnrengelman.shadow' version '8.1.1'
 }
 
 repositories {
@@ -37,15 +38,26 @@ android {
 }
 
 configurations {
+    shadowed
+
     testImplementation {
         exclude group: 'io.approov', module: 'approov-android-sdk'
     }
 }
 
+tasks.register('shadowJar', com.github.jengelman.gradle.plugins.shadow.tasks.ShadowJar) {
+    archiveClassifier.set('shadow')
+    configurations = [project.configurations.shadowed]
+    relocate 'org.bouncycastle', 'io.approov.internal.bouncycastle'
+    exclude 'META-INF/**'
+}
+
 dependencies {
     implementation 'com.squareup.okhttp3:okhttp:4.12.0'
     implementation 'io.approov:approov-android-sdk:3.5.3'
-    implementation 'org.bouncycastle:bcprov-jdk15to18:1.84'
+    shadowed 'org.bouncycastle:bcprov-jdk15to18:1.84'
+    compileOnly files(tasks.named('shadowJar'))
+    implementation files(tasks.named('shadowJar'))
     implementation 'androidx.annotation:annotation-jvm:1.9.1'
     testImplementation 'junit:junit:4.13.2'
     testImplementation project(':approov-sdk')
@@ -53,4 +65,8 @@ dependencies {
     testImplementation 'org.robolectric:robolectric:4.11.1'
     testImplementation 'org.json:json:20231013'
     testImplementation 'androidx.test:core:1.6.1'
+}
+
+tasks.withType(JavaCompile) {
+    dependsOn tasks.named('shadowJar')
 }
