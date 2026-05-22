@@ -248,8 +248,9 @@ public class ApproovDefaultMessageSigning implements ApproovServiceMutator {
                 }
                 // decode the signature from ASN.1 DER format
                 try (ASN1InputStream asn1InputStream = new ASN1InputStream(signature)) {
-                    ASN1Sequence sequence = (ASN1Sequence) asn1InputStream.readObject();
-                    if (sequence instanceof ASN1Sequence) {
+                    Object obj = asn1InputStream.readObject();
+                    if (obj instanceof ASN1Sequence) {
+                        ASN1Sequence sequence = (ASN1Sequence) obj;
                         // Combine r and s into a single byte array
                         byte[] rBytes = to32ByteArray((ASN1Integer) sequence.getObjectAt(0));
                         byte[] sBytes = to32ByteArray((ASN1Integer) sequence.getObjectAt(1));

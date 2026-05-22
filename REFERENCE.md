@@ -27,16 +27,19 @@ void initialize(Context context, String config)
 
 **Kotlin:**
 ```kotlin
-fun initialize(context: Context, config: String)
+fun initialize(context: Context, config: String?)
 ```
 
 The [application context](https://developer.android.com/reference/android/content/Context#getApplicationContext()) must be provided using the `context` parameter.
 
-It is possible to pass an empty `config` string to bypass Approov SDK initialization. In that case the service layer still reports itself as initialized, but any `OkHttpClient` obtained from it behaves as a plain client with no Approov token injection, message signing, secure strings, or pinning.
+It is possible to pass an empty `config` string or `null` to bypass Approov SDK initialization. In that case the service layer still reports itself as initialized, but any `OkHttpClient` obtained from it behaves as a plain client with no Approov token injection, message signing, secure strings, or pinning.
 
 This empty-config mode is intended as a bootstrap or bypass state for advanced integrations. A later call to `initialize()` with a valid non-empty config string is allowed and will then enable the native Approov SDK at runtime. By contrast, reinitializing from one non-empty config string to a different non-empty config string is still rejected unless you are intentionally using a supported same-config `reinit...` flow.
 
-Initialization comments starting with `options:` should be treated as initial-call options, not as a repeated runtime update path. Repeated same-config `options:...` calls may fail at the native SDK level.
+Documentation of the `comment` parameter highlights:
+* Passing a `comment` starting with `options:` during the initial setup forwards these custom startup options to the native SDK.
+* Passing a `comment` starting with `reinit:` on subsequent identical-config calls triggers native re-initialization.
+* Passing `null` is supported and is the default when no comment is supplied.
 
 An alternative initialization function allows to provide further options in the `comment` parameter. Please refer to the [Approov SDK documentation](https://approov.io/docs/latest/approov-direct-sdk-integration/#sdk-initialization-options) for details.
 
@@ -47,7 +50,7 @@ void initialize(Context context, String config, String comment)
 
 **Kotlin:**
 ```kotlin
-fun initialize(context: Context, config: String, comment: String)
+fun initialize(context: Context, config: String?, comment: String?)
 ```
 
 ## isInitialized
@@ -385,16 +388,16 @@ fun removeSubstitutionQueryParam(key: String)
 ```
 
 ## getSubstitutionQueryParams
-Gets the set of query parameter keys currently subject to secure string substitution.
+Gets the map of query parameter keys to compiled regex patterns currently subject to secure string substitution.
 
 **Java:**
 ```java
-Set<String> getSubstitutionQueryParams()
+Map<String, Pattern> getSubstitutionQueryParams()
 ```
 
 **Kotlin:**
 ```kotlin
-fun getSubstitutionQueryParams(): Set<String>
+fun getSubstitutionQueryParams(): Map<String, Pattern>
 ```
 
 ## addExclusionURLRegex
