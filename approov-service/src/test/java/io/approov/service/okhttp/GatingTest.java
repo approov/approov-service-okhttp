@@ -41,5 +41,36 @@ public class GatingTest {
         ApproovService.initialize(ApplicationProvider.getApplicationContext(), "");
         assertNotNull(ApproovService.getOkHttpClient());
     }
+
+    @Test
+    public void testInitializationWithNullConfigAndComment() {
+        ApproovService.initialize(ApplicationProvider.getApplicationContext(), null, null);
+        assertTrue(ApproovService.isInitialized());
+        assertFalse(ApproovService.isApproovEnabled());
+    }
+
+    @Test
+    public void testGetMethodsBeforeInitialization() {
+        try {
+            ApproovService.getSubstitutionHeaders();
+            fail("Expected IllegalStateException for getSubstitutionHeaders");
+        } catch (IllegalStateException e) {
+            assertEquals("ApproovService is not initialized", e.getMessage());
+        }
+
+        try {
+            ApproovService.getSubstitutionQueryParams();
+            fail("Expected IllegalStateException for getSubstitutionQueryParams");
+        } catch (IllegalStateException e) {
+            assertEquals("ApproovService is not initialized", e.getMessage());
+        }
+
+        try {
+            ApproovService.getExclusionURLRegexs();
+            fail("Expected IllegalStateException for getExclusionURLRegexs");
+        } catch (IllegalStateException e) {
+            assertEquals("ApproovService is not initialized", e.getMessage());
+        }
+    }
 }
 

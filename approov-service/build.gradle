@@ -35,6 +35,16 @@ android {
             returnDefaultValues = true
         }
     }
+
+    sourceSets {
+        test {
+            java {
+                if (findProject(':approov-sdk') == null || findProject(':test-support') == null) {
+                    exclude '**/ApproovServiceMiniSdkTest.java'
+                }
+            }
+        }
+    }
 }
 
 configurations {

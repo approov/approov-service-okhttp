@@ -16,7 +16,7 @@ The format is based on Keep a Changelog and this project adheres to Semantic Ver
 ### Changed
 - `setProceedOnNetworkFail()` and `getProceedOnNetworkFail()` are now obsolete no-ops. Mutator defaults dynamically enforce exceptions upon network drops.
 - Shaded and relocated the BouncyCastle dependency (`io.approov.internal.bouncycastle`) to prevent version collisions for consuming applications.
-- Removed the transitive `org.bouncycastle:bcprov-jdk15to18` dependency from `pom.xml`.
+- Removed the transitive `org.bouncycastle:bcprov-jdk18on` dependency from `pom.xml`.
 
 ### Fixed
 - Enforced SDK initialization gating across all public API endpoints (`fetchCustomJWT`, `getDeviceID`, `setDataHashInToken`, `setInstallAttrsInToken`, etc.) to prevent unhandled `IllegalStateException` crashes from the platform SDK when the service layer is operating in bypass/uninitialized mode.

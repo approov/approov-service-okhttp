@@ -33,7 +33,8 @@ By default, the `ApproovService` processes requests based on the attestation sta
 | **Success** | Proceed | The request acts as expected and is sent with the `Approov-Token`. |
 | **No Network / Poor Network / MITM Detected** | Throw Exception | An `ApproovNetworkException` is thrown. The request should be retried. |
 | **Rejection** | Throw Exception | An `ApproovRejectionException` is thrown. The request is marked as rejected. |
-| **No Approov Service / Unknown URL** | Proceed | The request is sent **without** an `Approov-Token`. |
+| **No Approov Service** | Proceed | The request is sent with an **empty** `Approov-Token` header (or carries the fetch status if `setUseApproovStatusIfNoToken(true)` is enabled). |
+| **Unknown URL / Unprotected URL** | Proceed | The request is sent **without** an `Approov-Token` header. |
 
 ## Customizing Request Handling with Mutators
 
@@ -41,7 +42,7 @@ You may want to modify this behavior to suit specific app requirements. A common
 
 ### Prevent Access Without a Token (e.g. NO_APPROOV_SERVICE)
 
-The standard behavior for statuses like `NO_APPROOV_SERVICE` is to proceed with the request without adding an Approov token. This might occur, for example, if a device cannot connect to the Approov cloud due to a restricted network environment. You may wish to prevent this behavior to ensure that *only* requests with valid proof of attestation reach your backend API, allowing you to explicitly handle this case within your application.
+The standard behavior for `NO_APPROOV_SERVICE` is to proceed with the request, which adds an empty `Approov-Token` header (unless `setUseApproovStatusIfNoToken(true)` is enabled, which adds the status string instead). For completely unrecognized or skipped URLs (e.g., `UNKNOWN_URL`), the request proceeds without adding any `Approov-Token` header at all. This might occur, for example, if a device cannot connect to the Approov cloud due to a restricted network environment. You may wish to prevent this behavior to ensure that *only* requests with valid proof of attestation reach your backend API, allowing you to explicitly handle this case within your application.
 
 You can use a mutator to enforce this policy by throwing an error or returning `false` for such statuses.
 

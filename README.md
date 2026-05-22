@@ -6,7 +6,7 @@ A wrapper for the [Approov SDK](https://github.com/approov/approov-android-sdk) 
 
 The Approov integration is available via [`mavenCentral`](https://mvnrepository.com/repos/central). This allows inclusion into the project by simply specifying a dependency in the `gradle` files for the app.
 
-The `mavenCentral()` repository is already present in the gradle.build file so the only import you need to make is the actual service layer itself:
+The `mavenCentral()` repository is already present in the build.gradle file so the only import you need to make is the actual service layer itself:
 
 ```groovy
 implementation("io.approov:service.okhttp:3.5.7")
@@ -144,7 +144,7 @@ Your Approov onboarding email should contain a link allowing you to access [Live
 
 To actually protect your APIs and/or secrets there are some further steps. Approov provides two different options for protection:
 
-* **API PROTECTION**: You should use this if you control the backend API(s) being protected and are able to modify them to ensure that a valid Approov token is being passed by the app. An [Approov Token](https://approov.io/docs/latest/approov-usage-documentation/#approov-tokens) is short lived crytographically signed JWT proving the authenticity of the call.
+* **API PROTECTION**: You should use this if you control the backend API(s) being protected and are able to modify them to ensure that a valid Approov token is being passed by the app. An [Approov Token](https://approov.io/docs/latest/approov-usage-documentation/#approov-tokens) is short lived cryptographically signed JWT proving the authenticity of the call.
 
 * **SECRETS PROTECTION**: This allows app secrets, including API keys for 3rd party services, to be protected so that they no longer need to be included in the released app code. These secrets are only made available to valid apps at runtime.
 

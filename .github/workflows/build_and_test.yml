@@ -42,6 +42,7 @@ jobs:
       #    so both repos must sit under the same parent ($GITHUB_WORKSPACE).
       # -----------------------------------------------------------------------
       - name: Checkout core-service-layers-testing
+        if: github.event_name != 'pull_request' || github.event.pull_request.head.repo.fork == false
         uses: actions/checkout@v5
         with:
           repository: approov/core-service-layers-testing
@@ -60,6 +61,7 @@ jobs:
       #    script in core-service-layers-testing to redeploy them.
       # -----------------------------------------------------------------------
       - name: Verify worker endpoints
+        if: github.event_name != 'pull_request' || github.event.pull_request.head.repo.fork == false
         run: |
           # ── URL resolution ──────────────────────────────────────────────────
           PROTECTED_URL="${TESTING_REPLY_URL:-https://replay.ivol.workers.dev}"

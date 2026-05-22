@@ -144,6 +144,12 @@ public class ApproovService {
      * @param comment the comment string, or empty for no comment
      */
     public static synchronized void initialize(Context context, String config, String comment) {
+        if (config == null) {
+            config = "";
+        }
+        if (comment == null) {
+            comment = "";
+        }
         // check if the Approov SDK is already initialized
         boolean allowEnableAfterEmptyInitialization = isInitialized && (configString != null) && configString.isEmpty() && !config.isEmpty();
         if (isInitialized && !comment.startsWith("reinit") && !allowEnableAfterEmptyInitialization) {
@@ -225,7 +231,7 @@ public class ApproovService {
      * Resets the ApproovService state. This should only be used for testing purposes.
      */
     @VisibleForTesting
-    public static synchronized void reset() {
+    static synchronized void reset() {
         isInitialized = false;
         configString = null;
         useApproovStatusIfNoToken = false;
@@ -246,20 +252,10 @@ public class ApproovService {
 
     /**
      * Sets a flag indicating if the network interceptor should proceed anyway if it
-     * is
-     * not possible to obtain an Approov token due to a networking failure. If this
-     * is set
-     * then your backend API can receive calls without the expected Approov token
-     * header
-     * being added, or without header/query parameter substitutions being made. Note
-     * that
-     * this should be used with caution because it may allow a connection to be
-     * established
-     * before any dynamic pins have been received via Approov, thus potentially
-     * opening the
-     * channel to a MitM.
+     * is not possible to obtain an Approov token due to a networking failure.
+     * Note: This method is now obsolete and has no effect. The behavior is controlled via setServiceMutator.
      *
-     * @param proceed is true if Approov networking fails should allow continuation
+     * @param proceed is ignored
      * @deprecated Use setServiceMutator to control this behavior
      */
     @Deprecated
@@ -269,11 +265,10 @@ public class ApproovService {
 
     /**
      * Gets a flag indicating if the network interceptor should proceed anyway if it
-     * is
-     * not possible to obtain an Approov token due to a networking failure.
+     * is not possible to obtain an Approov token due to a networking failure.
+     * Note: This method is now obsolete and always returns false. The behavior is controlled via setServiceMutator.
      *
-     * @return true if Approov networking fails should allow continuation, false
-     *         otherwise
+     * @return always returns false
      * @deprecated Use setServiceMutator to control this behavior
      */
     @Deprecated
@@ -514,6 +509,9 @@ public class ApproovService {
      *         required prefix
      */
     public static synchronized Map<String, String> getSubstitutionHeaders() {
+        if (!isInitialized) {
+            throw new IllegalStateException("ApproovService is not initialized");
+        }
         return new HashMap<>(substitutionHeaders);
     }
 
@@ -564,6 +562,9 @@ public class ApproovService {
      *         Pattern
      */
     public static synchronized Map<String, Pattern> getSubstitutionQueryParams() {
+        if (!isInitialized) {
+            throw new IllegalStateException("ApproovService is not initialized");
+        }
         return new HashMap<>(substitutionQueryParams);
     }
 
@@ -625,6 +626,9 @@ public class ApproovService {
      *         Patterns
      */
     public static synchronized Map<String, Pattern> getExclusionURLRegexs() {
+        if (!isInitialized) {
+            throw new IllegalStateException("ApproovService is not initialized");
+        }
         return new HashMap<>(exclusionURLRegexs);
     }
 
