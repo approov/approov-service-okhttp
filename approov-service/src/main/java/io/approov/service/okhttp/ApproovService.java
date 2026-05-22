@@ -217,8 +217,29 @@ public class ApproovService {
      *
      * @return true if Approov protection is enabled, false otherwise
      */
-    static synchronized boolean isApproovEnabled() {
+    public static synchronized boolean isApproovEnabled() {
         return isInitialized && (configString != null) && !configString.isEmpty();
+    }
+
+    /**
+     * Resets the ApproovService state. This should only be used for testing purposes.
+     */
+    @VisibleForTesting
+    public static synchronized void reset() {
+        isInitialized = false;
+        configString = null;
+        useApproovStatusIfNoToken = false;
+        pinningInterceptor = null;
+        okHttpBuilders = null;
+        okHttpClients = null;
+        approovTokenHeader = null;
+        approovTraceIDHeader = null;
+        approovTokenPrefix = null;
+        bindingHeader = null;
+        serviceMutator = ApproovServiceMutator.DEFAULT;
+        substitutionHeaders = null;
+        substitutionQueryParams = null;
+        exclusionURLRegexs = null;
     }
 
 
@@ -603,7 +624,7 @@ public class ApproovService {
      * @return Map<String, Pattern> of the exclusion regexs to their respective
      *         Patterns
      */
-    static synchronized Map<String, Pattern> getExclusionURLRegexs() {
+    public static synchronized Map<String, Pattern> getExclusionURLRegexs() {
         return new HashMap<>(exclusionURLRegexs);
     }
 
@@ -1106,6 +1127,10 @@ public class ApproovService {
      * @return OkHttpClient to be used with Approov
      */
     public static synchronized OkHttpClient getOkHttpClient(String builderName) {
+        if (!isInitialized) {
+            Log.e(TAG, "getOkHttpClient: SDK not initialized");
+            throw new IllegalStateException("getOkHttpClient: SDK not initialized");
+        }
         OkHttpClient okHttpClient = okHttpClients.get(builderName);
         if (okHttpClient == null) {
             // get the builder and warn if none was available

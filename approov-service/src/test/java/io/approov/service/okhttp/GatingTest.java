@@ -2,7 +2,6 @@ package io.approov.service.okhttp;
 import org.junit.Test;
 import org.junit.After;
 import org.junit.Before;
-import java.lang.reflect.Field;
 import org.junit.runner.RunWith;
 import org.robolectric.RobolectricTestRunner;
 import androidx.test.core.app.ApplicationProvider;
@@ -12,24 +11,35 @@ import static org.junit.Assert.*;
 public class GatingTest {
     @Before
     @After
-    public void resetApproovServiceState() throws Exception {
-        Field isInitializedField = ApproovService.class.getDeclaredField("isInitialized");
-        isInitializedField.setAccessible(true);
-        isInitializedField.setBoolean(null, false);
+    public void resetApproovServiceState() {
+        ApproovService.reset();
     }
 
     @Test
-    public void testFetchCustomJWTWithEmptyConfig() throws Exception {
+    public void testFetchCustomJWTWithEmptyConfig() {
         ApproovService.initialize(ApplicationProvider.getApplicationContext(), "");
         try {
             ApproovService.fetchCustomJWT("{\"test\": 1}");
-            System.out.println("fetchCustomJWT SUCCESS");
+            fail("Expected ApproovException but none was thrown");
         } catch (ApproovException e) {
-            System.out.println("fetchCustomJWT THREW: " + e.getClass().getName() + ": " + e.getMessage());
-            e.printStackTrace(System.out);
-        } catch (Exception e) {
-            System.out.println("fetchCustomJWT THREW OTHER: " + e.getClass().getName() + ": " + e.getMessage());
-            e.printStackTrace(System.out);
+            assertEquals("fetchCustomJWT: SDK not initialized", e.getMessage());
         }
     }
+
+    @Test
+    public void testGetOkHttpClientBeforeInitialization() {
+        try {
+            ApproovService.getOkHttpClient();
+            fail("Expected IllegalStateException but none was thrown");
+        } catch (IllegalStateException e) {
+            assertEquals("getOkHttpClient: SDK not initialized", e.getMessage());
+        }
+    }
+
+    @Test
+    public void testGetOkHttpClientWithEmptyConfig() {
+        ApproovService.initialize(ApplicationProvider.getApplicationContext(), "");
+        assertNotNull(ApproovService.getOkHttpClient());
+    }
 }
+
