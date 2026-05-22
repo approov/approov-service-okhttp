@@ -4,6 +4,28 @@ All notable changes to this package will be documented in this file.
 
 The format is based on Keep a Changelog and this project adheres to Semantic Versioning.
 
+## [3.5.7] - 2026-04-09
+
+### Added
+- Integrated a localized testing framework for comprehensive service layer verification.
+- Added extensive test coverage for token management, pinning synchronization, and request mutation scenarios.
+- Enhanced internal service components to improve testability.
+- Added `ApproovService.isInitialized()` to expose the service-layer initialization state.
+- Consumer ProGuard rules (`consumer-rules.pro`) to automatically preserve native SDK interfaces and internal cryptography bounds.
+
+### Changed
+- `setProceedOnNetworkFail()` and `getProceedOnNetworkFail()` are now obsolete no-ops. Mutator defaults dynamically enforce exceptions upon network drops.
+- Shaded and relocated the BouncyCastle dependency (`io.approov.internal.bouncycastle`) to prevent version collisions for consuming applications.
+- Removed the transitive `org.bouncycastle:bcprov-jdk18on` dependency from `pom.xml`.
+
+### Fixed
+- Enforced SDK initialization gating across all public API endpoints (`fetchCustomJWT`, `getDeviceID`, `setDataHashInToken`, `setInstallAttrsInToken`, etc.) to prevent unhandled `IllegalStateException` crashes from the platform SDK when the service layer is operating in bypass/uninitialized mode.
+- Prevented premature construction of the `ApproovPinningInterceptor` and immediate `getPins()` calls when the Approov service layer is initialized with an empty configuration string.
+- Improved service re-initialization consistency for internal state management.
+- Initializing with an empty config string now keeps the service layer initialized while returning a plain `OkHttpClient` without Approov processing.
+- Initializing first with an empty config string and later with a valid non-empty config string now enables Approov at runtime instead of being rejected as a different-config reinitialization.
+- Enforced strict failure by throwing `IllegalArgumentException` in `ApproovService.initialize` if a malformed configuration string is provided.
+
 ## [3.5.6] - 2026-02-11
 
 ### Added
