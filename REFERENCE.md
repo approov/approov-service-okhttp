@@ -27,7 +27,7 @@ void initialize(Context context, String config)
 
 **Kotlin:**
 ```kotlin
-fun initialize(context: Context, config: String?)
+fun initialize(context: Context, config: String!)
 ```
 
 The [application context](https://developer.android.com/reference/android/content/Context#getApplicationContext()) must be provided using the `context` parameter.
@@ -50,7 +50,7 @@ void initialize(Context context, String config, String comment)
 
 **Kotlin:**
 ```kotlin
-fun initialize(context: Context, config: String?, comment: String?)
+fun initialize(context: Context, config: String!, comment: String!)
 ```
 
 ## isInitialized
