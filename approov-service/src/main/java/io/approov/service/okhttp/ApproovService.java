@@ -140,8 +140,8 @@ public class ApproovService {
      * Initializes the ApproovService with an account configuration and comment.
      *
      * @param context the Application context
-     * @param config  the configuration string, or empty for no SDK initialization
-     * @param comment the comment string, or empty for no comment
+     * @param config  the configuration string, or null/empty for no SDK initialization
+     * @param comment the comment string, or null/empty for no comment
      */
     public static synchronized void initialize(Context context, String config, String comment) {
         if (config == null) {
