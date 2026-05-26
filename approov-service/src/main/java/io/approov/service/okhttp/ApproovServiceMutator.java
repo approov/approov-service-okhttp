@@ -226,7 +226,6 @@ public interface ApproovServiceMutator {
                 throw new ApproovNetworkException(status,
                         "Approov token fetch for " + url + ": " + status.toString());
             case NO_APPROOV_SERVICE:
-                return true;
             case UNKNOWN_URL:
             case UNPROTECTED_URL: // Continue without token for unprotected URLs
                 return false;
