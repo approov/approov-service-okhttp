@@ -20,6 +20,8 @@ If a method throws an `ApproovRejectionException` (a subclass of `ApproovExcepti
 ## initialize
 Initializes the Approov SDK and thus enables the Approov features. The `config` will have been provided in the initial onboarding or email or can be [obtained](https://approov.io/docs/latest/approov-usage-documentation/#getting-the-initial-sdk-configuration) using the approov CLI. This will generate an error if a second attempt is made at initialization with a different `config`.
 
+This is the standard form and should be used in most cases. The `comment` parameter defaults to `null` when not supplied.
+
 **Java:**
 ```Java
 void initialize(Context context, String config)
@@ -32,16 +34,11 @@ fun initialize(context: Context, config: String!)
 
 The [application context](https://developer.android.com/reference/android/content/Context#getApplicationContext()) must be provided using the `context` parameter.
 
-It is possible to pass an empty `config` string or `null` to bypass Approov SDK initialization. In that case the service layer still reports itself as initialized, but any `OkHttpClient` obtained from it behaves as a plain client with no Approov token injection, message signing, secure strings, or pinning.
+It is possible to pass an empty `config` string to bypass Approov SDK initialization. In that case the service layer still reports itself as initialized, but any `OkHttpClient` obtained from it behaves as a plain client with no Approov token injection, message signing, secure strings, or pinning.
 
-This empty-config mode is intended as a bootstrap or bypass state for advanced integrations. A later call to `initialize()` with a valid non-empty config string is allowed and will then enable the native Approov SDK at runtime. By contrast, reinitializing from one non-empty config string to a different non-empty config string is still rejected unless you are intentionally using a supported same-config `reinit...` flow.
+This empty-config mode is intended as a bootstrap or bypass state for advanced integrations. A later call to `initialize()` with a valid non-empty config string is allowed and will then enable the native Approov SDK at runtime. By contrast, reinitializing from one non-empty config string to a different non-empty config string is rejected by the platform SDK.
 
-Documentation of the `comment` parameter highlights:
-* Passing a `comment` starting with `options:` during the initial setup forwards these custom startup options to the native SDK.
-* Passing a `comment` starting with `reinit:` on subsequent identical-config calls triggers native re-initialization.
-* Passing `null` is supported and is the default when no comment is supplied.
-
-An alternative initialization function allows to provide further options in the `comment` parameter. Please refer to the [Approov SDK documentation](https://approov.io/docs/latest/approov-direct-sdk-integration/#sdk-initialization-options) for details.
+If you need to supply a `comment` to the native SDK (for example to pass `options:...` startup flags or trigger a `reinit...` flow), use the extended form instead:
 
 **Java:**
 ```java
@@ -52,6 +49,14 @@ void initialize(Context context, String config, String comment)
 ```kotlin
 fun initialize(context: Context, config: String!, comment: String!)
 ```
+
+The `comment` parameter is passed directly to the native Approov SDK. Key uses:
+* Pass a string starting with `options:` during the initial setup to forward custom startup options to the native SDK.
+* Pass a string starting with `reinit` to trigger native re-initialization on a subsequent same-config call.
+* Pass `null` (or use the 2-arg form) when no comment is needed — this is the default.
+
+Please refer to the [Approov SDK documentation](https://approov.io/docs/latest/approov-direct-sdk-integration/#sdk-initialization-options) for full details on supported comment values.
+
 
 ## isInitialized
 Returns whether the service layer itself has been initialized.

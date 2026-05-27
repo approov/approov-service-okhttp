@@ -144,36 +144,29 @@ public class ApproovService {
      * @param comment the comment string, or null/empty for no comment
      */
     public static synchronized void initialize(Context context, String config, String comment) {
-        if (config == null) {
-            config = "";
-        }
-        // check if the Approov SDK is already initialized
-        boolean allowEnableAfterEmptyInitialization = isInitialized && (configString != null) && configString.isEmpty() && !config.isEmpty();
-        if (isInitialized && (comment == null || !comment.startsWith("reinit")) && !allowEnableAfterEmptyInitialization) {
-            if (!config.equals(configString)) {
-                throw new IllegalStateException("ApproovService layer is already initialized.");
-            }
-            Log.d(TAG, "Ignoring multiple ApproovService layer initializations with the same config");
-        } else {
-            // setup for creating clients
-            isInitialized = false;
-            useApproovStatusIfNoToken = false;
-            okHttpBuilders = new HashMap<>();
-            okHttpBuilders.put(DEFAULT_BUILDER_NAME, new OkHttpClient.Builder());
-            okHttpClients = new HashMap<>();
-            approovTokenHeader = APPROOV_TOKEN_HEADER;
-            approovTraceIDHeader = APPROOV_TRACE_ID_HEADER;
-            approovTokenPrefix = APPROOV_TOKEN_PREFIX;
-            bindingHeader = null;
-            substitutionHeaders = new HashMap<>();
-            substitutionQueryParams = new HashMap<>();
-            exclusionURLRegexs = new HashMap<>();
+        // Reset service layer state
+        isInitialized = false;
+        useApproovStatusIfNoToken = false;
+        okHttpBuilders = new HashMap<>();
+        okHttpBuilders.put(DEFAULT_BUILDER_NAME, new OkHttpClient.Builder());
+        okHttpClients = new HashMap<>();
+        approovTokenHeader = APPROOV_TOKEN_HEADER;
+        approovTraceIDHeader = APPROOV_TRACE_ID_HEADER;
+        approovTokenPrefix = APPROOV_TOKEN_PREFIX;
+        bindingHeader = null;
+        substitutionHeaders = new HashMap<>();
+        substitutionQueryParams = new HashMap<>();
+        exclusionURLRegexs = new HashMap<>();
 
-
-            // initialize the Approov SDK
+        // Initialize the platform SDK if not in bypass mode (empty config).
+        // The SDK returns true if initialization succeeded, false if already initialized
+        // with the same config. Any other failure (e.g. different config) throws.
+        if (!config.isEmpty()) {
             try {
-                if (!config.isEmpty())
-                    Approov.initialize(context.getApplicationContext(), config, "auto", comment);
+                boolean sdkInitialized = Approov.initialize(context.getApplicationContext(), config, "auto", comment);
+                if (!sdkInitialized) {
+                    Log.d(TAG, "Approov SDK already initialized");
+                }
             } catch (IllegalArgumentException e) {
                 Log.e(TAG, "Approov initialization failed: " + e.getMessage());
                 throw e;
@@ -181,14 +174,14 @@ public class ApproovService {
                 Log.e(TAG, "Approov initialization failed: " + e.getMessage());
                 throw e;
             }
-            isInitialized = true;
-            configString = config;
-            if (isApproovEnabled()) {
-                pinningInterceptor = new ApproovPinningInterceptor();
-                Approov.setUserProperty("approov-service-okhttp");
-            } else {
-                pinningInterceptor = null;
-            }
+        }
+        isInitialized = true;
+        configString = config;
+        if (isApproovEnabled()) {
+            pinningInterceptor = new ApproovPinningInterceptor();
+            Approov.setUserProperty("approov-service-okhttp");
+        } else {
+            pinningInterceptor = null;
         }
     }
 

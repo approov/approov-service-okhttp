@@ -43,8 +43,8 @@ public class GatingTest {
     }
 
     @Test
-    public void testInitializationWithNullConfigAndComment() {
-        ApproovService.initialize(ApplicationProvider.getApplicationContext(), null, null);
+    public void testInitializationWithEmptyConfigAndNullComment() {
+        ApproovService.initialize(ApplicationProvider.getApplicationContext(), "", null);
         assertTrue(ApproovService.isInitialized());
         assertFalse(ApproovService.isApproovEnabled());
     }
