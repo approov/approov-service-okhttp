@@ -71,7 +71,7 @@ boolean isInitialized()
 fun isInitialized(): Boolean
 ```
 
-This reports the state of the service layer, not whether Approov protection is currently active. If initialization used an empty `config` string then this returns `true`, while the layer still operates as a plain `OkHttpClient` wrapper without Approov features.
+Returns `true` if `initialize` has been called successfully, including when bypass mode is active (empty config string). Returns `false` if `initialize` has never been called or if the last initialization attempt failed. Use `isApproovEnabled()` to distinguish between bypass and protected modes.
 
 ## isApproovEnabled
 Returns whether Approov protection is currently enabled.
@@ -86,7 +86,8 @@ boolean isApproovEnabled()
 fun isApproovEnabled(): Boolean
 ```
 
-This returns `true` only if the service layer has been initialized with a valid, non-empty configuration string. If initialized with an empty string, or not initialized at all, it returns `false`.
+Returns `true` only when the service layer was initialized with a valid, non-empty configuration string and the native Approov SDK is active. Returns `false` in all other cases: not initialized, or initialized in bypass mode (empty config). All direct Approov SDK methods (such as `fetchToken`, `precheck`, `fetchSecureString`) will throw `ApproovException` if called when this returns `false`.
+
 
 ## setApproovInterceptorExtensions
 
