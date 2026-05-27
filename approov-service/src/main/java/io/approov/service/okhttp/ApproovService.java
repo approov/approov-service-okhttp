@@ -140,10 +140,12 @@ public class ApproovService {
      * Initializes the ApproovService with an account configuration and comment.
      *
      * @param context the Application context
-     * @param config  the configuration string, or null/empty for no SDK initialization
-     * @param comment the comment string, or null/empty for no comment
+     * @param config  the configuration string, or empty for no SDK initialization
+     * @param comment the comment string, or null for no comment
      */
     public static synchronized void initialize(Context context, String config, String comment) {
+        if (config == null)
+            throw new IllegalArgumentException("config must not be null; pass \"\" for bypass mode");
         // Reset service layer state
         isInitialized = false;
         useApproovStatusIfNoToken = false;
