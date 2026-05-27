@@ -268,8 +268,8 @@ public class ApproovServiceMiniSdkTest {
         Request request = new Request.Builder().url(getTargetURL()).build();
         try (Response response = client.newCall(request).execute()) {
             JSONObject reply = new JSONObject(response.body().string());
-            assertEquals("", getHeader(reply, "Approov-Token"));
-            assertNotNull(getHeader(reply, "Approov-TraceID"));
+            assertNull(getHeader(reply, "Approov-Token"));
+            assertNull(getHeader(reply, "Approov-TraceID"));
         }
     }
 
