@@ -220,7 +220,7 @@ void setServiceMutator(ApproovServiceMutator mutator)
 fun setServiceMutator(mutator: ApproovServiceMutator?)
 ```
 
-Passing `null` (or omitting the parameter in Java) reinstates the default behavior.
+Passing `null` reinstates the default behavior.
 
 ## getServiceMutator
 Gets the active service mutator instance.
