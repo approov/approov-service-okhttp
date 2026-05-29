@@ -61,19 +61,20 @@ public class ApproovServiceMiniSdkTest {
     // SECTION 1: Initialization
     // TESTING_REQUIREMENTS.md §1
     // ==================================================================================
-
     /**
      * §1 Same Config Re-initialization / Different Config Re-initialization
      *
      * Re-initialize with the same config string should not fail (platform SDK returns false).
      * Re-initialize with a different config string should fail: the platform SDK throws
      * IllegalStateException which is re-thrown by the service layer.
+     * Per TESTING_REQUIREMENTS §17-18: failure preserves the prior operating state;
+     * the service layer remains initialized and Approov-enabled.
      */
     @Test
     public void testInitializeIgnoresSameConfigAndRejectsDifferentConfig() {
         // Re-init with same config: SDK returns false, service layer logs and continues
         ApproovService.initialize(context, validInitialConfig);
- 
+
         // Re-init with different config: platform SDK throws IllegalStateException
         String differentConfig = "#cb-other#mAxOF0ekJUOC36J5XWmVmVipOcUoEdMjhPSp2FVtyTo=";
         try {
@@ -82,6 +83,9 @@ public class ApproovServiceMiniSdkTest {
         } catch (IllegalStateException e) {
             assertNotNull(e.getMessage());
         }
+        // Per TESTING_REQUIREMENTS §17-18: failure preserves the prior operating state.
+        assertTrue(ApproovService.isInitialized());
+        assertTrue(ApproovService.isApproovEnabled());
     }
 
     /**

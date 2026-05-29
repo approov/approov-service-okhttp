@@ -146,7 +146,25 @@ public class ApproovService {
     public static synchronized void initialize(Context context, String config, String comment) {
         if (config == null)
             throw new IllegalArgumentException("config must not be null; pass \"\" for bypass mode");
-        // Reset service layer state
+
+        // Initialize the platform SDK if not in bypass mode (empty config).
+        // State is only modified after the SDK confirms success, preserving the current
+        // operating mode (protected or bypass) if the call fails.
+        if (!config.isEmpty()) {
+            try {
+                boolean sdkInitialized = Approov.initialize(context.getApplicationContext(), config, "auto", comment);
+                if (!sdkInitialized) {
+                    Log.d(TAG, "Approov SDK already initialized");
+                }
+            } catch (IllegalArgumentException e) {
+                Log.e(TAG, "Approov initialization failed: " + e.getMessage());
+                throw e; // service-layer state NOT modified — prior operating mode preserved
+            } catch (IllegalStateException e) {
+                Log.e(TAG, "Approov initialization failed: " + e.getMessage());
+                throw e; // service-layer state NOT modified — prior operating mode preserved
+            }
+        }
+        // SDK succeeded (or bypass) — now reset and commit new service-layer state.
         isInitialized = false;
         useApproovStatusIfNoToken = false;
         okHttpBuilders = new HashMap<>();
@@ -159,24 +177,6 @@ public class ApproovService {
         substitutionHeaders = new HashMap<>();
         substitutionQueryParams = new HashMap<>();
         exclusionURLRegexs = new HashMap<>();
-
-        // Initialize the platform SDK if not in bypass mode (empty config).
-        // The SDK returns true if initialization succeeded, false if already initialized
-        // with the same config. Any other failure (e.g. different config) throws.
-        if (!config.isEmpty()) {
-            try {
-                boolean sdkInitialized = Approov.initialize(context.getApplicationContext(), config, "auto", comment);
-                if (!sdkInitialized) {
-                    Log.d(TAG, "Approov SDK already initialized");
-                }
-            } catch (IllegalArgumentException e) {
-                Log.e(TAG, "Approov initialization failed: " + e.getMessage());
-                throw e;
-            } catch (IllegalStateException e) {
-                Log.e(TAG, "Approov initialization failed: " + e.getMessage());
-                throw e;
-            }
-        }
         isInitialized = true;
         configString = config;
         if (isApproovEnabled()) {
