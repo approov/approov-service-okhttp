@@ -181,10 +181,12 @@ If you have already customized the mutator, you can add message signing to it by
 ```kotlin
 import io.approov.service.okhttp.ApproovDefaultMessageSigning.SignatureParametersFactory
 
-val factory = SignatureParametersFactory()
-    .setUseAccountMessageSigning() // or setUseInstallMessageSigning()
-    .setAddCreated(true)
-    .setExpiresLifetime(60)
+// Always start from the safe default factory and override what you need.
+// Using a bare SignatureParametersFactory() produces a signature that
+// covers no request components and is therefore security-worthless.
+val factory = ApproovDefaultMessageSigning.generateDefaultSignatureParametersFactory()
+    .setUseAccountMessageSigning() // switch from install (default) to account signing
+    .setExpiresLifetime(60)        // override the default 15s expiry
 
 val signer = ApproovDefaultMessageSigning()
     .setDefaultFactory(factory)

@@ -211,7 +211,13 @@ public class ApproovDefaultMessageSigning implements ApproovServiceMutator {
         }
         // generate and add a message signature
         OkHttpComponentProvider provider = new OkHttpComponentProvider(request);
-        SignatureParameters params = buildSignatureParameters(provider, changes);
+        SignatureParameters params;
+        try {
+            params = buildSignatureParameters(provider, changes);
+        } catch (Exception e) {
+            Log.d(TAG, "Failed to build signature parameters - skipping message signing: " + e);
+            return request;
+        }
         if (params == null) {
             // No sig to be added to the request; return the original request.
             return request;
@@ -386,8 +392,9 @@ public class ApproovDefaultMessageSigning implements ApproovServiceMutator {
      */
     public static class SignatureParametersFactory {
         // The base parameters that are copied for every new generated message
-        // signature.
-        protected SignatureParameters baseParameters;
+        // signature. Initialised to an empty SignatureParameters so that a bare
+        // SignatureParametersFactory() is safe to use without calling setBaseParameters().
+        protected SignatureParameters baseParameters = new SignatureParameters();
         // The algorithm to use for body digests, or null if no body digest is to be
         // used.
         protected String bodyDigestAlgorithm;
@@ -409,7 +416,9 @@ public class ApproovDefaultMessageSigning implements ApproovServiceMutator {
         protected boolean addApproovTraceIDHeader;
         // Lists the headers to add to the message signature if they are present in the
         // request. (Non-optional headers should be added to the base parameters).
-        protected List<String> optionalHeaders;
+        // Initialised to an empty list so that a bare SignatureParametersFactory() is
+        // safe to use without calling addOptionalHeaders().
+        protected List<String> optionalHeaders = new ArrayList<>();
 
         /**
          * Sets the base parameters for the factory. The base parameters are copied for
