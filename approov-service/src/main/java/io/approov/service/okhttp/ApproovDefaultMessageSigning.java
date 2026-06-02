@@ -320,8 +320,8 @@ public class ApproovDefaultMessageSigning implements ApproovServiceMutator {
         // signature builder
         // may have modified it.
         Request.Builder signedBuilder = provider.getRequest().newBuilder()
-                .addHeader("Signature", sigHeader)
-                .addHeader("Signature-Input", sigInputHeader);
+                .header("Signature", sigHeader)
+                .header("Signature-Input", sigInputHeader);
         if (params.isDebugMode()) {
             try {
                 MessageDigest digestBuilder = MessageDigest.getInstance("SHA-256");
@@ -329,7 +329,7 @@ public class ApproovDefaultMessageSigning implements ApproovServiceMutator {
                 byte[] digest = digestBuilder.digest(message.getBytes(StandardCharsets.UTF_8));
                 String digestHeader = Dictionary.valueOf(Collections.singletonMap(
                         DIGEST_SHA256, ByteSequenceItem.valueOf(digest))).serialize();
-                signedBuilder.addHeader("Signature-Base-Digest", digestHeader);
+                signedBuilder.header("Signature-Base-Digest", digestHeader);
             } catch (NoSuchAlgorithmException e) {
                 Log.d(TAG, "Failed to get digest algorithm - no debug entry " + e);
             }
@@ -602,7 +602,7 @@ public class ApproovDefaultMessageSigning implements ApproovServiceMutator {
             // add the digest to the request
             Request request = provider.getRequest();
             request = request.newBuilder()
-                    .addHeader("Content-Digest", digestHeader.serialize())
+                    .header("Content-Digest", digestHeader.serialize())
                     .build();
             provider.setRequest(request);
             // add the header to the SignatureParameters
