@@ -12,12 +12,10 @@ jobs:
       WORKSPACE: "${{ github.workspace }}"
       GIT_BRANCH: "${{ github.ref }}"
       CURRENT_TAG: "${{ github.ref_name }}"
-      # Worker endpoints: consumed from GitHub organisation variables first.
-      # If the org variable is not set the value is an empty string; the probe
-      # step below falls back to the same hardcoded defaults that are baked into
-      # the mini-sdk (MiniAttesterConfig / Approov.m), keeping them in sync.
-      # Worker management (create / redeploy) logic is centralized in the
-      # core-service-layers-testing script, but invoked here when needed.
+      # Worker endpoints: must be set as GitHub organisation or repository
+      # variables. No fallback is hardcoded here to avoid exposing endpoint
+      # URLs in the public repository. The workflow fails with a clear error
+      # if either variable is missing.
       TESTING_REPLY_URL: ${{ vars.TESTING_REPLY_URL }}
       TESTING_REPLY_URL_UNPROTECTED: ${{ vars.TESTING_REPLY_URL_UNPROTECTED }}
       # Required for the redeploy script invocation on failure
@@ -64,9 +62,19 @@ jobs:
         if: github.event_name != 'pull_request' || github.event.pull_request.head.repo.fork == false
         run: |
           # ── URL resolution ──────────────────────────────────────────────────
-          PROTECTED_URL="${TESTING_REPLY_URL:-https://replay.ivol.workers.dev}"
-          UNPROTECTED_URL="${TESTING_REPLY_URL_UNPROTECTED:-https://replay-unprotected.ivol.workers.dev}"
-          
+          # URLs MUST be set as GitHub organisation/repository variables.
+          # No hardcoded fallback is provided to avoid exposing endpoints
+          # in the public repository.
+          if [[ -z "$TESTING_REPLY_URL" || -z "$TESTING_REPLY_URL_UNPROTECTED" ]]; then
+            echo "ERROR: TESTING_REPLY_URL and TESTING_REPLY_URL_UNPROTECTED must be"
+            echo "       set as GitHub organisation or repository variables."
+            echo "       See CONTRIBUTING.md for setup instructions."
+            exit 1
+          fi
+
+          PROTECTED_URL="$TESTING_REPLY_URL"
+          UNPROTECTED_URL="$TESTING_REPLY_URL_UNPROTECTED"
+
           echo "TESTING_REPLY_URL=$PROTECTED_URL"       >> "$GITHUB_ENV"
           echo "TESTING_REPLY_URL_UNPROTECTED=$UNPROTECTED_URL" >> "$GITHUB_ENV"
 
