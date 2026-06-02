@@ -1,0 +1,20 @@
+// Temporary init script — injects publishToMavenLocal config without modifying build.gradle
+allprojects {
+    afterEvaluate { project ->
+        if (project.plugins.hasPlugin('com.android.library') && project.plugins.hasPlugin('maven-publish')) {
+            project.publishing {
+                publications {
+                    release(MavenPublication) {
+                        groupId    = 'io.approov'
+                        artifactId = 'approov-service-okhttp'
+                        version    = '3.5.7'
+                        artifact("${project.buildDir}/outputs/aar/${project.name}-release.aar")
+                    }
+                }
+                repositories {
+                    mavenLocal()
+                }
+            }
+        }
+    }
+}
