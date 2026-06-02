@@ -80,7 +80,6 @@ public class ApproovService {
     // the config string used for initialization
     private static String configString;
 
-
     // true if the Approov fetch status should be used as the token header value if
     // the
     // actual token fetch fails or returns an empty token
@@ -127,8 +126,6 @@ public class ApproovService {
     // set of URL regexs that should be excluded from any Approov protection, mapped
     // to the compiled Pattern
     private static Map<String, Pattern> exclusionURLRegexs = null;
-
-
 
     /**
      * Construction is disallowed as this is a static only class.
@@ -219,7 +216,8 @@ public class ApproovService {
     }
 
     /**
-     * Resets the ApproovService state. This should only be used for testing purposes.
+     * Resets the ApproovService state. This should only be used for testing
+     * purposes.
      */
     @VisibleForTesting
     static synchronized void reset() {
@@ -239,12 +237,11 @@ public class ApproovService {
         exclusionURLRegexs = null;
     }
 
-
-
     /**
      * Sets a flag indicating if the network interceptor should proceed anyway if it
      * is not possible to obtain an Approov token due to a networking failure.
-     * Note: This method is now obsolete and has no effect. The behavior is controlled via setServiceMutator.
+     * Note: This method is now obsolete and has no effect. The behavior is
+     * controlled via setServiceMutator.
      *
      * @param proceed is ignored
      * @deprecated Use setServiceMutator to control this behavior
@@ -257,7 +254,8 @@ public class ApproovService {
     /**
      * Gets a flag indicating if the network interceptor should proceed anyway if it
      * is not possible to obtain an Approov token due to a networking failure.
-     * Note: This method is now obsolete and always returns false. The behavior is controlled via setServiceMutator.
+     * Note: This method is now obsolete and always returns false. The behavior is
+     * controlled via setServiceMutator.
      *
      * @return always returns false
      * @deprecated Use setServiceMutator to control this behavior
@@ -1324,7 +1322,7 @@ class ApproovTokenInterceptor implements Interceptor {
                 String queryValue = matcher.group(1);
                 approovResults = Approov.fetchSecureStringAndWait(queryValue, null);
                 Log.d(TAG, "Substituting query parameter: " + queryKey + ", " + approovResults.getStatus().toString());
-                if (mutator.handleInterceptorHeaderSubstitutionResult(approovResults, queryKey)) {
+                if (mutator.handleInterceptorQueryParamSubstitutionResult(approovResults, queryKey)) {
                     // substitute the query parameter
                     aChange = true;
                     queryKeys.add(queryKey);
