@@ -307,6 +307,10 @@ public class ApproovService {
      * @throws ApproovException if there was a problem
      */
     public static synchronized void setDevKey(String devKey) throws ApproovException {
+        if (!isApproovEnabled()) {
+            Log.e(TAG, "setDevKey: SDK not initialized");
+            throw new ApproovException("setDevKey: SDK not initialized");
+        }
         try {
             Approov.setDevKey(devKey);
             Log.d(TAG, "setDevKey");
@@ -633,7 +637,7 @@ public class ApproovService {
      */
     @Deprecated
     public static synchronized void prefetch() {
-        if (isInitialized)
+        if (isApproovEnabled())
             // fire and forget the prefetch
             Approov.fetchApproovToken(new PrefetchCallbackHandler(), "approov.io");
     }
