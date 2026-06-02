@@ -229,7 +229,7 @@ public class ApproovService {
         okHttpClients = null;
         approovTokenHeader = null;
         approovTraceIDHeader = null;
-        approovTokenPrefix = null;
+        approovTokenPrefix = APPROOV_TOKEN_PREFIX;
         bindingHeader = null;
         serviceMutator = ApproovServiceMutator.DEFAULT;
         substitutionHeaders = null;
@@ -328,7 +328,7 @@ public class ApproovService {
     public static synchronized void setApproovHeader(String header, String prefix) {
         Log.d(TAG, "setApproovHeader " + header + ", " + prefix);
         approovTokenHeader = header;
-        approovTokenPrefix = prefix;
+        approovTokenPrefix = (prefix != null) ? prefix : APPROOV_TOKEN_PREFIX;
     }
 
     /**
