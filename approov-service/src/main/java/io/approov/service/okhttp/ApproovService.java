@@ -163,7 +163,6 @@ public class ApproovService {
         }
         // SDK succeeded (or bypass) — now reset and commit new service-layer state.
         isInitialized = false;
-        useApproovStatusIfNoToken = false;
         okHttpBuilders = new HashMap<>();
         okHttpBuilders.put(DEFAULT_BUILDER_NAME, new OkHttpClient.Builder());
         okHttpClients = new HashMap<>();
