@@ -177,6 +177,7 @@ public class ApproovService {
         approovTraceIDHeader = APPROOV_TRACE_ID_HEADER;
         approovTokenPrefix = APPROOV_TOKEN_PREFIX;
         bindingHeader = null;
+        serviceMutator = ApproovServiceMutator.DEFAULT;
         substitutionHeaders = new HashMap<>();
         substitutionQueryParams = new HashMap<>();
         exclusionURLRegexs = new HashMap<>();
