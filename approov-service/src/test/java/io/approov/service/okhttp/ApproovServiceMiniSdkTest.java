@@ -873,9 +873,9 @@ public class ApproovServiceMiniSdkTest {
     }
 
     /**
-     * §6 Custom JWT Fetch (malformatted JSON)
+     * §6 Custom JWT Fetch (malformed JSON)
      *
-     * Fetching a Custom JWT with a malformatted JSON string throws an exception.
+     * Fetching a Custom JWT with a malformed JSON string throws an exception.
      */
     @Test
     public void testFetchCustomJWTBadPayloadThrowsApproovException() throws Exception {

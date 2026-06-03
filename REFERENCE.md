@@ -355,6 +355,8 @@ fun removeSubstitutionHeader(header: String)
 ## getSubstitutionHeaders
 Gets the map of headers currently subject to secure string substitution, mapped to their required prefixes.
 
+This throws `IllegalStateException` if `ApproovService` is not initialized.
+
 **Java:**
 ```java
 Map<String, String> getSubstitutionHeaders()
@@ -396,6 +398,8 @@ fun removeSubstitutionQueryParam(key: String)
 ## getSubstitutionQueryParams
 Gets the map of query parameter keys to compiled regex patterns currently subject to secure string substitution.
 
+This throws `IllegalStateException` if `ApproovService` is not initialized.
+
 **Java:**
 ```java
 Map<String, Pattern> getSubstitutionQueryParams()
@@ -436,6 +440,8 @@ fun removeExclusionURLRegex(urlRegex: String)
 
 ## getExclusionURLRegexs
 Gets the current map of exclusion URL regular expressions.
+
+This throws `IllegalStateException` if `ApproovService` is not initialized.
 
 **Java:**
 ```java

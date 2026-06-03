@@ -53,5 +53,7 @@ Pods/
 **/*.user
 **/.vs/
 
-# Ignore PDF files
+# Ignore local files and documents
+comments.json
+*.txt
 *.pdf
