@@ -146,7 +146,7 @@ public class ApproovService {
 
         // If we are already initialized with a valid config, ignore any subsequent
         // empty config initialization
-        if (isInitialized && configString != null && !configString.isEmpty() && config.isEmpty()) {
+        if (isApproovEnabled() && config.isEmpty()) {
             Log.d(TAG, "ApproovService already initialized with a valid config; ignoring empty configuration");
             return;
         }
