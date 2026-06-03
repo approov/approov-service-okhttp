@@ -144,9 +144,10 @@ public class ApproovService {
         if (config == null)
             throw new IllegalArgumentException("config must not be null; pass \"\" for bypass mode");
 
-        // If the service is already initialized, ignore any subsequent empty config initialization
-        if (isInitialized && config.isEmpty()) {
-            Log.d(TAG, "ApproovService already initialized; ignoring empty configuration");
+        // If we are already initialized with a valid config, ignore any subsequent
+        // empty config initialization
+        if (isInitialized && configString != null && !configString.isEmpty() && config.isEmpty()) {
+            Log.d(TAG, "ApproovService already initialized with a valid config; ignoring empty configuration");
             return;
         }
 
