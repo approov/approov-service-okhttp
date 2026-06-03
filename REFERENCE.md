@@ -20,6 +20,8 @@ If a method throws an `ApproovRejectionException` (a subclass of `ApproovExcepti
 ## initialize
 Initializes the Approov SDK and thus enables the Approov features. The `config` will have been provided in the initial onboarding or email or can be [obtained](https://approov.io/docs/latest/approov-usage-documentation/#getting-the-initial-sdk-configuration) using the approov CLI. This will generate an error if a second attempt is made at initialization with a different `config`.
 
+This is the standard form and should be used in most cases. The `comment` parameter defaults to `null` when not supplied.
+
 **Java:**
 ```Java
 void initialize(Context context, String config)
@@ -32,9 +34,11 @@ fun initialize(context: Context, config: String)
 
 The [application context](https://developer.android.com/reference/android/content/Context#getApplicationContext()) must be provided using the `context` parameter.
 
-It is possible to pass an empty `config` string to indicate that no initialization is required. Only do this if you are also using a different Approov service layer in your app (which will use the same underlying Approov SDK) and this will have been initialized first.
+It is possible to pass an empty `config` string to bypass Approov SDK initialization. In that case the service layer still reports itself as initialized, but any `OkHttpClient` obtained from it behaves as a plain client with no Approov token injection, message signing, secure strings, or pinning.
 
-An alternative initialization function allows to provide further options in the `comment` parameter. Please refer to the [Approov SDK documentation](https://approov.io/docs/latest/approov-direct-sdk-integration/#sdk-initialization-options) for details.
+This empty-config mode is intended as a bootstrap or bypass state for advanced integrations. A later call to `initialize()` with a valid non-empty config string is allowed and will then enable the native Approov SDK at runtime. By contrast, reinitializing from one non-empty config string to a different non-empty config string is rejected by the platform SDK.
+
+If you need to supply a `comment` to the native SDK (for example to pass `options:...` startup flags or trigger a `reinit...` flow), use the extended form instead:
 
 **Java:**
 ```java
@@ -43,10 +47,51 @@ void initialize(Context context, String config, String comment)
 
 **Kotlin:**
 ```kotlin
-fun initialize(context: Context, config: String, comment: String)
+fun initialize(context: Context, config: String, comment: String?)
 ```
 
+The `comment` parameter is passed directly to the native Approov SDK. Key uses:
+* Pass a string starting with `options:` during the initial setup to forward custom startup options to the native SDK.
+* Pass a string starting with `reinit` to trigger native re-initialization on a subsequent same-config call.
+* Pass `null` (or use the 2-arg form) when no comment is needed — this is the default.
+
+Please refer to the [Approov SDK documentation](https://approov.io/docs/latest/approov-direct-sdk-integration/#sdk-initialization-options) for full details on supported comment values.
+
+
+## isInitialized
+Returns whether the service layer itself has been initialized.
+
+**Java:**
+```java
+boolean isInitialized()
+```
+
+**Kotlin:**
+```kotlin
+fun isInitialized(): Boolean
+```
+
+Returns `true` if `initialize` has been called successfully, including when bypass mode is active (empty config string). Returns `false` if `initialize` has never been called or if the last initialization attempt failed. Use `isApproovEnabled()` to distinguish between bypass and protected modes.
+
+## isApproovEnabled
+Returns whether Approov protection is currently enabled.
+
+**Java:**
+```java
+boolean isApproovEnabled()
+```
+
+**Kotlin:**
+```kotlin
+fun isApproovEnabled(): Boolean
+```
+
+Returns `true` only when the service layer was initialized with a valid, non-empty configuration string and the native Approov SDK is active. Returns `false` in all other cases: not initialized, or initialized in bypass mode (empty config). All direct Approov SDK methods (such as `fetchToken`, `precheck`, `fetchSecureString`) will throw `ApproovException` if called when this returns `false`.
+
+
 ## setApproovInterceptorExtensions
+
+**OBSOLETED**: Use `setServiceMutator` instead.
 
 Sets the interceptor extensions callback handler. This facility supports message signing that is independent from the rest of the attestation flow. The default ApproovService layer issues no callbacks. Provide a non-null handler to add functionality to the attestation flow. The configuration used to control installation message signing is passed in the `callbacks` parameter. The behavior of the provided configuration must remain constant while in use by the ApproovService. Passing `null` to this method will disable message signing.
 
@@ -95,7 +140,7 @@ OkHttpClient getOkHttpClient()
 fun getOkHttpClient(): OkHttpClient
 ```
 
-If Approov has not been initialized, then this provides an `OkHttpClient` without any Approov protection.
+You must initialize the service layer before calling this method. If initialization used an empty config string then this provides a plain `OkHttpClient` without any Approov protection.
 
 Use `setOkHttpClientBuilder` to provide any special builder properties. If you wish to use multiple different builders in your application you can set them by also providing a builder name to `setOkHttpClientBuilder`. In this case you get an `OkHttpClient` using a specific builder using:
 
@@ -135,7 +180,8 @@ fun setOkHttpClientBuilder(builderName: String, builder: OkHttpClient.Builder)
 ```
 
 ## setProceedOnNetworkFail
-If the provided `proceed` value is `true` then this indicates that the network interceptor should proceed anyway if it is not possible to obtain an Approov token due to a networking failure. If this is called then the backend API can receive calls without the expected Approov token header being added, or without header/query parameter substitutions being made. This should only ever be used if there is some particular reason, perhaps due to local network conditions, that you believe that traffic to the Approov cloud service will be particularly problematic.
+
+> **OBSOLETE:** This legacy configuration is now a functional no-op do-nothing method. Use `ApproovServiceMutator` to manually bypass exceptions for network failures if required.
 
 **Java:**
 ```Java
@@ -147,10 +193,6 @@ void setProceedOnNetworkFail(boolean proceed)
 fun setProceedOnNetworkFail(proceed: Boolean)
 ```
 
-**DEPRECATED**: Use `setServiceMutator` instead to control this behavior.
-
-
-Note that this should be used with *CAUTION* because it may allow a connection to be established before any dynamic pins have been received via Approov, thus potentially opening the channel to a MitM.
 
 ## setUseApproovStatusIfNoToken
 If the provided `shouldUse` value is `true` then this indicates that the Approov fetch status (e.g. "NO_NETWORK", "MITM_DETECTED") should be used as the token header value if the actual token fetch fails or returns an empty token. This allows passing error condition information to the backend via the Approov-Token header, which might otherwise be empty or missing.
@@ -163,6 +205,34 @@ void setUseApproovStatusIfNoToken(boolean shouldUse)
 **Kotlin:**
 ```kotlin
 fun setUseApproovStatusIfNoToken(shouldUse: Boolean)
+```
+
+## setServiceMutator
+Sets the `ApproovServiceMutator` instance to handle callbacks from the ApproovService implementation. This facility enables customization of ApproovService operations at key points in the configuration and attestation flows.
+
+**Java:**
+```java
+void setServiceMutator(ApproovServiceMutator mutator)
+```
+
+**Kotlin:**
+```kotlin
+fun setServiceMutator(mutator: ApproovServiceMutator?)
+```
+
+Passing `null` reinstates the default behavior.
+
+## getServiceMutator
+Gets the active service mutator instance.
+
+**Java:**
+```java
+ApproovServiceMutator getServiceMutator()
+```
+
+**Kotlin:**
+```kotlin
+fun getServiceMutator(): ApproovServiceMutator
 ```
 
 ## setDevKey
@@ -191,8 +261,60 @@ void setApproovHeader(String header, String prefix)
 fun setApproovHeader(header: String, prefix: String?)
 ```
 
+## getApproovTokenHeader
+Gets the name of the header used to carry the Approov token.
+
+**Java:**
+```java
+String getApproovTokenHeader()
+```
+
+**Kotlin:**
+```kotlin
+fun getApproovTokenHeader(): String
+```
+
+## getApproovTokenPrefix
+Gets any prefix string (e.g., "Bearer ") being added to the Approov token header value.
+
+**Java:**
+```java
+String getApproovTokenPrefix()
+```
+
+**Kotlin:**
+```kotlin
+fun getApproovTokenPrefix(): String
+```
+
+## setApproovTraceIDHeader
+Sets the header name used to provide the optional Approov TraceID debug value. Passing `null` disables the TraceID header.
+
+**Java:**
+```java
+void setApproovTraceIDHeader(String header)
+```
+
+**Kotlin:**
+```kotlin
+fun setApproovTraceIDHeader(header: String?)
+```
+
+## getApproovTraceIDHeader
+Gets the header name currently used for the Approov TraceID. Returns `null` if disabled.
+
+**Java:**
+```java
+String getApproovTraceIDHeader()
+```
+
+**Kotlin:**
+```kotlin
+fun getApproovTraceIDHeader(): String?
+```
+
 ## setBindingHeader
-Sets a binding `header` that may be present on requests being made. This is for the [token binding](https://approov.io/docs/latest/approov-usage-documentation/#token-binding) feature. A header should be chosen whose value is unchanging for most requests (such as an Authorization header). If the `header` is present, then a hash of the `header` value is included in the issued Approov tokens to bind them to the value. This may then be verified by the backend API integration.
+Sets a binding `header` that may be present on requests being made. This is for the [token binding](https://approov.io/docs/latest/approov-usage-documentation/#token-binding) feature. A header should be chosen whose value is unchanging for most requests (such as an Authorization header). If the `header` is present, then its SHA256 hash is supplied to Approov so the issued token can carry the corresponding `pay` claim and be bound to the value. This may then be verified by the backend API integration.
 
 **Java:**
 ```Java
@@ -230,8 +352,25 @@ void removeSubstitutionHeader(String header)
 fun removeSubstitutionHeader(header: String)
 ```
 
+## getSubstitutionHeaders
+Gets the map of headers currently subject to secure string substitution, mapped to their required prefixes.
+
+This throws `IllegalStateException` if `ApproovService` is not initialized.
+
+**Java:**
+```java
+Map<String, String> getSubstitutionHeaders()
+```
+
+**Kotlin:**
+```kotlin
+fun getSubstitutionHeaders(): Map<String, String>
+```
+
 ## addSubstitutionQueryParam
 Adds a `key` name for a query parameter that should be subject to [secure strings](https://approov.io/docs/latest/approov-usage-documentation/#secure-strings) substitution. This means that if the query parameter is present in a URL then the value will be used as a key to look up a secure string value which will be substituted as the query parameter value instead. This allows easy migration to the use of secure strings.
+
+> **Note**: The service layer inserts secure strings into the URL exactly as they are returned by the Approov cloud. It does **not** automatically apply URL encoding. If your secure strings contain reserved characters (like `&`, `=`, `#`, or spaces), you must ensure they are properly URL-encoded when adding them via the Approov CLI to avoid mangling the query parameters.
 
 **Java:**
 ```Java
@@ -254,6 +393,21 @@ void removeSubstitutionQueryParam(String key)
 **Kotlin:**
 ```kotlin
 fun removeSubstitutionQueryParam(key: String)
+```
+
+## getSubstitutionQueryParams
+Gets the map of query parameter keys to compiled regex patterns currently subject to secure string substitution.
+
+This throws `IllegalStateException` if `ApproovService` is not initialized.
+
+**Java:**
+```java
+Map<String, Pattern> getSubstitutionQueryParams()
+```
+
+**Kotlin:**
+```kotlin
+fun getSubstitutionQueryParams(): Map<String, Pattern>
 ```
 
 ## addExclusionURLRegex
@@ -282,6 +436,21 @@ void removeExclusionURLRegex(String urlRegex)
 **Kotlin:**
 ```kotlin
 fun removeExclusionURLRegex(urlRegex: String)
+```
+
+## getExclusionURLRegexs
+Gets the current map of exclusion URL regular expressions.
+
+This throws `IllegalStateException` if `ApproovService` is not initialized.
+
+**Java:**
+```java
+Map<String, Pattern> getExclusionURLRegexs()
+```
+
+**Kotlin:**
+```kotlin
+fun getExclusionURLRegexs(): Map<String, Pattern>
 ```
 
 ## prefetch
@@ -332,7 +501,7 @@ fun getDeviceID(): String
 This throws `ApproovException` if there was a problem obtaining the device ID.
 
 ## setDataHashInToken
-Directly sets the [token binding](https://approov.io/docs/latest/approov-usage-documentation/#token-binding) hash to be included in subsequently fetched Approov tokens. If the hash is different from any previously set value then this will cause the next token fetch operation to fetch a new token with the correct payload data hash. The hash appears in the `pay` claim of the Approov token as a base64 encoded string of the SHA256 hash of the data. Note that the data is hashed locally and never sent to the Approov cloud service. This is an alternative to using `setBindingHeader` and you should not use both methods at the same time.
+Directly sets the [token binding](https://approov.io/docs/latest/approov-usage-documentation/#token-binding) hash for subsequently fetched Approov tokens. If the hash is different from any previously set value then this will cause the next token fetch operation to fetch a new token with the correct payload data hash. The resulting token is expected to carry the `pay` claim as a base64 encoded string of the SHA256 hash of the data. Note that the data is hashed locally and never sent to the Approov cloud service. This is an alternative to using `setBindingHeader` and you should not use both methods at the same time.
 
 **Java:**
 ```Java
@@ -455,3 +624,17 @@ fun getLastARC(): String
 ```
 
 In the event of no network available this function returns an empty string. This function should be used with *CAUTION* and instead rely on a customized error response from the server which includes the `ARC` code if one is available. 
+
+## setInstallAttrsInToken
+Sets an [install attributes token](https://approov.io/docs/latest/approov-usage-documentation/#application-installation-attributes) to be sent to the server and associated with this particular app installation for future Approov token fetches.
+
+**Java:**
+```java
+void setInstallAttrsInToken(String attrs) throws ApproovException
+```
+
+**Kotlin:**
+```kotlin
+@Throws(ApproovException::class)
+fun setInstallAttrsInToken(attrs: String)
+```

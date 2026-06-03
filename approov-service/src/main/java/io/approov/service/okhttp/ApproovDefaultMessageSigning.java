@@ -20,9 +20,9 @@ package io.approov.service.okhttp;
 import android.util.Base64;
 import android.util.Log;
 
-import org.bouncycastle.asn1.ASN1InputStream;
-import org.bouncycastle.asn1.ASN1Integer;
-import org.bouncycastle.asn1.ASN1Sequence;
+import io.approov.internal.okhttp.bouncycastle.asn1.ASN1InputStream;
+import io.approov.internal.okhttp.bouncycastle.asn1.ASN1Integer;
+import io.approov.internal.okhttp.bouncycastle.asn1.ASN1Sequence;
 
 import java.io.IOException;
 import java.math.BigInteger;
@@ -32,6 +32,7 @@ import java.security.MessageDigest;
 import java.security.NoSuchAlgorithmException;
 import java.util.ArrayList;
 import java.util.Arrays;
+import java.util.Collections;
 import java.util.HashMap;
 import java.util.List;
 import java.util.Map;
@@ -210,7 +211,13 @@ public class ApproovDefaultMessageSigning implements ApproovServiceMutator {
         }
         // generate and add a message signature
         OkHttpComponentProvider provider = new OkHttpComponentProvider(request);
-        SignatureParameters params = buildSignatureParameters(provider, changes);
+        SignatureParameters params;
+        try {
+            params = buildSignatureParameters(provider, changes);
+        } catch (Exception e) {
+            Log.d(TAG, "Failed to build signature parameters - skipping message signing: " + e);
+            return request;
+        }
         if (params == null) {
             // No sig to be added to the request; return the original request.
             return request;
@@ -239,11 +246,17 @@ public class ApproovDefaultMessageSigning implements ApproovServiceMutator {
                     Log.d(TAG, "InstallMessageSignature is empty - skipping message signing");
                     return request;
                 }
-                signature = Base64.decode(base64, Base64.NO_WRAP);
+                try {
+                    signature = Base64.decode(base64, Base64.NO_WRAP);
+                } catch (Exception e) {
+                    Log.d(TAG, "Failed to decode base64 signature - skipping message signing " + e);
+                    return request;
+                }
                 // decode the signature from ASN.1 DER format
                 try (ASN1InputStream asn1InputStream = new ASN1InputStream(signature)) {
-                    ASN1Sequence sequence = (ASN1Sequence) asn1InputStream.readObject();
-                    if (sequence instanceof ASN1Sequence) {
+                    Object obj = asn1InputStream.readObject();
+                    if (obj instanceof ASN1Sequence) {
+                        ASN1Sequence sequence = (ASN1Sequence) obj;
                         // Combine r and s into a single byte array
                         byte[] rBytes = to32ByteArray((ASN1Integer) sequence.getObjectAt(0));
                         byte[] sBytes = to32ByteArray((ASN1Integer) sequence.getObjectAt(1));
@@ -251,17 +264,34 @@ public class ApproovDefaultMessageSigning implements ApproovServiceMutator {
                         System.arraycopy(rBytes, 0, signature, 0, rBytes.length);
                         System.arraycopy(sBytes, 0, signature, rBytes.length, sBytes.length);
                     } else {
-                        throw new IllegalStateException("Not an ASN1Sequence");
+                        Log.d(TAG, "Not an ASN1Sequence - skipping message signing");
+                        return request;
                     }
                 } catch (Exception e) {
-                    throw new IllegalStateException("Failed to decode ASN.1 DER ES256 signature", e);
+                    Log.d(TAG, "Failed to decode ASN.1 DER ES256 signature - skipping message signing", e);
+                    return request;
                 }
                 break;
             }
             case ALG_HS256: {
                 sigId = "account";
-                String base64 = ApproovService.getAccountMessageSignature(message);
-                signature = Base64.decode(base64, Base64.NO_WRAP);
+                String base64;
+                try {
+                    base64 = ApproovService.getAccountMessageSignature(message);
+                } catch (ApproovException e) {
+                    Log.d(TAG, "Failed to get AccountMessageSignature - skipping message signing " + e);
+                    return request;
+                }
+                if (base64.isEmpty()) {
+                    Log.d(TAG, "AccountMessageSignature is empty - skipping message signing");
+                    return request;
+                }
+                try {
+                    signature = Base64.decode(base64, Base64.NO_WRAP);
+                } catch (Exception e) {
+                    Log.d(TAG, "Failed to decode base64 signature - skipping message signing " + e);
+                    return request;
+                }
                 break;
             }
             default:
@@ -274,9 +304,9 @@ public class ApproovDefaultMessageSigning implements ApproovServiceMutator {
         // would better
         // fit the data.
         String signatureBase64 = Base64.encodeToString(signature, Base64.NO_WRAP);
-        String sigHeader = Dictionary.valueOf(Map.of(
+        String sigHeader = Dictionary.valueOf(Collections.singletonMap(
                 sigId, StringItem.valueOf(signatureBase64))).serialize();
-        String sigInputHeader = Dictionary.valueOf(Map.of(
+        String sigInputHeader = Dictionary.valueOf(Collections.singletonMap(
                 sigId, params.toComponentValue())).serialize();
 
         // Debugging - log the message and signature-related headers
@@ -290,16 +320,16 @@ public class ApproovDefaultMessageSigning implements ApproovServiceMutator {
         // signature builder
         // may have modified it.
         Request.Builder signedBuilder = provider.getRequest().newBuilder()
-                .addHeader("Signature", sigHeader)
-                .addHeader("Signature-Input", sigInputHeader);
+                .header("Signature", sigHeader)
+                .header("Signature-Input", sigInputHeader);
         if (params.isDebugMode()) {
             try {
                 MessageDigest digestBuilder = MessageDigest.getInstance("SHA-256");
                 digestBuilder.reset();
                 byte[] digest = digestBuilder.digest(message.getBytes(StandardCharsets.UTF_8));
-                String digestHeader = Dictionary.valueOf(Map.of(
+                String digestHeader = Dictionary.valueOf(Collections.singletonMap(
                         DIGEST_SHA256, ByteSequenceItem.valueOf(digest))).serialize();
-                signedBuilder.addHeader("Signature-Base-Digest", digestHeader);
+                signedBuilder.header("Signature-Base-Digest", digestHeader);
             } catch (NoSuchAlgorithmException e) {
                 Log.d(TAG, "Failed to get digest algorithm - no debug entry " + e);
             }
@@ -362,8 +392,9 @@ public class ApproovDefaultMessageSigning implements ApproovServiceMutator {
      */
     public static class SignatureParametersFactory {
         // The base parameters that are copied for every new generated message
-        // signature.
-        protected SignatureParameters baseParameters;
+        // signature. Initialised to an empty SignatureParameters so that a bare
+        // SignatureParametersFactory() is safe to use without calling setBaseParameters().
+        protected SignatureParameters baseParameters = new SignatureParameters();
         // The algorithm to use for body digests, or null if no body digest is to be
         // used.
         protected String bodyDigestAlgorithm;
@@ -385,7 +416,9 @@ public class ApproovDefaultMessageSigning implements ApproovServiceMutator {
         protected boolean addApproovTraceIDHeader;
         // Lists the headers to add to the message signature if they are present in the
         // request. (Non-optional headers should be added to the base parameters).
-        protected List<String> optionalHeaders;
+        // Initialised to an empty list so that a bare SignatureParametersFactory() is
+        // safe to use without calling addOptionalHeaders().
+        protected List<String> optionalHeaders = new ArrayList<>();
 
         /**
          * Sets the base parameters for the factory. The base parameters are copied for
@@ -563,13 +596,13 @@ public class ApproovDefaultMessageSigning implements ApproovServiceMutator {
                     return false;
             }
             // generate the header value
-            Dictionary digestHeader = Dictionary.valueOf(Map.of(
+            Dictionary digestHeader = Dictionary.valueOf(Collections.singletonMap(
                     bodyDigestAlgorithm, ByteSequenceItem.valueOf(digest.toByteArray())));
 
             // add the digest to the request
             Request request = provider.getRequest();
             request = request.newBuilder()
-                    .addHeader("Content-Digest", digestHeader.serialize())
+                    .header("Content-Digest", digestHeader.serialize())
                     .build();
             provider.setRequest(request);
             // add the header to the SignatureParameters

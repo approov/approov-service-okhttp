@@ -19,6 +19,7 @@ package io.approov.service.okhttp;
 
 import android.util.Log;
 import android.content.Context;
+import androidx.annotation.VisibleForTesting;
 
 import com.criticalblue.approovsdk.Approov;
 
@@ -79,10 +80,6 @@ public class ApproovService {
     // the config string used for initialization
     private static String configString;
 
-    // true if the interceptor should proceed on network failures and not add an
-    // Approov token
-    private static boolean proceedOnNetworkFail = false;
-
     // true if the Approov fetch status should be used as the token header value if
     // the
     // actual token fetch fails or returns an empty token
@@ -141,45 +138,56 @@ public class ApproovService {
      *
      * @param context the Application context
      * @param config  the configuration string, or empty for no SDK initialization
-     * @param comment the comment string, or empty for no comment
+     * @param comment the comment string, or null for no comment
      */
     public static synchronized void initialize(Context context, String config, String comment) {
-        // check if the Approov SDK is already initialized
-        if (isInitialized && !comment.startsWith("reinit")) {
-            if (!config.equals(configString)) {
-                throw new IllegalStateException("ApproovService layer is already initialized.");
-            }
-            Log.d(TAG, "Ignoring multiple ApproovService layer initializations with the same config");
-        } else {
-            // setup for creating clients
-            isInitialized = false;
-            proceedOnNetworkFail = false;
-            useApproovStatusIfNoToken = false;
-            okHttpBuilders = new HashMap<>();
-            okHttpBuilders.put(DEFAULT_BUILDER_NAME, new OkHttpClient.Builder());
-            okHttpClients = new HashMap<>();
-            approovTokenHeader = APPROOV_TOKEN_HEADER;
-            approovTraceIDHeader = APPROOV_TRACE_ID_HEADER;
-            approovTokenPrefix = APPROOV_TOKEN_PREFIX;
-            bindingHeader = null;
-            substitutionHeaders = new HashMap<>();
-            substitutionQueryParams = new HashMap<>();
-            exclusionURLRegexs = new HashMap<>();
+        if (config == null)
+            throw new IllegalArgumentException("config must not be null; pass \"\" for bypass mode");
 
-            // initialize the Approov SDK
+        // If we are already initialized with a valid config, ignore any subsequent
+        // empty config initialization
+        if (isApproovEnabled() && config.isEmpty()) {
+            Log.d(TAG, "ApproovService already initialized with a valid config; ignoring empty configuration");
+            return;
+        }
+
+        // Initialize the platform SDK if not in bypass mode (empty config).
+        // State is only modified after the SDK confirms success, preserving the current
+        // operating mode (protected or bypass) if the call fails.
+        if (!config.isEmpty()) {
             try {
-                if (!config.isEmpty())
-                    Approov.initialize(context.getApplicationContext(), config, "auto", comment);
+                boolean sdkInitialized = Approov.initialize(context.getApplicationContext(), config, "auto", comment);
+                if (!sdkInitialized) {
+                    Log.d(TAG, "Approov SDK already initialized");
+                }
             } catch (IllegalArgumentException e) {
                 Log.e(TAG, "Approov initialization failed: " + e.getMessage());
-                throw e;
+                throw e; // service-layer state NOT modified — prior operating mode preserved
             } catch (IllegalStateException e) {
-                Log.e(TAG, "Approov already intialized: Ignoring native layer exception " + e.getMessage());
+                Log.e(TAG, "Approov initialization failed: " + e.getMessage());
+                throw e; // service-layer state NOT modified — prior operating mode preserved
             }
+        }
+        // SDK succeeded (or bypass) — now reset and commit new service-layer state.
+        isInitialized = false;
+        okHttpBuilders = new HashMap<>();
+        okHttpBuilders.put(DEFAULT_BUILDER_NAME, new OkHttpClient.Builder());
+        okHttpClients = new HashMap<>();
+        approovTokenHeader = APPROOV_TOKEN_HEADER;
+        approovTraceIDHeader = APPROOV_TRACE_ID_HEADER;
+        approovTokenPrefix = APPROOV_TOKEN_PREFIX;
+        bindingHeader = null;
+        serviceMutator = ApproovServiceMutator.DEFAULT;
+        substitutionHeaders = new HashMap<>();
+        substitutionQueryParams = new HashMap<>();
+        exclusionURLRegexs = new HashMap<>();
+        isInitialized = true;
+        configString = config;
+        if (isApproovEnabled()) {
             pinningInterceptor = new ApproovPinningInterceptor();
-            isInitialized = true;
-            configString = config;
             Approov.setUserProperty("approov-service-okhttp");
+        } else {
+            pinningInterceptor = null;
         }
     }
 
@@ -190,46 +198,78 @@ public class ApproovService {
      * @param config  the configuration string, or empty for no SDK initialization
      */
     public static void initialize(Context context, String config) {
-        // default uses the empty comment string
-        initialize(context, config, "");
+        // default uses null comment
+        initialize(context, config, null);
+    }
+
+    /**
+     * Indicates whether the service layer has been initialized.
+     *
+     * @return true if the service layer has been initialized, false otherwise
+     */
+    public static synchronized boolean isInitialized() {
+        return isInitialized;
+    }
+
+    /**
+     * Indicates whether Approov protection is enabled for this service layer
+     * instance. If initialization used an empty config string then the layer is
+     * initialized but Approov protection is bypassed.
+     *
+     * @return true if Approov protection is enabled, false otherwise
+     */
+    public static synchronized boolean isApproovEnabled() {
+        return isInitialized && (configString != null) && !configString.isEmpty();
+    }
+
+    /**
+     * Resets the ApproovService state. This should only be used for testing
+     * purposes.
+     */
+    @VisibleForTesting
+    static synchronized void reset() {
+        isInitialized = false;
+        configString = null;
+        useApproovStatusIfNoToken = false;
+        pinningInterceptor = null;
+        okHttpBuilders = null;
+        okHttpClients = null;
+        approovTokenHeader = null;
+        approovTraceIDHeader = null;
+        approovTokenPrefix = APPROOV_TOKEN_PREFIX;
+        bindingHeader = null;
+        serviceMutator = ApproovServiceMutator.DEFAULT;
+        substitutionHeaders = null;
+        substitutionQueryParams = null;
+        exclusionURLRegexs = null;
     }
 
     /**
      * Sets a flag indicating if the network interceptor should proceed anyway if it
-     * is
-     * not possible to obtain an Approov token due to a networking failure. If this
-     * is set
-     * then your backend API can receive calls without the expected Approov token
-     * header
-     * being added, or without header/query parameter substitutions being made. Note
-     * that
-     * this should be used with caution because it may allow a connection to be
-     * established
-     * before any dynamic pins have been received via Approov, thus potentially
-     * opening the
-     * channel to a MitM.
+     * is not possible to obtain an Approov token due to a networking failure.
+     * Note: This method is now obsolete and has no effect. The behavior is
+     * controlled via setServiceMutator.
      *
-     * @param proceed is true if Approov networking fails should allow continuation
+     * @param proceed is ignored
      * @deprecated Use setServiceMutator to control this behavior
      */
     @Deprecated
     public static synchronized void setProceedOnNetworkFail(boolean proceed) {
         Log.d(TAG, "setProceedOnNetworkFail " + proceed);
-        proceedOnNetworkFail = proceed;
     }
 
     /**
      * Gets a flag indicating if the network interceptor should proceed anyway if it
-     * is
-     * not possible to obtain an Approov token due to a networking failure.
+     * is not possible to obtain an Approov token due to a networking failure.
+     * Note: This method is now obsolete and always returns false. The behavior is
+     * controlled via setServiceMutator.
      *
-     * @return true if Approov networking fails should allow continuation, false
-     *         otherwise
+     * @return always returns false
      * @deprecated Use setServiceMutator to control this behavior
      */
     @Deprecated
     public static synchronized boolean getProceedOnNetworkFail() {
-        return proceedOnNetworkFail;
+        return false;
     }
 
     /**
@@ -274,6 +314,10 @@ public class ApproovService {
      * @throws ApproovException if there was a problem
      */
     public static synchronized void setDevKey(String devKey) throws ApproovException {
+        if (!isApproovEnabled()) {
+            Log.e(TAG, "setDevKey: SDK not initialized");
+            throw new ApproovException("setDevKey: SDK not initialized");
+        }
         try {
             Approov.setDevKey(devKey);
             Log.d(TAG, "setDevKey");
@@ -295,7 +339,7 @@ public class ApproovService {
     public static synchronized void setApproovHeader(String header, String prefix) {
         Log.d(TAG, "setApproovHeader " + header + ", " + prefix);
         approovTokenHeader = header;
-        approovTokenPrefix = prefix;
+        approovTokenPrefix = (prefix != null) ? prefix : APPROOV_TOKEN_PREFIX;
     }
 
     /**
@@ -465,6 +509,9 @@ public class ApproovService {
      *         required prefix
      */
     public static synchronized Map<String, String> getSubstitutionHeaders() {
+        if (!isInitialized) {
+            throw new IllegalStateException("ApproovService is not initialized");
+        }
         return new HashMap<>(substitutionHeaders);
     }
 
@@ -515,6 +562,9 @@ public class ApproovService {
      *         Pattern
      */
     public static synchronized Map<String, Pattern> getSubstitutionQueryParams() {
+        if (!isInitialized) {
+            throw new IllegalStateException("ApproovService is not initialized");
+        }
         return new HashMap<>(substitutionQueryParams);
     }
 
@@ -575,7 +625,10 @@ public class ApproovService {
      * @return Map<String, Pattern> of the exclusion regexs to their respective
      *         Patterns
      */
-    static synchronized Map<String, Pattern> getExclusionURLRegexs() {
+    public static synchronized Map<String, Pattern> getExclusionURLRegexs() {
+        if (!isInitialized) {
+            throw new IllegalStateException("ApproovService is not initialized");
+        }
         return new HashMap<>(exclusionURLRegexs);
     }
 
@@ -591,7 +644,7 @@ public class ApproovService {
      */
     @Deprecated
     public static synchronized void prefetch() {
-        if (isInitialized)
+        if (isApproovEnabled())
             // fire and forget the prefetch
             Approov.fetchApproovToken(new PrefetchCallbackHandler(), "approov.io");
     }
@@ -614,6 +667,10 @@ public class ApproovService {
      * @throws ApproovException if there was a problem
      */
     public static void precheck() throws ApproovException {
+        if (!isApproovEnabled()) {
+            Log.e(TAG, "precheck: SDK not initialized");
+            throw new ApproovException("precheck: SDK not initialized");
+        }
         // try and fetch a non-existent secure string in order to check for a rejection
         Approov.TokenFetchResult approovResults;
         try {
@@ -640,6 +697,10 @@ public class ApproovService {
      * @throws ApproovException if there was a problem
      */
     public static String getDeviceID() throws ApproovException {
+        if (!isApproovEnabled()) {
+            Log.e(TAG, "getDeviceID: SDK not initialized");
+            throw new ApproovException("getDeviceID: SDK not initialized");
+        }
         try {
             String deviceID = Approov.getDeviceID();
             Log.d(TAG, "getDeviceID: " + deviceID);
@@ -664,6 +725,10 @@ public class ApproovService {
      * @throws ApproovException if there was a problem
      */
     public static void setDataHashInToken(String data) throws ApproovException {
+        if (!isApproovEnabled()) {
+            Log.e(TAG, "setDataHashInToken: SDK not initialized");
+            throw new ApproovException("setDataHashInToken: SDK not initialized");
+        }
         try {
             Approov.setDataHashInToken(data);
             Log.d(TAG, "setDataHashInToken");
@@ -695,6 +760,10 @@ public class ApproovService {
      * @throws ApproovException if there was a problem
      */
     public static String fetchToken(String url) throws ApproovException {
+        if (!isApproovEnabled()) {
+            Log.e(TAG, "fetchToken: SDK not initialized");
+            throw new ApproovException("fetchToken: SDK not initialized");
+        }
         // fetch the Approov token
         Approov.TokenFetchResult approovResults;
         try {
@@ -757,6 +826,10 @@ public class ApproovService {
      * @throws ApproovException if there was a problem
      */
     public static String getAccountMessageSignature(String message) throws ApproovException {
+        if (!isApproovEnabled()) {
+            Log.e(TAG, "getAccountMessageSignature: SDK not initialized");
+            throw new ApproovException("getAccountMessageSignature: SDK not initialized");
+        }
         try {
             String signature = Approov.getAccountMessageSignature(message);
             Log.d(TAG, "getAccountMessageSignature");
@@ -794,6 +867,10 @@ public class ApproovService {
      * @throws ApproovException if there was a problem
      */
     public static String getInstallMessageSignature(String message) throws ApproovException {
+        if (!isApproovEnabled()) {
+            Log.e(TAG, "getInstallMessageSignature: SDK not initialized");
+            throw new ApproovException("getInstallMessageSignature: SDK not initialized");
+        }
         try {
             String signature = Approov.getInstallMessageSignature(message);
             Log.d(TAG, "getInstallMessageSignature");
@@ -837,6 +914,10 @@ public class ApproovService {
      * @throws ApproovException if there was a problem
      */
     public static String fetchSecureString(String key, String newDef) throws ApproovException {
+        if (!isApproovEnabled()) {
+            Log.e(TAG, "fetchSecureString: SDK not initialized");
+            throw new ApproovException("fetchSecureString: SDK not initialized");
+        }
         // determine the type of operation as the values themselves cannot be logged
         String type = "lookup";
         if (newDef != null)
@@ -876,6 +957,10 @@ public class ApproovService {
      * @throws ApproovException if there was a problem
      */
     public static String fetchCustomJWT(String payload) throws ApproovException {
+        if (!isApproovEnabled()) {
+            Log.e(TAG, "fetchCustomJWT: SDK not initialized");
+            throw new ApproovException("fetchCustomJWT: SDK not initialized");
+        }
         // fetch the custom JWT catching any exceptions the SDK might throw
         Approov.TokenFetchResult approovResults;
         try {
@@ -905,6 +990,10 @@ public class ApproovService {
      *         unavailable
      */
     public static String getLastARC() {
+        if (!isApproovEnabled()) {
+            Log.e(TAG, "getLastARC: SDK not initialized");
+            return "";
+        }
         // Get the dynamic pins from Approov
         Map<String, List<String>> approovPins = Approov.getPins("public-key-sha256");
         if (approovPins == null || approovPins.isEmpty()) {
@@ -958,6 +1047,10 @@ public class ApproovService {
      *                          initialized
      */
     public static void setInstallAttrsInToken(String attrs) throws ApproovException {
+        if (!isApproovEnabled()) {
+            Log.e(TAG, "setInstallAttrsInToken: SDK not initialized");
+            throw new ApproovException("setInstallAttrsInToken: SDK not initialized");
+        }
         try {
             Approov.setInstallAttrsInToken(attrs);
             Log.d(TAG, "setInstallAttrsInToken");
@@ -977,6 +1070,18 @@ public class ApproovService {
     static synchronized void rebuildPins() {
         if (pinningInterceptor != null)
             pinningInterceptor.buildPins();
+    }
+
+    /**
+     * Gets the current CertificatePinner.
+     *
+     * @return the current CertificatePinner
+     */
+    @VisibleForTesting
+    static synchronized CertificatePinner getCertificatePinner() {
+        if (pinningInterceptor != null)
+            return pinningInterceptor.getCertificatePinner();
+        return new CertificatePinner.Builder().build();
     }
 
     /**
@@ -1026,6 +1131,10 @@ public class ApproovService {
      * @return OkHttpClient to be used with Approov
      */
     public static synchronized OkHttpClient getOkHttpClient(String builderName) {
+        if (!isInitialized) {
+            Log.e(TAG, "getOkHttpClient: SDK not initialized");
+            throw new IllegalStateException("getOkHttpClient: SDK not initialized");
+        }
         OkHttpClient okHttpClient = okHttpClients.get(builderName);
         if (okHttpClient == null) {
             // get the builder and warn if none was available
@@ -1035,7 +1144,7 @@ public class ApproovService {
                 okHttpBuilder = new OkHttpClient.Builder();
             }
             // build a new OkHttpClient on demand
-            if (isInitialized) {
+            if (isApproovEnabled()) {
                 // remove any existing ApproovTokenInterceptor from the builder
                 List<Interceptor> interceptors = okHttpBuilder.interceptors();
                 Iterator<Interceptor> iter = interceptors.iterator();
@@ -1061,9 +1170,9 @@ public class ApproovService {
                         .addInterceptor(tokenInterceptor)
                         .addNetworkInterceptor(pinningInterceptor).build();
             } else {
-                // if the ApproovService was not initialized or Approov is disabled, build plain
-                // client
-                Log.e(TAG, "Cannot build Approov OkHttpClient as not initialized");
+                // if the ApproovService was not initialized or Approov is bypassed, build a
+                // plain client
+                Log.d(TAG, "Building plain OkHttpClient for " + builderName);
                 okHttpClient = okHttpBuilder.build();
             }
             // cache the client for future usages
@@ -1224,7 +1333,7 @@ class ApproovTokenInterceptor implements Interceptor {
                 String queryValue = matcher.group(1);
                 approovResults = Approov.fetchSecureStringAndWait(queryValue, null);
                 Log.d(TAG, "Substituting query parameter: " + queryKey + ", " + approovResults.getStatus().toString());
-                if (mutator.handleInterceptorHeaderSubstitutionResult(approovResults, queryKey)) {
+                if (mutator.handleInterceptorQueryParamSubstitutionResult(approovResults, queryKey)) {
                     // substitute the query parameter
                     aChange = true;
                     queryKeys.add(queryKey);
@@ -1333,7 +1442,7 @@ class ApproovPinningInterceptor implements Interceptor {
      *
      * @return the current CertificatePinner
      */
-    synchronized private CertificatePinner getCertificatePinner() {
+    synchronized CertificatePinner getCertificatePinner() {
         return certificatePinner;
     }
 
