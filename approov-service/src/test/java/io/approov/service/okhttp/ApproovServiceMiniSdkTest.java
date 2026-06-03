@@ -97,8 +97,10 @@ public class ApproovServiceMiniSdkTest {
      */
     @Test
     public void testInitializeWithEmptyConfigBuildsPlainClient() throws Exception {
-        reinitializeService(scenarioJson(uniqueCaseName("empty-config"),
+        AttesterProxyController.reset();
+        AttesterProxyController.loadScenarioJson(scenarioJson(uniqueCaseName("empty-config"),
             "\"protectedDomains\": [\"" + getTargetHost() + "\"]"));
+        ApproovService.reset();
         ApproovService.initialize(context, "", "reinit-empty-config");
 
         assertTrue(ApproovService.isInitialized());
@@ -124,8 +126,10 @@ public class ApproovServiceMiniSdkTest {
      */
     @Test
     public void testInitializeWithEmptyConfigCanLaterEnableApproov() throws Exception {
-        reinitializeService(scenarioJson(uniqueCaseName("empty-then-valid"),
+        AttesterProxyController.reset();
+        AttesterProxyController.loadScenarioJson(scenarioJson(uniqueCaseName("empty-then-valid"),
             "\"protectedDomains\": [\"" + getTargetHost() + "\"]"));
+        ApproovService.reset();
         ApproovService.initialize(context, "", "reinit-empty-config");
 
         OkHttpClient plainClient = ApproovService.getOkHttpClient();

@@ -144,6 +144,12 @@ public class ApproovService {
         if (config == null)
             throw new IllegalArgumentException("config must not be null; pass \"\" for bypass mode");
 
+        // If the service is already initialized, ignore any subsequent empty config initialization
+        if (isInitialized && config.isEmpty()) {
+            Log.d(TAG, "ApproovService already initialized; ignoring empty configuration");
+            return;
+        }
+
         // Initialize the platform SDK if not in bypass mode (empty config).
         // State is only modified after the SDK confirms success, preserving the current
         // operating mode (protected or bypass) if the call fails.
