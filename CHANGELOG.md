@@ -4,6 +4,15 @@ All notable changes to this package will be documented in this file.
 
 The format is based on Keep a Changelog and this project adheres to Semantic Versioning.
 
+## [3.5.8] - 2026-06-12
+
+### Added
+- Service-layer version is now baked into the AAR at build time via `BuildConfig.APPROOV_SERVICE_VERSION` and reported to the Approov SDK via `setUserProperty("approov-service-okhttp/X.Y.Z")` during initialization. Local builds report `dev`.
+- CHANGELOG-vs-tag validation step in the publish workflow to fail fast if the top changelog entry does not match the release tag.
+
+### Changed
+- Publish workflow now passes `-PapproovServiceVersion` to `assembleRelease`, keeping the runtime version in lockstep with the Maven artifact version.
+
 ## [3.5.7] - 2026-04-09
 
 ### Added

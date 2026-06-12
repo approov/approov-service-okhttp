@@ -185,7 +185,7 @@ public class ApproovService {
         configString = config;
         if (isApproovEnabled()) {
             pinningInterceptor = new ApproovPinningInterceptor();
-            Approov.setUserProperty("approov-service-okhttp");
+            Approov.setUserProperty("approov-service-okhttp/" + BuildConfig.APPROOV_SERVICE_VERSION);
         } else {
             pinningInterceptor = null;
         }
