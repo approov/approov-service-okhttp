@@ -285,8 +285,8 @@ public class SignatureParameters implements Cloneable {
 		String value = identifier.get();
 		Parameters params = identifier.getParams();
 		for (StringItem item : componentIdentifiers) {
-			if (value.equals(identifier.get())
-				&& params.equals(identifier.getParams())) {
+			if (value.equals(item.get())
+				&& params.equals(item.getParams())) {
 				return true;
 			}
 		}
