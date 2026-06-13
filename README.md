@@ -9,7 +9,7 @@ The Approov integration is available via [`mavenCentral`](https://mvnrepository.
 The `mavenCentral()` repository is already present in the build.gradle file so the only import you need to make is the actual service layer itself:
 
 ```groovy
-implementation("io.approov:service.okhttp:3.5.7")
+implementation("io.approov:service.okhttp:3.5.8")
 ```
 
 Make sure you do a Gradle sync (by selecting `Sync Now` in the banner at the top of the modified `.gradle` file) after making these changes.
