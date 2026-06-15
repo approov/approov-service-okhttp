@@ -38,7 +38,6 @@ import java.util.List;
 import java.util.Map;
 
 import io.approov.util.http.sfv.ByteSequenceItem;
-import io.approov.util.http.sfv.StringItem;
 import io.approov.util.http.sfv.Dictionary;
 import io.approov.util.sig.ComponentProvider;
 import io.approov.util.sig.SignatureBaseBuilder;
@@ -209,15 +208,11 @@ public class ApproovDefaultMessageSigning implements ApproovServiceMutator {
             // the request doesn't have an Approov token, so we don't need to sign it
             return request;
         }
-        // generate and add a message signature
+        // generate and add a message signature. buildSignatureParameters fails CLOSED (throws) only
+        // when a body digest configured as required cannot be generated — that must abort the request,
+        // so it is intentionally not caught here. Every other signing failure below fails OPEN.
         OkHttpComponentProvider provider = new OkHttpComponentProvider(request);
-        SignatureParameters params;
-        try {
-            params = buildSignatureParameters(provider, changes);
-        } catch (Exception e) {
-            Log.d(TAG, "Failed to build signature parameters - skipping message signing: " + e);
-            return request;
-        }
+        SignatureParameters params = buildSignatureParameters(provider, changes);
         if (params == null) {
             // No sig to be added to the request; return the original request.
             return request;
@@ -239,17 +234,17 @@ public class ApproovDefaultMessageSigning implements ApproovServiceMutator {
                 try {
                     base64 = ApproovService.getInstallMessageSignature(message);
                 } catch (ApproovException e) {
-                    Log.d(TAG, "Failed to get InstallMessageSignature - skipping message signing " + e);
+                    Log.e(TAG, "Failed to get InstallMessageSignature - skipping message signing " + e);
                     return request;
                 }
                 if (base64.isEmpty()) {
-                    Log.d(TAG, "InstallMessageSignature is empty - skipping message signing");
+                    Log.e(TAG, "InstallMessageSignature is empty - skipping message signing");
                     return request;
                 }
                 try {
                     signature = Base64.decode(base64, Base64.NO_WRAP);
                 } catch (Exception e) {
-                    Log.d(TAG, "Failed to decode base64 signature - skipping message signing " + e);
+                    Log.e(TAG, "Failed to decode base64 signature - skipping message signing " + e);
                     return request;
                 }
                 // decode the signature from ASN.1 DER format
@@ -264,11 +259,11 @@ public class ApproovDefaultMessageSigning implements ApproovServiceMutator {
                         System.arraycopy(rBytes, 0, signature, 0, rBytes.length);
                         System.arraycopy(sBytes, 0, signature, rBytes.length, sBytes.length);
                     } else {
-                        Log.d(TAG, "Not an ASN1Sequence - skipping message signing");
+                        Log.e(TAG, "Not an ASN1Sequence - skipping message signing");
                         return request;
                     }
                 } catch (Exception e) {
-                    Log.d(TAG, "Failed to decode ASN.1 DER ES256 signature - skipping message signing", e);
+                    Log.e(TAG, "Failed to decode ASN.1 DER ES256 signature - skipping message signing", e);
                     return request;
                 }
                 break;
@@ -279,17 +274,17 @@ public class ApproovDefaultMessageSigning implements ApproovServiceMutator {
                 try {
                     base64 = ApproovService.getAccountMessageSignature(message);
                 } catch (ApproovException e) {
-                    Log.d(TAG, "Failed to get AccountMessageSignature - skipping message signing " + e);
+                    Log.e(TAG, "Failed to get AccountMessageSignature - skipping message signing " + e);
                     return request;
                 }
                 if (base64.isEmpty()) {
-                    Log.d(TAG, "AccountMessageSignature is empty - skipping message signing");
+                    Log.e(TAG, "AccountMessageSignature is empty - skipping message signing");
                     return request;
                 }
                 try {
                     signature = Base64.decode(base64, Base64.NO_WRAP);
                 } catch (Exception e) {
-                    Log.d(TAG, "Failed to decode base64 signature - skipping message signing " + e);
+                    Log.e(TAG, "Failed to decode base64 signature - skipping message signing " + e);
                     return request;
                 }
                 break;
@@ -298,14 +293,12 @@ public class ApproovDefaultMessageSigning implements ApproovServiceMutator {
                 throw new IllegalStateException("Unsupported algorithm identifier: " + params.getAlg());
         }
 
-        // Calculate the signature and message descriptor headers. Note that the
-        // signatures are
-        // added as strings (as required by the spec) instead of byte sequences which
-        // would better
-        // fit the data.
-        String signatureBase64 = Base64.encodeToString(signature, Base64.NO_WRAP);
+        // Calculate the signature and message descriptor headers. Per RFC 9421 §4.2 the `Signature`
+        // field is a Dictionary whose member values are Byte Sequences (RFC 8941 §3.3.5), serialized as
+        // base64 delimited by colons — e.g. `Signature: install=:<base64>:`. The value MUST be a Byte
+        // Sequence, never a String, so a single Approov verifier accepts signatures from every layer.
         String sigHeader = Dictionary.valueOf(Collections.singletonMap(
-                sigId, StringItem.valueOf(signatureBase64))).serialize();
+                sigId, ByteSequenceItem.valueOf(signature))).serialize();
         String sigInputHeader = Dictionary.valueOf(Collections.singletonMap(
                 sigId, params.toComponentValue())).serialize();
 

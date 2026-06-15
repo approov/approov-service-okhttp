@@ -13,6 +13,10 @@ The format is based on Keep a Changelog and this project adheres to Semantic Ver
 ### Changed
 - Publish workflow now passes `-PapproovServiceVersion` to `assembleRelease`, keeping the runtime version in lockstep with the Maven artifact version.
 
+### Fixed
+- **Message signature encoding**: the `Signature` header value is now encoded as a Byte Sequence (`install=:<base64>:` / `account=:<base64>:`) per RFC 9421 §4.2 / RFC 8941 §3.3.5, instead of a quoted String. This aligns the encoding with the other Approov service layers so a single Approov verifier accepts signatures from every layer.
+- **Message-signing fail-open conformance**: a body digest configured as *required* that cannot be generated now fails **closed** (aborting the request) instead of being silently skipped. All other signing failures (signature unavailable, base64 decode, ASN.1/DER decode, account-branch errors) continue to fail **open** (the request proceeds unsigned) but are now logged at **error** level for production visibility. Unsupported signing algorithms still fail closed.
+
 ## [3.5.7] - 2026-04-09
 
 ### Added
