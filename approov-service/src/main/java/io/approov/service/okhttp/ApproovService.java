@@ -1241,10 +1241,15 @@ class ApproovTokenInterceptor implements Interceptor {
             return chain.proceed(request);
         }
 
-        // update the data hash based on any token binding header (presence is optional)
+        // update the data hash based on any token binding header (presence is optional). HTTP header
+        // names are case-insensitive, so use Request.header() rather than a case-sensitive name set
+        // lookup. A null value means the header is absent (skip); an empty value is forwarded as-is.
         String bindingHeader = ApproovService.getBindingHeader();
-        if ((bindingHeader != null) && request.headers().names().contains(bindingHeader))
-            Approov.setDataHashInToken(request.header(bindingHeader));
+        if (bindingHeader != null) {
+            String bindingValue = request.header(bindingHeader);
+            if (bindingValue != null)
+                Approov.setDataHashInToken(bindingValue);
+        }
 
         HttpUrl url = request.url();
 
@@ -1282,7 +1287,10 @@ class ApproovTokenInterceptor implements Interceptor {
 
             String traceIDHeader = ApproovService.getApproovTraceIDHeader();
             String traceID = approovResults.getTraceID();
-            if ((traceIDHeader != null) && (traceID != null) && !traceID.isEmpty()) {
+            // Emit the trace header whenever the SDK provides a value, even if it is empty, so the
+            // backend has evidence that Approov processing occurred (see Missing Artifacts Fallback).
+            // A null trace ID means none is available, so the header is omitted in that case.
+            if ((traceIDHeader != null) && (traceID != null)) {
                 setTraceIDHeaderKey = traceIDHeader;
                 setTraceIDHeaderValue = traceID;
             }

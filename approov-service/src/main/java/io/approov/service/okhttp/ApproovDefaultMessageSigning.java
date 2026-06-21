@@ -38,6 +38,7 @@ import java.util.List;
 import java.util.Map;
 
 import io.approov.util.http.sfv.ByteSequenceItem;
+import io.approov.util.http.sfv.StringItem;
 import io.approov.util.http.sfv.Dictionary;
 import io.approov.util.sig.ComponentProvider;
 import io.approov.util.sig.SignatureBaseBuilder;
@@ -216,7 +217,9 @@ public class ApproovDefaultMessageSigning implements ApproovServiceMutator {
         SignatureParameters params;
         try {
             params = buildSignatureParameters(provider, changes);
-        } catch (IllegalStateException e) {
+        } catch (RequiredBodyDigestException e) {
+            // The only deliberate fail-closed build condition: a body digest configured as
+            // required could not be generated, so the request must be aborted.
             throw e;
         } catch (Exception e) {
             Log.e(TAG, "Failed to build signature parameters - proceeding unsigned: " + e);
@@ -308,12 +311,18 @@ public class ApproovDefaultMessageSigning implements ApproovServiceMutator {
                 throw new IllegalStateException("Unsupported algorithm identifier: " + params.getAlg());
         }
 
-        // Calculate the signature and message descriptor headers. Per RFC 9421 §4.2 the `Signature`
-        // field is a Dictionary whose member values are Byte Sequences (RFC 8941 §3.3.5), serialized as
-        // base64 delimited by colons — e.g. `Signature: install=:<base64>:`. The value MUST be a Byte
-        // Sequence, never a String, so a single Approov verifier accepts signatures from every layer.
+        // Calculate the signature and message descriptor headers. Note that the
+        // signatures are
+        // added as strings (as required by the spec) instead of byte sequences which
+        // would better
+        // fit the data.
+        // NOTE: RFC 9421 §4.2 / RFC 8941 §3.3.5 require the `Signature` member value to be a
+        // Byte Sequence (install=:<base64>:), and every other Approov service layer emits that
+        // form. This layer currently emits the quoted-String form for backwards compatibility;
+        // migration is tracked in https://github.com/approov/approov-service-okhttp/issues/34
+        String signatureBase64 = Base64.encodeToString(signature, Base64.NO_WRAP);
         String sigHeader = Dictionary.valueOf(Collections.singletonMap(
-                sigId, ByteSequenceItem.valueOf(signature))).serialize();
+                sigId, StringItem.valueOf(signatureBase64))).serialize();
         String sigInputHeader = Dictionary.valueOf(Collections.singletonMap(
                 sigId, params.toComponentValue())).serialize();
 
@@ -656,10 +665,24 @@ public class ApproovDefaultMessageSigning implements ApproovServiceMutator {
             }
             if (bodyDigestAlgorithm != null) {
                 if (!generateBodyDigest(provider, requestParameters) && bodyDigestRequired) {
-                    throw new IllegalStateException("Failed to create required body digest");
+                    throw new RequiredBodyDigestException("Failed to create required body digest");
                 }
             }
             return requestParameters;
+        }
+    }
+
+    /**
+     * Thrown when a body digest configured as <em>required</em> cannot be generated.
+     * This is the only signature-build condition that must fail CLOSED (abort the
+     * request). Every other build failure — including an {@link IllegalStateException}
+     * raised by a custom {@link SignatureParametersFactory} for an unrelated reason —
+     * fails OPEN (the request proceeds unsigned), because the backend is the
+     * enforcement point for message signatures.
+     */
+    public static class RequiredBodyDigestException extends IllegalStateException {
+        public RequiredBodyDigestException(String message) {
+            super(message);
         }
     }
 

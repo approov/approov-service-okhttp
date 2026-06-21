@@ -14,8 +14,12 @@ The format is based on Keep a Changelog and this project adheres to Semantic Ver
 - Publish workflow now passes `-PapproovServiceVersion` to `assembleRelease`, keeping the runtime version in lockstep with the Maven artifact version.
 
 ### Fixed
-- **Message signature encoding**: the `Signature` header value is now encoded as a Byte Sequence (`install=:<base64>:` / `account=:<base64>:`) per RFC 9421 §4.2 / RFC 8941 §3.3.5, instead of a quoted String. This aligns the encoding with the other Approov service layers so a single Approov verifier accepts signatures from every layer.
 - **Message-signing fail-open conformance**: a body digest configured as *required* that cannot be generated now fails **closed** (aborting the request) instead of being silently skipped. All other signing failures (signature unavailable, base64 decode, ASN.1/DER decode, account-branch errors) continue to fail **open** (the request proceeds unsigned) but are now logged at **error** level for production visibility. Unsupported signing algorithms still fail closed.
+- **Token binding header**: the binding header is now matched case-insensitively (HTTP header names are case-insensitive) and a present-but-empty value is forwarded to the SDK, while an absent header is skipped.
+- **Trace ID header**: an empty trace ID returned by the SDK is now emitted as an empty header value rather than omitted, so the backend has evidence that Approov processing occurred.
+
+### Known Issues
+- **Message signature encoding**: the `Signature` header value is emitted as a quoted String (`install="<base64>"`) rather than the Byte Sequence form (`install=:<base64>:`) required by RFC 9421 §4.2 / RFC 8941 §3.3.5 and used by every other Approov service layer. Migrating to the Byte Sequence form is a breaking change for existing verifiers and is tracked in [#34](https://github.com/approov/approov-service-okhttp/issues/34).
 
 ## [3.5.7] - 2026-04-09
 
