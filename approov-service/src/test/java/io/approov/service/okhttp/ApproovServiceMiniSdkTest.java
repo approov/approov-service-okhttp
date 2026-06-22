@@ -276,8 +276,10 @@ public class ApproovServiceMiniSdkTest {
         Request request = new Request.Builder().url(getTargetURL()).build();
         try (Response response = client.newCall(request).execute()) {
             JSONObject reply = new JSONObject(response.body().string());
-            assertNull(getHeader(reply, "Approov-Token"));
-            assertNull(getHeader(reply, "Approov-TraceID"));
+            // NO_APPROOV_SERVICE proceeds emitting an empty Approov-Token (and trace ID if the
+            // SDK provides one) as evidence of Approov processing — §2 Missing Artifacts Fallback.
+            assertEquals("", getHeader(reply, "Approov-Token"));
+            assertNotNull(getHeader(reply, "Approov-TraceID"));
         }
     }
 

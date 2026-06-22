@@ -93,16 +93,18 @@ Returns `true` only when the service layer was initialized with a valid, non-emp
 
 **OBSOLETED**: Use `setServiceMutator` instead.
 
-Sets the interceptor extensions callback handler. This facility supports message signing that is independent from the rest of the attestation flow. The default ApproovService layer issues no callbacks. Provide a non-null handler to add functionality to the attestation flow. The configuration used to control installation message signing is passed in the `callbacks` parameter. The behavior of the provided configuration must remain constant while in use by the ApproovService. Passing `null` to this method will disable message signing.
+Sets the interceptor extensions callback handler. This facility supports message signing that is independent from the rest of the attestation flow. The default ApproovService layer issues no callbacks. Provide a non-null handler to add functionality to the attestation flow. The configuration used to control installation message signing is passed in the `mutator` parameter. The behavior of the provided configuration must remain constant while in use by the ApproovService. Passing `null` to this method will disable message signing.
+
+This is a deprecated alias for `setServiceMutator`; the parameter is an `ApproovServiceMutator` (the legacy `ApproovInterceptorExtensions` interface is a deprecated subtype of it).
 
 **Java:**
 ```java
-void setApproovInterceptorExtensions(ApproovInterceptorExtensions callbacks)
+void setApproovInterceptorExtensions(ApproovServiceMutator mutator)
 ```
 
 **Kotlin:**
 ```kotlin
-fun setApproovInterceptorExtensions(callbacks: ApproovInterceptorExtensions)
+fun setApproovInterceptorExtensions(mutator: ApproovServiceMutator)
 ```
 
 Provide an ApproovDefaultMessageSigning object instantiated as shown below to enable installation message signing:
