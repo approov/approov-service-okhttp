@@ -1,5 +1,11 @@
 # Approov Service for OkHttp
 
+![Java](https://img.shields.io/badge/Java-8%2B-007396?logo=openjdk&logoColor=white)
+![Android](https://img.shields.io/badge/Android-minSdk%2023-3DDC84?logo=android&logoColor=white)
+![Maven Central](https://img.shields.io/maven-central/v/io.approov/service.okhttp?logo=apachemaven&logoColor=white&label=Maven%20Central)
+![Message Signing](https://img.shields.io/badge/Message%20Signing-RFC%209421-1f6feb)
+![Build](https://github.com/approov/approov-service-okhttp/actions/workflows/build_and_test.yml/badge.svg)
+
 A wrapper for the [Approov SDK](https://github.com/approov/approov-android-sdk) to enable easy integration when using [`OkHttp`](https://square.github.io/okhttp/) for making the API calls that you wish to protect with Approov. In order to use this you will need a trial or paid [Approov](https://www.approov.io) account.
 
 ## ADDING APPROOV SERVICE DEPENDENCY
@@ -37,32 +43,67 @@ Please [read this](https://approov.io/docs/latest/approov-usage-documentation/#t
 
 In order to use the `ApproovService` you must initialize it when your app is created, usually in the `onCreate` method:
 
+Wrap initialization in a try/catch: on success, confirm the layer is enabled and log the Approov device ID together with an app-generated session/correlation id; on failure, log it and continue **unprotected** by re-initializing with an empty config (bypass mode) so the app still functions.
+
 ### Java
 ```java
+import android.util.Log;
 import io.approov.service.okhttp.ApproovService;
+import java.util.UUID;
 
 public class YourApp extends Application {
+    private static final String TAG = "YourApp";
+
     @Override
     public void onCreate() {
         super.onCreate();
-        ApproovService.initialize(getApplicationContext(), "<enter-your-config-string-here>");
+
+        // App-generated id to correlate this install/session across your own logs and
+        // backend. Use a UUID, or any session/user identifier you have — NOT an Approov secret.
+        String correlationId = UUID.randomUUID().toString();
+        try {
+            ApproovService.initialize(getApplicationContext(), "<enter-your-config-string-here>");
+            if (ApproovService.isApproovEnabled()) {
+                Log.i(TAG, "Approov initialized; deviceID=" + ApproovService.getDeviceID()
+                        + " session=" + correlationId);
+            }
+        } catch (Exception e) {
+            // Initialization failed — log and continue UNPROTECTED so the app still works.
+            Log.e(TAG, "Approov init failed (session=" + correlationId + "); continuing unprotected", e);
+            ApproovService.initialize(getApplicationContext(), "");  // empty config = bypass mode
+        }
     }
 }
 ```
 
 ### Kotlin
 ```kotlin
+import android.util.Log
 import io.approov.service.okhttp.ApproovService
+import java.util.UUID
 
-class YourApp: Application() {
+class YourApp : Application() {
     override fun onCreate() {
         super.onCreate()
-        ApproovService.initialize(applicationContext, "<enter-your-config-string-here>")
+
+        // App-generated id to correlate this install/session across your own logs and
+        // backend. Use a UUID, or any session/user identifier you have — NOT an Approov secret.
+        val correlationId = UUID.randomUUID().toString()
+        try {
+            ApproovService.initialize(applicationContext, "<enter-your-config-string-here>")
+            if (ApproovService.isApproovEnabled()) {
+                Log.i("YourApp", "Approov initialized; deviceID=${ApproovService.getDeviceID()} session=$correlationId")
+            }
+        } catch (e: Exception) {
+            // Initialization failed — log and continue UNPROTECTED so the app still works.
+            Log.e("YourApp", "Approov init failed (session=$correlationId); continuing unprotected", e)
+            ApproovService.initialize(applicationContext, "")  // empty config = bypass mode
+        }
     }
 }
 ```
 
-The `<enter-your-config-string-here>` is a custom string that configures your Approov account access. This will have been provided in your Approov onboarding email.
+The `<enter-your-config-string-here>` is a custom string that configures your Approov account access. This will have been provided in your Approov onboarding email. On success the example logs the Approov **device ID** (`getDeviceID()`) and an **app-generated session/correlation id** so a given install can be correlated across your app logs, backend, and the Approov metrics. If initialization fails it re-initializes with an empty config so the app keeps working — but those requests go out **without Approov protection**, so the backend remains the enforcement point.
 
 ## USING APPROOV SERVICE
 
