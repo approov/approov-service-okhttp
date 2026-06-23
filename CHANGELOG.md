@@ -9,6 +9,7 @@ The format is based on Keep a Changelog and this project adheres to Semantic Ver
 ### Added
 - Service-layer version is now baked into the AAR at build time via `BuildConfig.APPROOV_SERVICE_VERSION` and reported to the Approov SDK via `setUserProperty("approov-service-okhttp/X.Y.Z")` during initialization. Local builds report `dev`.
 - CHANGELOG-vs-tag validation step in the publish workflow to fail fast if the top changelog entry does not match the release tag.
+- Automatic release tagging on merge to `main` (`tag-release` job in `build_and_test.yml`): once the build/tests pass, the top CHANGELOG entry drives a matching git tag, which triggers the Maven publish workflow. Skipped if the tag already exists.
 
 ### Changed
 - Publish workflow now passes `-PapproovServiceVersion` to `assembleRelease`, keeping the runtime version in lockstep with the Maven artifact version.
