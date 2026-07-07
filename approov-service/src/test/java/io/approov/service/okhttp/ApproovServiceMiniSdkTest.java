@@ -16,9 +16,12 @@ import org.junit.Test;
 import org.junit.runner.RunWith;
 import org.robolectric.RobolectricTestRunner;
 import org.robolectric.annotation.Config;
+import org.robolectric.shadows.ShadowSystemClock;
  
 import java.io.IOException;
 import java.nio.charset.StandardCharsets;
+import java.time.Duration;
+import java.util.concurrent.atomic.AtomicInteger;
 import java.security.MessageDigest;
 import java.util.ArrayList;
 import java.util.Base64;
@@ -884,6 +887,150 @@ public class ApproovServiceMiniSdkTest {
             fail("Expected ApproovException");
         } catch (ApproovException e) {
             // Should throw due to IllegalArgumentException from SDK
+        }
+    }
+
+    // ==================================================================================
+    // Stale Protection Refresh
+    // ==================================================================================
+
+    // message signing mutator that counts processed request callback invocations so
+    // that tests can observe how many times protection was applied to a request
+    private static class CountingMessageSigning extends ApproovDefaultMessageSigning {
+        final AtomicInteger processedCount = new AtomicInteger();
+
+        @Override
+        public Request handleInterceptorProcessedRequest(Request request, ApproovRequestMutations changes)
+                throws ApproovException {
+            processedCount.incrementAndGet();
+            return super.handleInterceptorProcessedRequest(request, changes);
+        }
+    }
+
+    /**
+     * A request that is held between the token interceptor applying protection and
+     * the request being transmitted (simulated by advancing the elapsed realtime
+     * clock in a network interceptor that runs before the Approov freshness
+     * interceptor) must have its protection refreshed at the network layer: the
+     * processed request callback runs a second time and the transmitted request
+     * carries exactly one token and one set of signature headers.
+     */
+    @Test
+    public void testStaleRequestProtectionRefreshedAtNetworkLayer() throws Exception {
+        reinitializeServiceWithTargetHost("");
+
+        CountingMessageSigning signing = new CountingMessageSigning();
+        signing.setDefaultFactory(ApproovDefaultMessageSigning.generateDefaultSignatureParametersFactory()
+            .setUseInstallMessageSigning());
+        ApproovService.setServiceMutator(signing);
+
+        // simulate a device suspend between protection and transmission on the
+        // first network attempt only
+        AtomicInteger attempts = new AtomicInteger();
+        OkHttpClient.Builder builder = new OkHttpClient.Builder()
+            .addNetworkInterceptor(chain -> {
+                if (attempts.getAndIncrement() == 0)
+                    ShadowSystemClock.advanceBy(Duration.ofSeconds(10));
+                return chain.proceed(chain.request());
+            });
+        ApproovService.setOkHttpClientBuilder(builder);
+
+        OkHttpClient client = ApproovService.getOkHttpClient();
+        Request request = new Request.Builder().url(getTargetURL()).get().build();
+        try (Response response = client.newCall(request).execute()) {
+            JSONObject reply = new JSONObject(response.body().string());
+
+            // protection was applied at the application layer and refreshed once at
+            // the network layer
+            assertEquals(2, signing.processedCount.get());
+
+            // the transmitted request carries a token and exactly one signature
+            assertNotNull(getHeader(reply, "Approov-Token"));
+            String signature = getHeader(reply, "Signature");
+            assertNotNull(signature);
+            assertTrue(signature.startsWith("install="));
+            assertEquals(signature.indexOf("install="), signature.lastIndexOf("install="));
+            String signatureInput = getHeader(reply, "Signature-Input");
+            assertNotNull(signatureInput);
+            assertTrue(signatureInput.startsWith("install="));
+            assertEquals(signatureInput.indexOf("install="), signatureInput.lastIndexOf("install="));
+        }
+    }
+
+    /**
+     * A request that is not held between protection and transmission must not have
+     * its protection refreshed, and disabling the stale protection refresh must
+     * prevent a refresh even for a held request.
+     */
+    @Test
+    public void testProtectionNotRefreshedWhenFreshOrDisabled() throws Exception {
+        reinitializeServiceWithTargetHost("");
+
+        CountingMessageSigning signing = new CountingMessageSigning();
+        signing.setDefaultFactory(ApproovDefaultMessageSigning.generateDefaultSignatureParametersFactory()
+            .setUseInstallMessageSigning());
+        ApproovService.setServiceMutator(signing);
+
+        // a request that is transmitted promptly is not reprocessed
+        OkHttpClient client = ApproovService.getOkHttpClient();
+        Request request = new Request.Builder().url(getTargetURL()).get().build();
+        try (Response response = client.newCall(request).execute()) {
+            assertEquals(200, response.code());
+            assertEquals(1, signing.processedCount.get());
+        }
+
+        // with the refresh disabled even a held request is not reprocessed
+        ApproovService.setStaleProtectionRefreshPeriod(0);
+        AtomicInteger attempts = new AtomicInteger();
+        OkHttpClient.Builder builder = new OkHttpClient.Builder()
+            .addNetworkInterceptor(chain -> {
+                if (attempts.getAndIncrement() == 0)
+                    ShadowSystemClock.advanceBy(Duration.ofSeconds(10));
+                return chain.proceed(chain.request());
+            });
+        ApproovService.setOkHttpClientBuilder(builder);
+        client = ApproovService.getOkHttpClient();
+        try (Response response = client.newCall(request).execute()) {
+            assertEquals(200, response.code());
+            assertEquals(2, signing.processedCount.get());
+        }
+    }
+
+    /**
+     * A custom mutator that does not opt in to protection refresh (via
+     * supportsProtectionRefresh) must never have its processed request callback
+     * reinvoked, even for a held request.
+     */
+    @Test
+    public void testProtectionNotRefreshedForNonOptedInMutator() throws Exception {
+        reinitializeServiceWithTargetHost("");
+
+        // a custom mutator implementing the interface directly, which does not
+        // override supportsProtectionRefresh and so defaults to unsupported
+        AtomicInteger processedCount = new AtomicInteger();
+        ApproovService.setServiceMutator(new ApproovServiceMutator() {
+            @Override
+            public Request handleInterceptorProcessedRequest(Request request, ApproovRequestMutations changes)
+                    throws ApproovException {
+                processedCount.incrementAndGet();
+                return request;
+            }
+        });
+
+        AtomicInteger attempts = new AtomicInteger();
+        OkHttpClient.Builder builder = new OkHttpClient.Builder()
+            .addNetworkInterceptor(chain -> {
+                if (attempts.getAndIncrement() == 0)
+                    ShadowSystemClock.advanceBy(Duration.ofSeconds(10));
+                return chain.proceed(chain.request());
+            });
+        ApproovService.setOkHttpClientBuilder(builder);
+
+        OkHttpClient client = ApproovService.getOkHttpClient();
+        Request request = new Request.Builder().url(getTargetURL()).get().build();
+        try (Response response = client.newCall(request).execute()) {
+            assertEquals(200, response.code());
+            assertEquals(1, processedCount.get());
         }
     }
 

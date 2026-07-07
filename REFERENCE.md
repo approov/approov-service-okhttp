@@ -326,6 +326,19 @@ void setBindingHeader(String header)
 fun setBindingHeader(header: String)
 ```
 
+## setStaleProtectionRefreshPeriod
+Sets the period in milliseconds after which a request that was held between having its Approov protection applied and being actually transmitted has that protection (Approov token and any message signature) refreshed at the network layer immediately before transmission. Requests may be held in this way if the device enters a deep sleep or doze state while the request is in flight, or if the app employs its own request queueing or backoff mechanism; the Approov token and any message signature (which carries created/expires timestamps) may then have expired by the time the request is sent. A refresh reissues the Approov token fetch (usually satisfied instantly from the SDK's cache) and reapplies any message signing via the service mutator's `handleInterceptorProcessedRequest` callback. Because this reinvokes the callback, a refresh is only performed if the mutator's `supportsProtectionRefresh()` returns true: the default mutator and `ApproovDefaultMessageSigning` support it, while custom `ApproovServiceMutator` implementations must opt in by overriding `supportsProtectionRefresh()` once their callback is safe to invoke more than once per request. The period should be comfortably less than the message signature expiry (15 seconds by default) but high enough that ordinary requests are not reprocessed. The default is 3000ms and passing a value less than or equal to zero disables the refresh.
+
+**Java:**
+```Java
+void setStaleProtectionRefreshPeriod(long periodMS)
+```
+
+**Kotlin:**
+```kotlin
+fun setStaleProtectionRefreshPeriod(periodMS: Long)
+```
+
 ## addSubstitutionHeader
 Adds the name of a `header` which should be subject to [secure strings](https://approov.io/docs/latest/approov-usage-documentation/#secure-strings) substitution. This means that if the `header` is present then the value will be used as a key to look up a secure string value which will be substituted into the `header` value instead. This allows easy migration to the use of secure strings. A `requiredPrefix` may be specified to deal with cases such as the use of "`Bearer `" prefixed before values in an authorization header. Set `requiredPrefix` to `null` if it is not required.
 

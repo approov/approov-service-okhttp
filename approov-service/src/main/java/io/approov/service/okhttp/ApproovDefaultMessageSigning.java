@@ -195,6 +195,19 @@ public class ApproovDefaultMessageSigning implements ApproovServiceMutator {
     }
 
     /**
+     * The default message signing only ever sets its headers with replace
+     * semantics and regenerates the signature from the current request state,
+     * so it is safe for the stale protection refresh to invoke
+     * handleInterceptorProcessedRequest again.
+     *
+     * @return true as reinvocation is supported
+     */
+    @Override
+    public boolean supportsProtectionRefresh() {
+        return true;
+    }
+
+    /**
      * @deprecated Use ApproovServiceMutator.handleInterceptorProcessedRequest
      *             instead.
      *
