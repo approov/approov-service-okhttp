@@ -2,6 +2,8 @@ name: Build and Test
 
 on:
   push:
+    branches:
+      - main
   pull_request:
 
 jobs:
@@ -299,57 +301,3 @@ jobs:
           name: test-results-${{ github.run_number }}
           path: approov-service-okhttp/approov-service/build/reports/tests/
           retention-days: 14
-
-  # ---------------------------------------------------------------------------
-  # Automatic release tagging (main only). The CHANGELOG top entry drives the
-  # version: a matching git tag is created after the build/tests pass, which in
-  # turn triggers the Maven Publish workflow. The published AAR bakes the tag
-  # version into BuildConfig.APPROOV_SERVICE_VERSION (-PapproovServiceVersion),
-  # reported at runtime via Approov.setUserProperty. Skipped if the tag exists.
-  # ---------------------------------------------------------------------------
-  tag-release:
-    needs: build-and-test
-    if: github.ref == 'refs/heads/main' && github.event_name == 'push'
-    runs-on: ubuntu-latest
-    permissions:
-      contents: write
-    steps:
-      - name: Checkout Repository
-        uses: actions/checkout@v4
-        with:
-          fetch-depth: 0
-
-      - name: Extract Version from CHANGELOG
-        id: get-version
-        run: |
-          VERSION=$(grep -m1 -oE '^## \[[0-9]+\.[0-9]+\.[0-9]+\]' CHANGELOG.md | grep -oE '[0-9]+\.[0-9]+\.[0-9]+') || true
-          if [ -z "$VERSION" ]; then
-            echo "::error::Could not find a version header (## [x.y.z]) in CHANGELOG.md"
-            exit 1
-          fi
-          echo "VERSION=$VERSION" >> "$GITHUB_OUTPUT"
-          echo "Version extracted from CHANGELOG.md is: $VERSION"
-
-      - name: Create and Push Tag
-        run: |
-          VERSION="${{ steps.get-version.outputs.VERSION }}"
-
-          if git fetch origin "refs/tags/$VERSION" --quiet 2>/dev/null; then
-            echo "Tag $VERSION already exists. Skipping tagging."
-            exit 0
-          fi
-
-          echo "Tag $VERSION does not exist. Verifying dev placeholder..."
-          FILE="approov-service/build.gradle"
-          if ! grep -q "'approovServiceVersion') ?: 'dev'" "$FILE"; then
-            echo "::error::Could not find default 'dev' version in $FILE"
-            exit 1
-          fi
-
-          echo "Configuring git..."
-          git config --global user.name "github-actions[bot]"
-          git config --global user.email "github-actions[bot]@users.noreply.github.com"
-
-          echo "Creating and pushing tag $VERSION..."
-          git tag "$VERSION"
-          git push origin "$VERSION"
