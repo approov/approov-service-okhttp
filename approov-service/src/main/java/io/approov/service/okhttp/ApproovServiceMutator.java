@@ -43,6 +43,13 @@ public interface ApproovServiceMutator {
         public String toString() {
             return "ApproovServiceMutator.DEFAULT";
         }
+
+        @Override
+        public boolean supportsProtectionRefresh() {
+            // the default handleInterceptorProcessedRequest makes no changes so it
+            // is trivially safe to invoke again
+            return true;
+        }
     };
 
     /**
@@ -333,6 +340,28 @@ public interface ApproovServiceMutator {
             throws ApproovException {
         // No further changes to the request are required
         return request;
+    }
+
+    /**
+     * Indicates whether this mutator supports the stale protection refresh
+     * performed at the network layer for requests that were held between having
+     * their Approov protection applied and being actually transmitted (see
+     * ApproovService.setStaleProtectionRefreshPeriod). A refresh removes the
+     * headers previously added by handleInterceptorProcessedRequest, updates
+     * the Approov token header and then invokes
+     * handleInterceptorProcessedRequest again on the same request, so it must
+     * only be enabled for implementations whose callback is safe to invoke
+     * more than once per request (note that changes the callback makes other
+     * than adding headers, such as modifying existing header values in place,
+     * are not undone before the reinvocation). This returns false by default
+     * so that custom implementations are never reinvoked unless they opt in
+     * by overriding this method.
+     *
+     * @return true if the stale protection refresh may reinvoke
+     *         handleInterceptorProcessedRequest, false to prevent any refresh
+     */
+    default boolean supportsProtectionRefresh() {
+        return false;
     }
 
     /**
