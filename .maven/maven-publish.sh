@@ -23,10 +23,15 @@ fi
 BODY_ARTIFACT="service.okhttp-${CURRENT_TAG}.zip"
 
 # The username:password for the maven repository
-MAVEN_CREDENTIALS=$(printf "${MAVEN_USERNAME}:${MAVEN_PASSWORD}" | base64)
+MAVEN_CREDENTIALS=$(printf '%s' "${MAVEN_USERNAME}:${MAVEN_PASSWORD}" | base64 | tr -d '\n')
+if [ -n "${GITHUB_ACTIONS:-}" ]; then
+  echo "::add-mask::${MAVEN_CREDENTIALS}"
+fi
 # Publish the body artifact
 curl --request POST \
-  --verbose \
+  --fail-with-body \
+  --silent \
+  --show-error \
   --header "Authorization: Bearer ${MAVEN_CREDENTIALS}" \
   --form "bundle=@${BODY_ARTIFACT}" \
   "https://central.sonatype.com/api/v1/publisher/upload?publishingType=AUTOMATIC&name=service.okhttp"

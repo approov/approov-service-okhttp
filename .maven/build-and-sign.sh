@@ -3,19 +3,21 @@
 set -e
 ## set variables/constants required by the script
 
-# Retrieve the tag from GITHUB_REF
-if [ -z "$GITHUB_REF" ]; then
-    echo "Error: GITHUB_REF is not set. This script requires a GitHub tag to be present."
-    exit 1
+# Prefer the explicitly validated release tag. Fall back to GITHUB_REF when the
+# script is invoked by a tag-triggered workflow or directly in older tooling.
+if [ -z "${CURRENT_TAG:-}" ]; then
+    if [[ "${GITHUB_REF:-}" == refs/tags/* ]]; then
+        CURRENT_TAG="${GITHUB_REF#refs/tags/}"
+    else
+        echo "Error: CURRENT_TAG is not set and GITHUB_REF is not a tag reference."
+        exit 1
+    fi
 fi
 
-# Extract the tag name from GITHUB_REF
-CURRENT_TAG=$(echo "$GITHUB_REF" | sed 's|refs/tags/||')
-
-# Check if the extracted tag matches the expected format (e.g., x.y.z)
+# Check that the release tag matches the expected format (e.g., x.y.z).
 if [[ ! "$CURRENT_TAG" =~ ^[0-9]+\.[0-9]+\.[0-9]+$ ]]; then
-    echo "Error: Current Git tag ($CURRENT_TAG) does not match the required format (x.y.z) ,using 0.0.0"
-    CURRENT_TAG="0.0.0"
+    echo "Error: Current Git tag ($CURRENT_TAG) does not match the required format (x.y.z)."
+    exit 1
 fi
 
 # The version of the package that will be build and will be visible in maven central

@@ -4,6 +4,27 @@ All notable changes to this package will be documented in this file.
 
 The format is based on Keep a Changelog and this project adheres to Semantic Versioning.
 
+## [3.5.8] - 2026-07-16
+
+### Added
+- Stale protection refresh: a new network interceptor detects requests that were held between Approov protection being applied and actual transmission (for example by a device deep sleep or doze period, or an app-level request queueing/backoff mechanism) and refreshes the Approov token and any message signature immediately before the request is sent, instead of transmitting expired credentials. Since it operates per network attempt it also refreshes protection on OkHttp generated retries and redirect followups. Configurable via `ApproovService.setStaleProtectionRefreshPeriod()` (default 3000ms, `<=0` disables). Because a refresh reinvokes the mutator's `handleInterceptorProcessedRequest` callback, it is gated on the new `ApproovServiceMutator.supportsProtectionRefresh()` capability: the default mutator and `ApproovDefaultMessageSigning` support it, while custom mutator implementations are never reinvoked unless they opt in.
+- Service-layer version is now baked into the AAR at build time via `BuildConfig.APPROOV_SERVICE_VERSION` and reported to the Approov SDK via `setUserProperty("approov-service-okhttp/X.Y.Z")` during initialization. Local builds report `dev`.
+- Manual `Release to Maven` workflow for publishing an existing release tag from `main`. It validates the requested semantic-version tag, verifies that the tag belongs to `main`, and requires the top CHANGELOG entry to match both on `main` and at the tagged commit before publishing.
+
+### Changed
+- Android build migrated from the unmaintained `com.github.johnrengelman.shadow` 8.1.1 plugin to the maintained fork `com.gradleup.shadow` 8.3.11 for Gradle 9 compatibility (Gradle 9 removed `FileCopyDetails.mode`, making the old plugin fail with a `MissingPropertyException`). Shaded BouncyCastle jar verified byte-identical; minimum supported Gradle remains 8.3.
+- Publish workflow now passes `-PapproovServiceVersion` to `assembleRelease`, keeping the runtime version in lockstep with the Maven artifact version.
+- **Breaking:** the HTTP `Signature` header now encodes install and account signatures as RFC 9421 Structured Fields Byte Sequences (`install=:<base64>:` / `account=:<base64>:`), matching every other Approov service layer. Verifiers that only accept the legacy quoted-String form must be updated.
+
+### Fixed
+- **Message-signing fail-open conformance**: a body digest configured as *required* that cannot be generated now fails **closed** (aborting the request) instead of being silently skipped. All other signing failures (signature unavailable, base64 decode, ASN.1/DER decode, account-branch errors) continue to fail **open** (the request proceeds unsigned) but are now logged at **error** level for production visibility. Unsupported signing algorithms still fail closed.
+- **Token binding header**: the binding header is now matched case-insensitively (HTTP header names are case-insensitive) and a present-but-empty value is forwarded to the SDK, while an absent header is skipped.
+- **Substitution header configuration**: adding and removing secure-string substitution headers now matches names case-insensitively. Re-adding the same logical header replaces its configuration without creating duplicate entries.
+- **Binding/substitution conflict**: configuring the same header for both token binding and secure-string substitution now fails fast with `IllegalArgumentException`, preventing a token from being bound to a placeholder that differs from the substituted value sent to the backend.
+- **Trace ID header**: an empty trace ID returned by the SDK is now emitted as an empty header value rather than omitted, so the backend has evidence that Approov processing occurred.
+- **`NO_APPROOV_SERVICE`**: the request now proceeds emitting an **empty** `Approov-Token` header (and a trace ID if the SDK provides one) as evidence that Approov processing occurred, instead of omitting the headers (root TESTING_REQUIREMENTS §2 Missing Artifacts Fallback). `UNKNOWN_URL`/`UNPROTECTED_URL` still send no headers.
+- **REFERENCE.md**: corrected the deprecated `setApproovInterceptorExtensions` signature — its parameter is an `ApproovServiceMutator` (the legacy `ApproovInterceptorExtensions` interface is a deprecated subtype), not `ApproovInterceptorExtensions`.
+
 ## [3.5.7] - 2026-04-09
 
 ### Added

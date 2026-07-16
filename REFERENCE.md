@@ -93,16 +93,18 @@ Returns `true` only when the service layer was initialized with a valid, non-emp
 
 **OBSOLETED**: Use `setServiceMutator` instead.
 
-Sets the interceptor extensions callback handler. This facility supports message signing that is independent from the rest of the attestation flow. The default ApproovService layer issues no callbacks. Provide a non-null handler to add functionality to the attestation flow. The configuration used to control installation message signing is passed in the `callbacks` parameter. The behavior of the provided configuration must remain constant while in use by the ApproovService. Passing `null` to this method will disable message signing.
+Sets the interceptor extensions callback handler. This facility supports message signing that is independent from the rest of the attestation flow. The default ApproovService layer issues no callbacks. Provide a non-null handler to add functionality to the attestation flow. The configuration used to control installation message signing is passed in the `mutator` parameter. The behavior of the provided configuration must remain constant while in use by the ApproovService. Passing `null` to this method will disable message signing.
+
+This is a deprecated alias for `setServiceMutator`; the parameter is an `ApproovServiceMutator` (the legacy `ApproovInterceptorExtensions` interface is a deprecated subtype of it).
 
 **Java:**
 ```java
-void setApproovInterceptorExtensions(ApproovInterceptorExtensions callbacks)
+void setApproovInterceptorExtensions(ApproovServiceMutator mutator)
 ```
 
 **Kotlin:**
 ```kotlin
-fun setApproovInterceptorExtensions(callbacks: ApproovInterceptorExtensions)
+fun setApproovInterceptorExtensions(mutator: ApproovServiceMutator)
 ```
 
 Provide an ApproovDefaultMessageSigning object instantiated as shown below to enable installation message signing:
@@ -316,6 +318,8 @@ fun getApproovTraceIDHeader(): String?
 ## setBindingHeader
 Sets a binding `header` that may be present on requests being made. This is for the [token binding](https://approov.io/docs/latest/approov-usage-documentation/#token-binding) feature. A header should be chosen whose value is unchanging for most requests (such as an Authorization header). If the `header` is present, then its SHA256 hash is supplied to Approov so the issued token can carry the corresponding `pay` claim and be bound to the value. This may then be verified by the backend API integration.
 
+The binding header cannot also be configured for secure string substitution. Such a configuration would bind the Approov token to the placeholder value while sending the substituted value to the backend, so either configuration call throws `IllegalArgumentException` when it detects the conflict. Header-name comparison is case-insensitive.
+
 **Java:**
 ```Java
 void setBindingHeader(String header)
@@ -326,8 +330,23 @@ void setBindingHeader(String header)
 fun setBindingHeader(header: String)
 ```
 
+## setStaleProtectionRefreshPeriod
+Sets the period in milliseconds after which a request that was held between having its Approov protection applied and being actually transmitted has that protection (Approov token and any message signature) refreshed at the network layer immediately before transmission. Requests may be held in this way if the device enters a deep sleep or doze state while the request is in flight, or if the app employs its own request queueing or backoff mechanism; the Approov token and any message signature (which carries created/expires timestamps) may then have expired by the time the request is sent. A refresh reissues the Approov token fetch (usually satisfied instantly from the SDK's cache) and reapplies any message signing via the service mutator's `handleInterceptorProcessedRequest` callback. Because this reinvokes the callback, a refresh is only performed if the mutator's `supportsProtectionRefresh()` returns true: the default mutator and `ApproovDefaultMessageSigning` support it, while custom `ApproovServiceMutator` implementations must opt in by overriding `supportsProtectionRefresh()` once their callback is safe to invoke more than once per request. The period should be comfortably less than the message signature expiry (15 seconds by default) but high enough that ordinary requests are not reprocessed. The default is 3000ms and passing a value less than or equal to zero disables the refresh.
+
+**Java:**
+```Java
+void setStaleProtectionRefreshPeriod(long periodMS)
+```
+
+**Kotlin:**
+```kotlin
+fun setStaleProtectionRefreshPeriod(periodMS: Long)
+```
+
 ## addSubstitutionHeader
 Adds the name of a `header` which should be subject to [secure strings](https://approov.io/docs/latest/approov-usage-documentation/#secure-strings) substitution. This means that if the `header` is present then the value will be used as a key to look up a secure string value which will be substituted into the `header` value instead. This allows easy migration to the use of secure strings. A `requiredPrefix` may be specified to deal with cases such as the use of "`Bearer `" prefixed before values in an authorization header. Set `requiredPrefix` to `null` if it is not required.
+
+Header names are matched case-insensitively. Adding the same logical header again replaces its existing configuration and preserves the casing from the latest call. A substitution header cannot also be the token binding header; either configuration call throws `IllegalArgumentException` when it detects the conflict.
 
 **Java:**
 ```Java
@@ -340,7 +359,7 @@ fun addSubstitutionHeader(header: String, requiredPrefix: String?)
 ```
 
 ## removeSubstitutionHeader
-Removes a `header` previously added using `addSubstitutionHeader`.
+Removes a `header` previously added using `addSubstitutionHeader`. Header-name matching is case-insensitive.
 
 **Java:**
 ```Java
