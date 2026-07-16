@@ -457,9 +457,16 @@ public class ApproovService {
      * method should typically only be called once.
      *
      * @param header is the header to use for Approov token binding
+     * @throws IllegalArgumentException if the header is already configured for
+     *                                  secure string substitution
      */
     public static synchronized void setBindingHeader(String header) {
         Log.d(TAG, "setBindingHeader " + header);
+        if ((header != null) && (substitutionHeaders != null) &&
+                (findSubstitutionHeaderKey(header) != null)) {
+            throw new IllegalArgumentException("Header " + header +
+                    " cannot be used for both token binding and secure string substitution");
+        }
         bindingHeader = header;
     }
 
@@ -575,10 +582,23 @@ public class ApproovService {
      * @param header         is the header to be marked for substitution
      * @param requiredPrefix is any required prefix to the value being substituted
      *                       or null if not required
+     * @throws IllegalArgumentException if the header is already configured for
+     *                                  token binding
      */
     public static synchronized void addSubstitutionHeader(String header, String requiredPrefix) {
         if (isInitialized) {
             Log.d(TAG, "addSubstitutionHeader " + header + ", " + requiredPrefix);
+            if ((header != null) && (bindingHeader != null) && header.equalsIgnoreCase(bindingHeader)) {
+                throw new IllegalArgumentException("Header " + header +
+                        " cannot be used for both token binding and secure string substitution");
+            }
+
+            // HTTP header names are case-insensitive. Remove any logically equivalent
+            // entry first so that the map contains only one entry and preserves the
+            // casing from the latest call.
+            String existingKey = findSubstitutionHeaderKey(header);
+            if (existingKey != null)
+                substitutionHeaders.remove(existingKey);
             if (requiredPrefix == null)
                 substitutionHeaders.put(header, "");
             else
@@ -594,8 +614,27 @@ public class ApproovService {
     public static synchronized void removeSubstitutionHeader(String header) {
         if (isInitialized) {
             Log.d(TAG, "removeSubstitutionHeader " + header);
-            substitutionHeaders.remove(header);
+            String existingKey = findSubstitutionHeaderKey(header);
+            if (existingKey != null)
+                substitutionHeaders.remove(existingKey);
         }
+    }
+
+    /**
+     * Finds the stored substitution-header key matching the supplied HTTP header
+     * name without regard to case.
+     *
+     * @param header the HTTP header name to find
+     * @return the stored key, or null if no matching entry exists
+     */
+    private static String findSubstitutionHeaderKey(String header) {
+        if ((header == null) || (substitutionHeaders == null))
+            return null;
+        for (String key : substitutionHeaders.keySet()) {
+            if (header.equalsIgnoreCase(key))
+                return key;
+        }
+        return null;
     }
 
     /**

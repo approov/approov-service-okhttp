@@ -241,6 +241,61 @@ public class ApproovServiceMiniSdkTest {
     }
 
     /**
+     * HTTP header names are case-insensitive, so adding a substitution header with
+     * different casing replaces the existing logical entry and removal works with
+     * any casing.
+     */
+    @Test
+    public void testSubstitutionHeaderConfigurationIsCaseInsensitive() {
+        ApproovService.addSubstitutionHeader("Authorization", "first-");
+        ApproovService.addSubstitutionHeader("authorization", "latest-");
+
+        Map<String, String> headers = ApproovService.getSubstitutionHeaders();
+        assertEquals(1, headers.size());
+        assertFalse(headers.containsKey("Authorization"));
+        assertEquals("latest-", headers.get("authorization"));
+
+        ApproovService.removeSubstitutionHeader("AUTHORIZATION");
+        assertTrue(ApproovService.getSubstitutionHeaders().isEmpty());
+    }
+
+    /**
+     * A header cannot be used for both token binding and secure-string
+     * substitution because the token would bind the pre-substitution placeholder
+     * while the backend receives the substituted value.
+     */
+    @Test
+    public void testBindingHeaderThenSubstitutionHeaderConflictIsRejected() {
+        ApproovService.setBindingHeader("Authorization");
+
+        try {
+            ApproovService.addSubstitutionHeader("authorization", "Bearer ");
+            fail("Expected conflicting substitution header to be rejected");
+        } catch (IllegalArgumentException e) {
+            assertTrue(e.getMessage().contains("both token binding and secure string substitution"));
+        }
+        assertTrue(ApproovService.getSubstitutionHeaders().isEmpty());
+    }
+
+    /**
+     * Conflict validation is independent of configuration call order and header
+     * casing.
+     */
+    @Test
+    public void testSubstitutionHeaderThenBindingHeaderConflictIsRejected() {
+        ApproovService.addSubstitutionHeader("Authorization", "Bearer ");
+
+        try {
+            ApproovService.setBindingHeader("authorization");
+            fail("Expected conflicting binding header to be rejected");
+        } catch (IllegalArgumentException e) {
+            assertTrue(e.getMessage().contains("both token binding and secure string substitution"));
+        }
+        assertNull(ApproovService.getBindingHeader());
+        assertEquals("Bearer ", ApproovService.getSubstitutionHeaders().get("Authorization"));
+    }
+
+    /**
      * §2 Protected Request Processing
      *
      * Verifies that a protected request receives a signed token with expected

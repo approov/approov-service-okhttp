@@ -318,6 +318,8 @@ fun getApproovTraceIDHeader(): String?
 ## setBindingHeader
 Sets a binding `header` that may be present on requests being made. This is for the [token binding](https://approov.io/docs/latest/approov-usage-documentation/#token-binding) feature. A header should be chosen whose value is unchanging for most requests (such as an Authorization header). If the `header` is present, then its SHA256 hash is supplied to Approov so the issued token can carry the corresponding `pay` claim and be bound to the value. This may then be verified by the backend API integration.
 
+The binding header cannot also be configured for secure string substitution. Such a configuration would bind the Approov token to the placeholder value while sending the substituted value to the backend, so either configuration call throws `IllegalArgumentException` when it detects the conflict. Header-name comparison is case-insensitive.
+
 **Java:**
 ```Java
 void setBindingHeader(String header)
@@ -344,6 +346,8 @@ fun setStaleProtectionRefreshPeriod(periodMS: Long)
 ## addSubstitutionHeader
 Adds the name of a `header` which should be subject to [secure strings](https://approov.io/docs/latest/approov-usage-documentation/#secure-strings) substitution. This means that if the `header` is present then the value will be used as a key to look up a secure string value which will be substituted into the `header` value instead. This allows easy migration to the use of secure strings. A `requiredPrefix` may be specified to deal with cases such as the use of "`Bearer `" prefixed before values in an authorization header. Set `requiredPrefix` to `null` if it is not required.
 
+Header names are matched case-insensitively. Adding the same logical header again replaces its existing configuration and preserves the casing from the latest call. A substitution header cannot also be the token binding header; either configuration call throws `IllegalArgumentException` when it detects the conflict.
+
 **Java:**
 ```Java
 void addSubstitutionHeader(String header, String requiredPrefix)
@@ -355,7 +359,7 @@ fun addSubstitutionHeader(header: String, requiredPrefix: String?)
 ```
 
 ## removeSubstitutionHeader
-Removes a `header` previously added using `addSubstitutionHeader`.
+Removes a `header` previously added using `addSubstitutionHeader`. Header-name matching is case-insensitive.
 
 **Java:**
 ```Java
