@@ -627,7 +627,9 @@ public class ApproovServiceMiniSdkTest {
             
             String signature = getHeader(reply, "Signature");
             assertNotNull(signature);
-            assertTrue(signature.startsWith("install="));
+            assertTrue(signature.startsWith("install=:"));
+            assertTrue(signature.endsWith(":"));
+            assertFalse(signature.contains("\""));
             assertFalse(signature.contains("account="));
         }
         
@@ -667,7 +669,9 @@ public class ApproovServiceMiniSdkTest {
             
             String signature = getHeader(reply, "Signature");
             assertNotNull(signature);
-            assertTrue(signature.startsWith("account="));
+            assertTrue(signature.startsWith("account=:"));
+            assertTrue(signature.endsWith(":"));
+            assertFalse(signature.contains("\""));
             assertFalse(signature.contains("install="));
         }
     }

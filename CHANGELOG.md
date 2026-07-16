@@ -15,6 +15,7 @@ The format is based on Keep a Changelog and this project adheres to Semantic Ver
 ### Changed
 - Android build migrated from the unmaintained `com.github.johnrengelman.shadow` 8.1.1 plugin to the maintained fork `com.gradleup.shadow` 8.3.11 for Gradle 9 compatibility (Gradle 9 removed `FileCopyDetails.mode`, making the old plugin fail with a `MissingPropertyException`). Shaded BouncyCastle jar verified byte-identical; minimum supported Gradle remains 8.3.
 - Publish workflow now passes `-PapproovServiceVersion` to `assembleRelease`, keeping the runtime version in lockstep with the Maven artifact version.
+- **Breaking:** the HTTP `Signature` header now encodes install and account signatures as RFC 9421 Structured Fields Byte Sequences (`install=:<base64>:` / `account=:<base64>:`), matching every other Approov service layer. Verifiers that only accept the legacy quoted-String form must be updated.
 
 ### Fixed
 - **Message-signing fail-open conformance**: a body digest configured as *required* that cannot be generated now fails **closed** (aborting the request) instead of being silently skipped. All other signing failures (signature unavailable, base64 decode, ASN.1/DER decode, account-branch errors) continue to fail **open** (the request proceeds unsigned) but are now logged at **error** level for production visibility. Unsupported signing algorithms still fail closed.
@@ -22,9 +23,6 @@ The format is based on Keep a Changelog and this project adheres to Semantic Ver
 - **Trace ID header**: an empty trace ID returned by the SDK is now emitted as an empty header value rather than omitted, so the backend has evidence that Approov processing occurred.
 - **`NO_APPROOV_SERVICE`**: the request now proceeds emitting an **empty** `Approov-Token` header (and a trace ID if the SDK provides one) as evidence that Approov processing occurred, instead of omitting the headers (root TESTING_REQUIREMENTS §2 Missing Artifacts Fallback). `UNKNOWN_URL`/`UNPROTECTED_URL` still send no headers.
 - **REFERENCE.md**: corrected the deprecated `setApproovInterceptorExtensions` signature — its parameter is an `ApproovServiceMutator` (the legacy `ApproovInterceptorExtensions` interface is a deprecated subtype), not `ApproovInterceptorExtensions`.
-
-### Known Issues
-- **Message signature encoding**: the `Signature` header value is emitted as a quoted String (`install="<base64>"`) rather than the Byte Sequence form (`install=:<base64>:`) required by RFC 9421 §4.2 / RFC 8941 §3.3.5 and used by every other Approov service layer. Migrating to the Byte Sequence form is a breaking change for existing verifiers and is tracked in [#34](https://github.com/approov/approov-service-okhttp/issues/34).
 
 ## [3.5.7] - 2026-04-09
 

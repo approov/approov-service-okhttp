@@ -38,7 +38,6 @@ import java.util.List;
 import java.util.Map;
 
 import io.approov.util.http.sfv.ByteSequenceItem;
-import io.approov.util.http.sfv.StringItem;
 import io.approov.util.http.sfv.Dictionary;
 import io.approov.util.sig.ComponentProvider;
 import io.approov.util.sig.SignatureBaseBuilder;
@@ -324,18 +323,11 @@ public class ApproovDefaultMessageSigning implements ApproovServiceMutator {
                 throw new IllegalStateException("Unsupported algorithm identifier: " + params.getAlg());
         }
 
-        // Calculate the signature and message descriptor headers. Note that the
-        // signatures are
-        // added as strings (as required by the spec) instead of byte sequences which
-        // would better
-        // fit the data.
-        // NOTE: RFC 9421 §4.2 / RFC 8941 §3.3.5 require the `Signature` member value to be a
-        // Byte Sequence (install=:<base64>:), and every other Approov service layer emits that
-        // form. This layer currently emits the quoted-String form for backwards compatibility;
-        // migration is tracked in https://github.com/approov/approov-service-okhttp/issues/34
-        String signatureBase64 = Base64.encodeToString(signature, Base64.NO_WRAP);
+        // RFC 9421 §4.2 defines each Signature dictionary member value as a Byte
+        // Sequence, serialized by RFC 8941 §3.3.5 as colon-delimited base64
+        // (for example, install=:<base64>:).
         String sigHeader = Dictionary.valueOf(Collections.singletonMap(
-                sigId, StringItem.valueOf(signatureBase64))).serialize();
+                sigId, ByteSequenceItem.valueOf(signature))).serialize();
         String sigInputHeader = Dictionary.valueOf(Collections.singletonMap(
                 sigId, params.toComponentValue())).serialize();
 
