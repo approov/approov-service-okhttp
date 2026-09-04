@@ -534,6 +534,32 @@ public class ApproovServiceMiniSdkTest {
     }
 
     /**
+     * #566: getLastARC reports the ARC of the most recent fetch this layer made and
+     * performs no fetch of its own. After a rejected interceptor request it returns
+     * that rejection's ARC; a following successful request replaces it.
+     */
+    @Test
+    public void testGetLastARCReportsMostRecentFetchWithoutFetching() throws Exception {
+        reinitializeServiceWithTargetHost("");
+        assertEquals("", ApproovService.getLastARC());
+        setDirective("{\"operation\": \"fetchApproovToken\", \"response\": {\"status\": \"REJECTED\", \"arc\": \"REJECTARC1\"}}");
+        OkHttpClient client = ApproovService.getOkHttpClient();
+        Request request = new Request.Builder().url(getTargetURL()).get().build();
+        try (Response response = client.newCall(request).execute()) {
+            JSONObject reply = new JSONObject(response.body().string());
+            assertEquals("rejected", getHeader(reply, "Approov-Status"));
+        }
+        // no directive is queued now: a fetch inside getLastARC would return the
+        // scenario's default ARC instead of the rejection's
+        assertEquals("REJECTARC1", ApproovService.getLastARC());
+        assertEquals("REJECTARC1", ApproovService.getLastARC());
+        try (Response response = client.newCall(request).execute()) {
+            assertEquals(200, response.code());
+        }
+        assertNotEquals("REJECTARC1", ApproovService.getLastARC());
+    }
+
+    /**
      * Common service layer interface names (§7): setTokenHeader / setTraceIDHeader
      * are the names, and the okhttp-specific setApproovHeader /
      * setApproovTraceIDHeader remain as deprecated aliases.

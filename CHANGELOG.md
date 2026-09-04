@@ -29,6 +29,7 @@ This release targets the Approov SDK 3.7.0 and changes the request contract ever
 - `USAGE.md` is replaced by `ADVANCED.md`, since the standard integration needs none of it: message signing is on by default and requests always proceed.
 
 ### Fixed
+- `getLastARC()` no longer performs a token fetch of its own (it fetched a token for the first pinned domain, which could return the ARC of a later, successful attestation rather than the one behind the request that failed, and cost a network round trip). It now returns the ARC recorded from the most recent fetch performed by this layer, from the interceptor or a direct method, with no network activity. Removes the getLastARC patch implementation tracked in approov/core-project-approov#566.
 - A header that is present with an empty value is now a valid covered component for message signing (RFC 9421 §2.1), so a request sent with an empty `Approov-Token` is still signed. Previously the signature base build failed and the request went out unsigned. This is in the shared `io.approov.util.sig.ComponentProvider` and applies to every layer carrying a copy of it.
 
 ### Notes

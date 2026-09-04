@@ -94,6 +94,10 @@ public class ApproovService {
     // the config string used for initialization
     private static String configString;
 
+    // the Attestation Response Code (ARC) from the most recent token fetch result
+    // seen by this layer, or empty if none or if ARC is not enabled for the account
+    private static String lastARC = "";
+
     // the Approov pinning interceptor to be used for all requests
     private static ApproovPinningInterceptor pinningInterceptor = null;
 
@@ -202,6 +206,7 @@ public class ApproovService {
         exclusionURLRegexs = new HashMap<>();
         isInitialized = true;
         configString = config;
+        lastARC = "";
         if (isApproovEnabled()) {
             pinningInterceptor = new ApproovPinningInterceptor();
             Approov.setUserProperty("approov-service-okhttp/" + BuildConfig.APPROOV_SERVICE_VERSION);
@@ -249,6 +254,7 @@ public class ApproovService {
     static synchronized void reset() {
         isInitialized = false;
         configString = null;
+        lastARC = "";
         pinningInterceptor = null;
         okHttpBuilders = null;
         okHttpClients = null;
@@ -848,6 +854,7 @@ public class ApproovService {
         Approov.TokenFetchResult approovResults;
         try {
             approovResults = Approov.fetchSecureStringAndWait("precheck-dummy-key", null);
+            recordLastARC(approovResults);
             Log.d(TAG, "precheck: " + approovResults.getStatus().toString());
         } catch (IllegalStateException e) {
             throw new ApproovException(e);
@@ -941,6 +948,7 @@ public class ApproovService {
         Approov.TokenFetchResult approovResults;
         try {
             approovResults = Approov.fetchApproovTokenAndWait(url);
+            recordLastARC(approovResults);
             Log.d(TAG, "fetchToken: " + approovResults.getStatus().toString());
         } catch (IllegalStateException e) {
             throw new ApproovException(e);
@@ -1101,6 +1109,7 @@ public class ApproovService {
         Approov.TokenFetchResult approovResults;
         try {
             approovResults = Approov.fetchSecureStringAndWait(key, newDef);
+            recordLastARC(approovResults);
             Log.d(TAG, "fetchSecureString " + type + ": " + key + ", " + approovResults.getStatus().toString());
         } catch (IllegalStateException e) {
             throw new ApproovException(e);
@@ -1138,6 +1147,7 @@ public class ApproovService {
         Approov.TokenFetchResult approovResults;
         try {
             approovResults = Approov.fetchCustomJWTAndWait(payload);
+            recordLastARC(approovResults);
             Log.d(TAG, "fetchCustomJWT: " + approovResults.getStatus().toString());
         } catch (IllegalStateException e) {
             throw new ApproovException(e);
@@ -1151,56 +1161,34 @@ public class ApproovService {
     }
 
     /**
-     * Gets the last ARC (Attestation Response Code) code.
+     * Gets the Attestation Response Code (ARC) from the most recent token, secure
+     * string or custom JWT fetch performed by this layer, whether from the
+     * interceptor or from a direct method. Returns an empty string if no fetch has
+     * been made since initialization, if the last fetch produced no ARC, or if ARC
+     * is not enabled for the account. This performs no network activity: it reports
+     * the result the app already received, so it can be read after a rejected
+     * request to correlate with the backend's view.
      *
-     * Always resolves with a string (ARC or empty string).
-     * NOTE: You MUST only call this method upon succesfull attestation completion.
-     * Any networking
-     * errors returned from the service layer will not return a meaningful ARC code
-     * if the method is called!!!
-     * 
-     * @return String ARC from last attestation request or empty string if network
-     *         unavailable
+     * @return the ARC of the most recent fetch, or an empty string
      */
-    public static String getLastARC() {
+    public static synchronized String getLastARC() {
         if (!isApproovEnabled()) {
             Log.e(TAG, "getLastARC: SDK not initialized");
             return "";
         }
-        // Get the dynamic pins from Approov
-        Map<String, List<String>> approovPins = Approov.getPins("public-key-sha256");
-        if (approovPins == null || approovPins.isEmpty()) {
-            Log.e(TAG, "ApproovService: no host pinning information available");
-            return "";
-        }
-        // The approovPins contains a map of hostnames to pin strings. Skip '*' and use
-        // another hostname if available.
-        String hostname = null;
-        for (String key : approovPins.keySet()) {
-            if (!"*".equals(key)) {
-                hostname = key;
-                break;
-            }
-        }
-        if (hostname != null) {
-            try {
-                Approov.TokenFetchResult result = Approov.fetchApproovTokenAndWait(hostname);
-                if (result.getToken() != null && !result.getToken().isEmpty()) {
-                    String arc = result.getARC();
-                    if (arc != null) {
-                        return arc;
-                    }
-                }
-                Log.i(TAG, "ApproovService: ARC code unavailable");
-                return "";
-            } catch (Exception e) {
-                Log.e(TAG, "ApproovService: error fetching ARC", e);
-                return "";
-            }
-        } else {
-            Log.i(TAG, "ApproovService: ARC code unavailable");
-            return "";
-        }
+        return lastARC;
+    }
+
+    /**
+     * Records the ARC carried by a fetch result as the most recent one, for
+     * getLastARC. An empty or null ARC clears the previous value, matching the SDK
+     * semantics of the ARC belonging to the last fetch.
+     *
+     * @param approovResults the fetch result just obtained
+     */
+    static synchronized void recordLastARC(Approov.TokenFetchResult approovResults) {
+        String arc = (approovResults != null) ? approovResults.getARC() : null;
+        lastARC = (arc != null) ? arc : "";
     }
 
     /**
@@ -1427,6 +1415,7 @@ class ApproovTokenInterceptor implements Interceptor {
 
         // request an Approov token for the request URL
         Approov.TokenFetchResult approovResults = Approov.fetchApproovTokenAndWait(url.toString());
+        ApproovService.recordLastARC(approovResults);
 
         // provide information about the obtained token or error (note "approov token
         // -check" can be used to check the validity of the token and if you use token
@@ -1481,6 +1470,7 @@ class ApproovTokenInterceptor implements Interceptor {
             String value = request.header(header);
             if ((value != null) && value.startsWith(prefix) && (value.length() > prefix.length())) {
                 approovResults = Approov.fetchSecureStringAndWait(value.substring(prefix.length()), null);
+                ApproovService.recordLastARC(approovResults);
                 Log.d(TAG, "Substituting header: " + header + ", " + approovResults.getStatus().toString());
                 // a failed substitution leaves the placeholder value in the header and the
                 // request proceeds: the backend sees the placeholder and decides
@@ -1506,6 +1496,7 @@ class ApproovTokenInterceptor implements Interceptor {
                 // up the existing value as a key for a secure string
                 String queryValue = matcher.group(1);
                 approovResults = Approov.fetchSecureStringAndWait(queryValue, null);
+                ApproovService.recordLastARC(approovResults);
                 Log.d(TAG, "Substituting query parameter: " + queryKey + ", " + approovResults.getStatus().toString());
                 if (mutator.handleInterceptorQueryParamSubstitutionResult(approovResults, queryKey)) {
                     // substitute the query parameter
@@ -1635,6 +1626,7 @@ class ApproovFreshnessInterceptor implements Interceptor {
         // cached token is still valid this returns immediately, otherwise a fresh
         // token is fetched
         Approov.TokenFetchResult approovResults = Approov.fetchApproovTokenAndWait(freshness.getFetchURL());
+        ApproovService.recordLastARC(approovResults);
         Log.d(TAG, "Refreshed token for " + freshness.getFetchURL() + ": " + approovResults.getLoggableToken());
 
         // force a pinning rebuild if there is any dynamic config update

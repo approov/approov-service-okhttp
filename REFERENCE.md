@@ -624,10 +624,10 @@ fun fetchCustomJWT(payload: String): String
 This throws `ApproovException` if there was a problem obtaining the custom JWT. This may require network access so may take some time to complete, and should not be called from the UI thread.
 
 ## getLastARC
-Obtains the last [Attestation Response Code](https://ext.approov.io/docs/latest/approov-usage-documentation/#attestation-response-code) provided a network request to the Approov servers has succeeded. 
+Gets the [Attestation Response Code](https://approov.io/docs/latest/approov-usage-documentation/#attestation-response-code) from the most recent token, secure string or custom JWT fetch made by this layer, from the interceptor or a direct method. Returns an empty string if no fetch has been made since initialization, if the last fetch produced no ARC, or if ARC is not enabled for the account. No network activity is performed: the value is the one the app already received, so read it after a rejected request to correlate with the backend. Prefer logging the ARC your backend observed where possible.
 
 **Java:**
-```Java
+```java
 String getLastARC()
 ```
 
@@ -635,8 +635,6 @@ String getLastARC()
 ```kotlin
 fun getLastARC(): String
 ```
-
-In the event of no network available this function returns an empty string. This function should be used with *CAUTION* and instead rely on a customized error response from the server which includes the `ARC` code if one is available. 
 
 ## setInstallAttrsInToken
 Sets an [install attributes token](https://approov.io/docs/latest/approov-usage-documentation/#application-installation-attributes) to be sent to the server and associated with this particular app installation for future Approov token fetches.
