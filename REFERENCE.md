@@ -11,9 +11,11 @@ import io.approov.service.okhttp.ApproovService;
 import io.approov.service.okhttp.ApproovService
 ```
 
-Various methods may throw an `ApproovException` if there is a problem. The method `getMessage()` provides a descriptive message.
+The request path never throws for a runtime condition: a request made through an `OkHttpClient` from `getOkHttpClient` always proceeds, with the fetch status on the `Approov-Status` header and an empty `Approov-Token` header if it could not be protected (see [ADVANCED.md](ADVANCED.md)). The exceptions below are thrown by the direct methods (`precheck`, `fetchToken`, `fetchSecureString`, `fetchCustomJWT`, ...), which return a value to the caller, and by a custom `ApproovServiceMutator` that chooses to fail closed.
 
-If a method throws an `ApproovNetworkException` (a subclass of `ApproovException`) then this indicates the problem was caused by a networking issue, and a user initiated retry should be allowed.
+Various methods may throw an `ApproovException` (an `IOException`) if there is a problem. The method `getMessage()` provides a descriptive message. An `ApproovFetchStatusException` (a subclass of `ApproovException`) carries the SDK fetch status in `getStatus()`.
+
+If a method throws an `ApproovNetworkException` (a subclass of `ApproovFetchStatusException`) then this indicates the problem was caused by a networking issue (`NO_NETWORK`, `POOR_NETWORK` or `UNTRUSTED_NETWORK`), and a user initiated retry should be allowed.
 
 If a method throws an `ApproovRejectionException` (a subclass of `ApproovException`) the this indicates the problem was that the app failed attestation. An additional method `getARC()` provides the [Attestation Response Code](https://approov.io/docs/latest/approov-usage-documentation/#attestation-response-code), which could be provided to the user for communication with your app support to determine the reason for failure, without this being revealed to the end user. The method `getRejectionReasons()` provides the [Rejection Reasons](https://approov.io/docs/latest/approov-usage-documentation/#rejection-reasons) if the feature is enabled, providing a comma separated list of reasons why the app attestation was rejected.
 
@@ -89,46 +91,6 @@ fun isApproovEnabled(): Boolean
 Returns `true` only when the service layer was initialized with a valid, non-empty configuration string and the native Approov SDK is active. Returns `false` in all other cases: not initialized, or initialized in bypass mode (empty config). All direct Approov SDK methods (such as `fetchToken`, `precheck`, `fetchSecureString`) will throw `ApproovException` if called when this returns `false`.
 
 
-## setApproovInterceptorExtensions
-
-**OBSOLETED**: Use `setServiceMutator` instead.
-
-Sets the interceptor extensions callback handler. This facility supports message signing that is independent from the rest of the attestation flow. The default ApproovService layer issues no callbacks. Provide a non-null handler to add functionality to the attestation flow. The configuration used to control installation message signing is passed in the `mutator` parameter. The behavior of the provided configuration must remain constant while in use by the ApproovService. Passing `null` to this method will disable message signing.
-
-This is a deprecated alias for `setServiceMutator`; the parameter is an `ApproovServiceMutator` (the legacy `ApproovInterceptorExtensions` interface is a deprecated subtype of it).
-
-**Java:**
-```java
-void setApproovInterceptorExtensions(ApproovServiceMutator mutator)
-```
-
-**Kotlin:**
-```kotlin
-fun setApproovInterceptorExtensions(mutator: ApproovServiceMutator)
-```
-
-Provide an ApproovDefaultMessageSigning object instantiated as shown below to enable installation message signing:
-
-**Java:**
-```java
-    ApproovService.setApproovInterceptorExtensions(
-        new ApproovDefaultMessageSigning().setDefaultFactory(
-            ApproovDefaultMessageSigning.generateDefaultSignatureParametersFactory()));
-```
-
-**Kotlin:**
-```kotlin
-    ApproovService.setApproovInterceptorExtensions(
-        ApproovDefaultMessageSigning().setDefaultFactory(
-            ApproovDefaultMessageSigning.generateDefaultSignatureParametersFactory()))
-```
-
-This default setup provides a basic signature mechanism that is not specific to the requests that are issued by an app.
-
-The default signature parameter factory returned by `ApproovDefaultMessageSigning.generateDefaultSignatureParametersFactory` can be customized by calling further methods. Please refer to the code for the `SignatureParametersFactory` class in the [approov-service-okhttp](https://github.com/approov/approov-service-okhttp) repository's [`ApproovDefaultMessageSigning.java`](https://github.com/approov/approov-service-okhttp/blob/main/approov-service/src/main/java/io/approov/service/okhttp/ApproovDefaultMessageSigning.java) source file for information on the available options. Alternatively, you can extend the `SignatureParametersFactory` class and provide an object of the derived class as the argument to `ApproovDefaultMessageSigning().setDefaultFactory`.
-
-Additionally, you can provide a custom implementation of the [`ApproovInterceptorExtensions`](https://github.com/approov/approov-service-okhttp/blob/main/approov-service/src/main/java/io/approov/service/okhttp/ApproovInterceptorExtensions.java) interface to have full control of the message signing. Please see the implementation of the class `ApproovDefaultMessageSigning` in [`ApproovDefaultMessageSigning.java`](https://github.com/approov/approov-service-okhttp/blob/main/approov-service/src/main/java/io/approov/service/okhttp/ApproovDefaultMessageSigning.java) for an example.
-
 ## getOkHttpClient
 Gets the default `OkHttpClient` that enables the Approov service. This adds the Approov token in a header to requests, performs and header or query parameter substitutions and also pins the connections. The `OkHttpClient` is constructed lazily on demand but is cached if there are no changes.
 
@@ -181,36 +143,8 @@ void setOkHttpClientBuilder(String builderName, OkHttpClient.Builder builder)
 fun setOkHttpClientBuilder(builderName: String, builder: OkHttpClient.Builder)
 ```
 
-## setProceedOnNetworkFail
-
-> **OBSOLETE:** This legacy configuration is now a functional no-op do-nothing method. Use `ApproovServiceMutator` to manually bypass exceptions for network failures if required.
-
-**Java:**
-```Java
-void setProceedOnNetworkFail(boolean proceed)
-```
-
-**Kotlin:**
-```kotlin
-fun setProceedOnNetworkFail(proceed: Boolean)
-```
-
-
-## setUseApproovStatusIfNoToken
-If the provided `shouldUse` value is `true` then this indicates that the Approov fetch status (e.g. "NO_NETWORK", "MITM_DETECTED") should be used as the token header value if the actual token fetch fails or returns an empty token. This allows passing error condition information to the backend via the Approov-Token header, which might otherwise be empty or missing.
-
-**Java:**
-```Java
-void setUseApproovStatusIfNoToken(boolean shouldUse)
-```
-
-**Kotlin:**
-```kotlin
-fun setUseApproovStatusIfNoToken(shouldUse: Boolean)
-```
-
 ## setServiceMutator
-Sets the `ApproovServiceMutator` instance to handle callbacks from the ApproovService implementation. This facility enables customization of ApproovService operations at key points in the configuration and attestation flows.
+Sets the `ApproovServiceMutator` instance to handle callbacks from the ApproovService implementation. This facility enables customization of ApproovService operations at key points in the configuration and attestation flows; see [ADVANCED.md](ADVANCED.md) for the hooks and examples.
 
 **Java:**
 ```java
@@ -222,7 +156,38 @@ void setServiceMutator(ApproovServiceMutator mutator)
 fun setServiceMutator(mutator: ApproovServiceMutator?)
 ```
 
-Passing `null` reinstates the default behavior.
+The mutator installed by `initialize` is the one returned by `createDefaultServiceMutator`: the standard decisions plus message signing with both the install and the account signatures. Passing `null` reinstates that default. Passing `ApproovServiceMutator.DEFAULT` keeps the standard decisions with message signing switched off. To customize the signatures provide an `ApproovDefaultMessageSigning` configured with a `SignatureParametersFactory`:
+
+**Java:**
+```java
+    ApproovService.setServiceMutator(
+        new ApproovDefaultMessageSigning().setDefaultFactory(
+            ApproovDefaultMessageSigning.generateDefaultSignatureParametersFactory()
+                .setUseInstallMessageSigning()));
+```
+
+**Kotlin:**
+```kotlin
+    ApproovService.setServiceMutator(
+        ApproovDefaultMessageSigning().setDefaultFactory(
+            ApproovDefaultMessageSigning.generateDefaultSignatureParametersFactory()
+                .setUseInstallMessageSigning()))
+```
+
+The default decisions of `ApproovServiceMutator` never abort a request: `handleInterceptorFetchTokenResult` returns `true` for every status except `UNKNOWN_URL` and `UNPROTECTED_URL` (for which it returns `false` so that no Approov headers are sent), and the substitution decisions return `true` only for `SUCCESS`. A custom mutator may throw an `ApproovException` from any interceptor hook to fail closed; that is an explicit integrator decision.
+
+## createDefaultServiceMutator
+Creates the mutator that `initialize` installs out of the box: an `ApproovDefaultMessageSigning` configured with `generateDefaultSignatureParametersFactory()`, producing both the install (`ecdsa-p256-sha256`) and the account (`hmac-sha256`) signatures as members `install` and `account` of the `Signature` and `Signature-Input` headers.
+
+**Java:**
+```java
+ApproovServiceMutator createDefaultServiceMutator()
+```
+
+**Kotlin:**
+```kotlin
+fun createDefaultServiceMutator(): ApproovServiceMutator
+```
 
 ## getServiceMutator
 Gets the active service mutator instance.
@@ -250,70 +215,99 @@ void setDevKey(String devKey)
 fun setDevKey(devKey: String)
 ```
 
-## setApproovHeader
-Sets the `header` that the Approov token is added on, as well as an optional `prefix` String (such as "`Bearer `"). Set `prefix` to the empty string if it is not required. By default the token is provided on `Approov-Token` with no prefix.
+## setTokenHeader
+Sets the `header` that the Approov token is added on, as well as an optional `prefix` String (such as "`Bearer `"). Pass `null` or the empty string for `prefix` if it is not required; `null` never prepends the literal string "null". By default the token is provided on `Approov-Token` with no prefix. If no token could be obtained the header is still sent, with an empty value after any prefix, and the status is reported on the status header (see `setStatusHeader`). Failure information is never placed in this header.
 
 **Java:**
 ```Java
-void setApproovHeader(String header, String prefix)
+void setTokenHeader(String header, String prefix)
 ```
 
 **Kotlin:**
 ```kotlin
-fun setApproovHeader(header: String, prefix: String?)
+fun setTokenHeader(header: String, prefix: String?)
 ```
 
-## getApproovTokenHeader
+## getTokenHeader
 Gets the name of the header used to carry the Approov token.
 
 **Java:**
 ```java
-String getApproovTokenHeader()
+String getTokenHeader()
 ```
 
 **Kotlin:**
 ```kotlin
-fun getApproovTokenHeader(): String
+fun getTokenHeader(): String
 ```
 
-## getApproovTokenPrefix
+## getTokenPrefix
 Gets any prefix string (e.g., "Bearer ") being added to the Approov token header value.
 
 **Java:**
 ```java
-String getApproovTokenPrefix()
+String getTokenPrefix()
 ```
 
 **Kotlin:**
 ```kotlin
-fun getApproovTokenPrefix(): String
+fun getTokenPrefix(): String
 ```
 
-## setApproovTraceIDHeader
-Sets the header name used to provide the optional Approov TraceID debug value. Passing `null` disables the TraceID header.
+## setTraceIDHeader
+Sets the header name used to provide the optional Approov TraceID debug value. By default this is `Approov-TraceID`. Passing `null` disables the TraceID header.
 
 **Java:**
 ```java
-void setApproovTraceIDHeader(String header)
+void setTraceIDHeader(String header)
 ```
 
 **Kotlin:**
 ```kotlin
-fun setApproovTraceIDHeader(header: String?)
+fun setTraceIDHeader(header: String?)
 ```
 
-## getApproovTraceIDHeader
+## getTraceIDHeader
 Gets the header name currently used for the Approov TraceID. Returns `null` if disabled.
 
 **Java:**
 ```java
-String getApproovTraceIDHeader()
+String getTraceIDHeader()
 ```
 
 **Kotlin:**
 ```kotlin
-fun getApproovTraceIDHeader(): String?
+fun getTraceIDHeader(): String?
 ```
+
+## setStatusHeader
+Sets the name of the header used to report the Approov token fetch status to the backend on every request processed by Approov. By default this is `Approov-Status`. The value is the SDK fetch status name in lowercase (`success`, `no_network`, `poor_network`, `untrusted_network`, `no_approov_service`, `rejected`, `internal_error`, ...), identical on Android and iOS. It is sent on successful requests too, and never on requests to domains not protected by Approov. With the default message signing the header is covered by the signatures. Passing `null` disables the header, in which case a request that could not be protected is sent with an empty token header and no explanation.
+
+**Java:**
+```java
+void setStatusHeader(String header)
+```
+
+**Kotlin:**
+```kotlin
+fun setStatusHeader(header: String?)
+```
+
+## getStatusHeader
+Gets the header name currently used to report the Approov fetch status. Returns `null` if disabled.
+
+**Java:**
+```java
+String getStatusHeader()
+```
+
+**Kotlin:**
+```kotlin
+fun getStatusHeader(): String?
+```
+
+## Deprecated header aliases
+`setApproovHeader(header, prefix)`, `setApproovTraceIDHeader(header)`, `getApproovTokenHeader()`, `getApproovTokenPrefix()` and `getApproovTraceIDHeader()` remain as deprecated aliases of `setTokenHeader`, `setTraceIDHeader`, `getTokenHeader`, `getTokenPrefix` and `getTraceIDHeader`, which are the names used by every Approov service layer.
 
 ## setBindingHeader
 Sets a binding `header` that may be present on requests being made. This is for the [token binding](https://approov.io/docs/latest/approov-usage-documentation/#token-binding) feature. A header should be chosen whose value is unchanging for most requests (such as an Authorization header). If the `header` is present, then its SHA256 hash is supplied to Approov so the issued token can carry the corresponding `pay` claim and be bound to the value. This may then be verified by the backend API integration.

@@ -338,7 +338,225 @@ public class ApproovServiceMiniSdkTest {
             // SDK provides one) as evidence of Approov processing — §2 Missing Artifacts Fallback.
             assertEquals("", getHeader(reply, "Approov-Token"));
             assertNotNull(getHeader(reply, "Approov-TraceID"));
+            // 3.7.0 §4: the status is reported on the status header
+            assertEquals("no_approov_service", getHeader(reply, "Approov-Status"));
         }
+    }
+
+    // ==================================================================================
+    // 3.7.0 Behaviour-Spec §1 always proceed, §4 status header (T37-01, T37-05, T37-06, T37-07)
+    // ==================================================================================
+
+    /**
+     * T37-01 / T37-05: every token fetch failure status proceeds with an empty
+     * Approov-Token header and the lowercased status on Approov-Status. The token
+     * header never carries the status.
+     */
+    @Test
+    public void testEveryTokenFetchFailureProceedsAndReportsOnStatusHeader() throws Exception {
+        String[] statuses = {"NO_NETWORK", "POOR_NETWORK", "NO_APPROOV_SERVICE", "INTERNAL_ERROR", "REJECTED"};
+        for (String status : statuses) {
+            reinitializeServiceWithTargetHost("");
+            setDirective("{" +
+                "  \"operation\": \"fetchApproovToken\"," +
+                "  \"response\": {" +
+                "    \"status\": \"" + status + "\"" +
+                "  }" +
+                "}");
+            // no message signing so that the headers under test are isolated
+            ApproovService.setServiceMutator(ApproovServiceMutator.DEFAULT);
+
+            OkHttpClient client = ApproovService.getOkHttpClient();
+            Request request = new Request.Builder().url(getTargetURL()).get().build();
+            try (Response response = client.newCall(request).execute()) {
+                assertEquals(status, 200, response.code());
+                JSONObject reply = new JSONObject(response.body().string());
+                assertEquals(status, "", getHeader(reply, "Approov-Token"));
+                assertEquals(status, status.toLowerCase(), getHeader(reply, "Approov-Status"));
+            }
+        }
+    }
+
+    /**
+     * T37-05: a successful request reports "success" on the status header too, so the
+     * backend can tell a stripped header from a genuine failure, and any value the
+     * app set itself is replaced (the layer owns the header).
+     */
+    @Test
+    public void testSuccessfulRequestReportsSuccessOnStatusHeader() throws Exception {
+        reinitializeServiceWithTargetHost("");
+        OkHttpClient client = ApproovService.getOkHttpClient();
+        Request request = new Request.Builder().url(getTargetURL())
+            .header("Approov-Status", "forged").get().build();
+        try (Response response = client.newCall(request).execute()) {
+            JSONObject reply = new JSONObject(response.body().string());
+            String token = getHeader(reply, "Approov-Token");
+            assertNotNull(token);
+            assertFalse(token.isEmpty());
+            assertEquals("success", getHeader(reply, "Approov-Status"));
+        }
+
+        // no Approov headers at all for a domain not protected by Approov
+        Request unprotected = new Request.Builder().url(getUnprotectedURL()).get().build();
+        try (Response response = client.newCall(unprotected).execute()) {
+            JSONObject reply = new JSONObject(response.body().string());
+            assertNull(getHeader(reply, "Approov-Token"));
+            assertNull(getHeader(reply, "Approov-Status"));
+        }
+    }
+
+    /**
+     * T37-06: the status header can be renamed, and disabled with null; disabling
+     * it changes nothing else about the request.
+     */
+    @Test
+    public void testStatusHeaderCanBeRenamedAndDisabled() throws Exception {
+        reinitializeServiceWithTargetHost("");
+        ApproovService.setServiceMutator(ApproovServiceMutator.DEFAULT);
+        assertEquals("Approov-Status", ApproovService.getStatusHeader());
+
+        // renamed
+        ApproovService.setStatusHeader("X-Approov-Fetch-Status");
+        setDirective("{\"operation\": \"fetchApproovToken\", \"response\": {\"status\": \"NO_NETWORK\"}}");
+        OkHttpClient client = ApproovService.getOkHttpClient();
+        Request request = new Request.Builder().url(getTargetURL()).get().build();
+        try (Response response = client.newCall(request).execute()) {
+            JSONObject reply = new JSONObject(response.body().string());
+            assertEquals("", getHeader(reply, "Approov-Token"));
+            assertNull(getHeader(reply, "Approov-Status"));
+            assertEquals("no_network", getHeader(reply, "X-Approov-Fetch-Status"));
+        }
+
+        // disabled
+        ApproovService.setStatusHeader(null);
+        assertNull(ApproovService.getStatusHeader());
+        setDirective("{\"operation\": \"fetchApproovToken\", \"response\": {\"status\": \"NO_NETWORK\"}}");
+        try (Response response = client.newCall(request).execute()) {
+            assertEquals(200, response.code());
+            JSONObject reply = new JSONObject(response.body().string());
+            assertEquals("", getHeader(reply, "Approov-Token"));
+            assertNotNull(getHeader(reply, "Approov-TraceID"));
+            assertNull(getHeader(reply, "Approov-Status"));
+            assertNull(getHeader(reply, "X-Approov-Fetch-Status"));
+        }
+    }
+
+    /**
+     * T37-07 / M37-08: a secure string failure after a successful token fetch
+     * proceeds instead of throwing. The header keeps its placeholder value, the
+     * token is still sent, and the status header still reports the token fetch
+     * ("success"): substitution failures are not reported, the placeholder is the
+     * evidence.
+     */
+    @Test
+    public void testSecureStringHeaderRejectionProceedsWithPlaceholder() throws Exception {
+        String targetHost = getTargetHost();
+        reinitializeService(scenarioJson(uniqueCaseName("subst-rejected"),
+            "\"protectedDomains\": [\"" + targetHost + "\"]," +
+            "\"initialSecureStrings\": {\"header-key\": \"header-secret\"}"
+        ));
+        ApproovService.setServiceMutator(ApproovServiceMutator.DEFAULT);
+        ApproovService.addSubstitutionHeader("Api-Key", null);
+        setDirective("{\"operation\": \"fetchSecureString\", \"response\": {\"status\": \"REJECTED\"}}");
+
+        OkHttpClient client = ApproovService.getOkHttpClient();
+        Request request = new Request.Builder().url(getTargetURL())
+            .header("Api-Key", "header-key").get().build();
+        try (Response response = client.newCall(request).execute()) {
+            assertEquals(200, response.code());
+            JSONObject reply = new JSONObject(response.body().string());
+            String token = getHeader(reply, "Approov-Token");
+            assertNotNull(token);
+            assertFalse(token.isEmpty());
+            assertEquals("header-key", getHeader(reply, "Api-Key"));
+            assertEquals("success", getHeader(reply, "Approov-Status"));
+        }
+    }
+
+    /**
+     * T37-07: a secure string query parameter failure proceeds with the placeholder
+     * left in the URL, and an unknown key is treated the same way.
+     */
+    @Test
+    public void testSecureStringQueryFailureProceedsWithPlaceholder() throws Exception {
+        String targetHost = getTargetHost();
+        reinitializeService(scenarioJson(uniqueCaseName("query-failed"),
+            "\"protectedDomains\": [\"" + targetHost + "\"]," +
+            "\"initialSecureStrings\": {\"query-key\": \"query-secret\"}"
+        ));
+        ApproovService.setServiceMutator(ApproovServiceMutator.DEFAULT);
+        ApproovService.addSubstitutionQueryParam("api_key");
+        OkHttpClient client = ApproovService.getOkHttpClient();
+
+        setDirective("{\"operation\": \"fetchSecureString\", \"response\": {\"status\": \"NO_APPROOV_SERVICE\"}}");
+        Request request = new Request.Builder().url(getTargetURL() + "?api_key=query-key").get().build();
+        try (Response response = client.newCall(request).execute()) {
+            assertEquals(200, response.code());
+            JSONObject reply = new JSONObject(response.body().string());
+            assertTrue(reply.getString("url").contains("api_key=query-key"));
+            assertEquals("success", getHeader(reply, "Approov-Status"));
+        }
+
+        Request unknown = new Request.Builder().url(getTargetURL() + "?api_key=not-a-secure-string").get().build();
+        try (Response response = client.newCall(unknown).execute()) {
+            assertEquals(200, response.code());
+            JSONObject reply = new JSONObject(response.body().string());
+            assertTrue(reply.getString("url").contains("api_key=not-a-secure-string"));
+            assertEquals("success", getHeader(reply, "Approov-Status"));
+        }
+    }
+
+    /**
+     * 3.7.0 §3/§4: a request sent with an empty Approov-Token (token fetch failed)
+     * is still signed by the default mutator, with both the empty token header and
+     * the status header covered. An empty header value is a legal covered component
+     * (RFC 9421 §2.1), so the backend can verify that the reported status came from
+     * a genuine app installation.
+     */
+    @Test
+    public void testFailedTokenFetchStillSignedWithTokenAndStatusHeadersCovered() throws Exception {
+        reinitializeServiceWithTargetHost("");
+        setDirective("{\"operation\": \"fetchApproovToken\", \"response\": {\"status\": \"NO_APPROOV_SERVICE\"}}");
+        OkHttpClient client = ApproovService.getOkHttpClient();
+        Request request = new Request.Builder().url(getTargetURL()).get().build();
+        try (Response response = client.newCall(request).execute()) {
+            JSONObject reply = new JSONObject(response.body().string());
+            assertEquals("", getHeader(reply, "Approov-Token"));
+            assertEquals("no_approov_service", getHeader(reply, "Approov-Status"));
+            String signatureInput = getHeader(reply, "Signature-Input");
+            assertNotNull(signatureInput);
+            assertTrue(signatureInput, signatureInput.contains("\"approov-token\""));
+            assertTrue(signatureInput, signatureInput.contains("\"approov-status\""));
+            assertTrue(signatureInput, signatureInput.startsWith("install=("));
+            assertTrue(signatureInput, signatureInput.contains(", account=("));
+            assertNotNull(getHeader(reply, "Signature"));
+        }
+    }
+
+    /**
+     * Common service layer interface names (§7): setTokenHeader / setTraceIDHeader
+     * are the names, and the okhttp-specific setApproovHeader /
+     * setApproovTraceIDHeader remain as deprecated aliases.
+     */
+    @Test
+    @SuppressWarnings("deprecation")
+    public void testHeaderSetterNamesAndDeprecatedAliases() throws Exception {
+        reinitializeServiceWithTargetHost("");
+        assertEquals("Approov-Token", ApproovService.getTokenHeader());
+        assertEquals("", ApproovService.getTokenPrefix());
+        assertEquals("Approov-TraceID", ApproovService.getTraceIDHeader());
+
+        ApproovService.setTokenHeader("Authorization", "Bearer ");
+        ApproovService.setTraceIDHeader("X-Trace");
+        assertEquals("Authorization", ApproovService.getApproovTokenHeader());
+        assertEquals("Bearer ", ApproovService.getApproovTokenPrefix());
+        assertEquals("X-Trace", ApproovService.getApproovTraceIDHeader());
+
+        ApproovService.setApproovHeader("X-Token", null);
+        ApproovService.setApproovTraceIDHeader(null);
+        assertEquals("X-Token", ApproovService.getTokenHeader());
+        assertEquals("", ApproovService.getTokenPrefix());
+        assertNull(ApproovService.getTraceIDHeader());
     }
 
     /**
@@ -458,12 +676,17 @@ public class ApproovServiceMiniSdkTest {
     }
 
     /**
-     * §2 Token Fallback Status (error status mapping)
+     * 3.7.0 §2 (Behaviour-Spec): MITM_DETECTED is dropped on the Approov channel.
      *
-     * MITM_DETECTED → ApproovNetworkException
+     * The 3.7.0 SDK replaces MITM_DETECTED with UNTRUSTED_NETWORK in
+     * Approov.TokenFetchStatus. UNTRUSTED_NETWORK is a network failure and
+     * fetchToken must map it to ApproovNetworkException (T37-03). This cannot be
+     * exercised until the mini SDK carries the 3.7.0 enum (M37-19); the transitional
+     * behaviour asserted here is that MITM_DETECTED, still emitted by the 3.5.x mini
+     * SDK, is no longer classified as a network failure by this layer.
      */
     @Test
-    public void testFetchTokenThrowsNetworkExceptionForMitmDetected() throws Exception {
+    public void testFetchTokenMitmDetectedIsNoLongerANetworkFailure() throws Exception {
         reinitializeServiceWithTargetHost("");
         setDirective("{" +
             "  \"operation\": \"fetchApproovToken\"," +
@@ -474,8 +697,10 @@ public class ApproovServiceMiniSdkTest {
 
         try {
             ApproovService.fetchToken(getTargetURL());
-            fail("Expected ApproovNetworkException");
+            fail("Expected ApproovFetchStatusException");
         } catch (ApproovNetworkException e) {
+            fail("MITM_DETECTED must not be classified as a network failure on 3.7.x");
+        } catch (ApproovFetchStatusException e) {
             assertTrue(e.getMessage().contains("fetchToken: MITM_DETECTED"));
         }
     }
@@ -532,19 +757,21 @@ public class ApproovServiceMiniSdkTest {
     // ==================================================================================
 
     /**
-     * §3 Custom Mutators / Decision Overrides
+     * §3 Service Mutator Override
      *
-     * Overriding the default fail-closed behavior for MITM_DETECTED via a custom
-     * ApproovServiceMutator allows the request to proceed without a token.
+     * A custom ApproovServiceMutator can still decide that a request carries no
+     * Approov headers at all for a given status: returning false from
+     * handleInterceptorFetchTokenResult sends the request untouched, with neither
+     * a token header nor an error header.
      */
     @Test
-    public void testServiceMutatorOverridesFailClosedBehavior() throws Exception {
+    public void testServiceMutatorCanSuppressAllApproovHeaders() throws Exception {
         reinitializeServiceWithTargetHost("");
         
         setDirective("{" +
             "  \"operation\": \"fetchApproovToken\"," +
             "  \"response\": {" +
-            "    \"status\": \"MITM_DETECTED\"" +
+            "    \"status\": \"NO_NETWORK\"" +
             "  }" +
             "}");
             
@@ -562,6 +789,41 @@ public class ApproovServiceMiniSdkTest {
             assertEquals(200, response.code());
             JSONObject reply = new JSONObject(response.body().string());
             assertNull(getHeader(reply, "Approov-Token"));
+            assertNull(getHeader(reply, "Approov-Status"));
+        }
+    }
+
+    /**
+     * §3 Service Mutator Override / 3.7.0 §1 explicit caller error (M37-02)
+     *
+     * A custom mutator remains free to fail closed by throwing: the exception
+     * reaches the caller and no request is sent. This is the integrator's explicit
+     * decision, not a default of the layer.
+     */
+    @Test
+    public void testServiceMutatorCanStillFailClosedByThrowing() throws Exception {
+        reinitializeServiceWithTargetHost("");
+        setDirective("{" +
+            "  \"operation\": \"fetchApproovToken\"," +
+            "  \"response\": {" +
+            "    \"status\": \"NO_NETWORK\"" +
+            "  }" +
+            "}");
+        ApproovService.setServiceMutator(new ApproovServiceMutator() {
+            @Override
+            public boolean handleInterceptorFetchTokenResult(Approov.TokenFetchResult approovResults, String url) throws ApproovException {
+                if (approovResults.getStatus() != Approov.TokenFetchStatus.SUCCESS)
+                    throw new ApproovFetchStatusException(approovResults.getStatus(), "custom: " + approovResults.getStatus());
+                return true;
+            }
+        });
+
+        OkHttpClient client = ApproovService.getOkHttpClient();
+        Request request = new Request.Builder().url(getTargetURL()).get().build();
+        try (Response response = client.newCall(request).execute()) {
+            fail("Expected ApproovFetchStatusException");
+        } catch (ApproovFetchStatusException e) {
+            assertTrue(e.getMessage().contains("custom: NO_NETWORK"));
         }
     }
 
@@ -652,6 +914,75 @@ public class ApproovServiceMiniSdkTest {
     // SECTION 5: Message Signing
     // TESTING_REQUIREMENTS.md §5
     // ==================================================================================
+
+    /**
+     * M37-25 / T37-04: guard the default. Out of the box, with no setServiceMutator
+     * call, every request carrying an Approov token is signed with both the install
+     * and the account signatures as members of the same Signature and
+     * Signature-Input dictionaries. A change of this default cannot ship
+     * unreviewed.
+     */
+    @Test
+    public void testDefaultMutatorSignsWithInstallAndAccountSignatures() throws Exception {
+        reinitializeServiceWithTargetHost("");
+        assertTrue(ApproovService.getServiceMutator() instanceof ApproovDefaultMessageSigning);
+
+        OkHttpClient client = ApproovService.getOkHttpClient();
+        Request request = new Request.Builder().url(getTargetURL()).get().build();
+        try (Response response = client.newCall(request).execute()) {
+            JSONObject reply = new JSONObject(response.body().string());
+            assertNotNull(getHeader(reply, "Approov-Token"));
+
+            String signatureInput = getHeader(reply, "Signature-Input");
+            assertNotNull(signatureInput);
+            assertTrue(signatureInput, signatureInput.startsWith("install=("));
+            assertTrue(signatureInput, signatureInput.contains(", account=("));
+            assertTrue(signatureInput, signatureInput.contains("alg=\"ecdsa-p256-sha256\""));
+            assertTrue(signatureInput, signatureInput.contains("alg=\"hmac-sha256\""));
+
+            String signature = getHeader(reply, "Signature");
+            assertNotNull(signature);
+            assertTrue(signature, signature.startsWith("install=:"));
+            assertTrue(signature, signature.contains(", account=:"));
+            assertTrue(signature, signature.endsWith(":"));
+        }
+
+        // setServiceMutator(null) reinstates the same default, DEFAULT switches signing off
+        ApproovService.setServiceMutator(null);
+        assertTrue(ApproovService.getServiceMutator() instanceof ApproovDefaultMessageSigning);
+        ApproovService.setServiceMutator(ApproovServiceMutator.DEFAULT);
+        try (Response response = client.newCall(request).execute()) {
+            JSONObject reply = new JSONObject(response.body().string());
+            assertNotNull(getHeader(reply, "Approov-Token"));
+            assertNull(getHeader(reply, "Signature"));
+        }
+    }
+
+    /**
+     * 3.7.0 §3: when one of the two default signatures cannot be produced the
+     * request proceeds with the other, rather than unsigned or aborted.
+     */
+    @Test
+    public void testDefaultSigningFallsBackToAccountWhenInstallKeyUnavailable() throws Exception {
+        String targetHost = getTargetHost();
+        reinitializeService(scenarioJson(uniqueCaseName("no-install-key-default"),
+            "\"protectedDomains\": [\"" + targetHost + "\"]," +
+            "\"simulateInstallKeyFailure\": true"));
+
+        OkHttpClient client = ApproovService.getOkHttpClient();
+        Request request = new Request.Builder().url(getTargetURL()).get().build();
+        try (Response response = client.newCall(request).execute()) {
+            assertEquals(200, response.code());
+            JSONObject reply = new JSONObject(response.body().string());
+            String signature = getHeader(reply, "Signature");
+            assertNotNull(signature);
+            assertTrue(signature, signature.startsWith("account=:"));
+            assertFalse(signature, signature.contains("install="));
+            String signatureInput = getHeader(reply, "Signature-Input");
+            assertTrue(signatureInput, signatureInput.startsWith("account=("));
+            assertFalse(signatureInput, signatureInput.contains("install="));
+        }
+    }
 
     /**
      * §5 Install Signature Success / Single Signature Application

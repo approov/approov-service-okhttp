@@ -33,6 +33,7 @@ import java.util.Iterator;
 import java.util.LinkedHashMap;
 import java.util.LinkedHashSet;
 import java.util.List;
+import java.util.Locale;
 import java.util.Map;
 import java.util.Set;
 import java.util.regex.Matcher;
@@ -69,6 +70,11 @@ public class ApproovService {
     // the SDK
     private static final String APPROOV_TRACE_ID_HEADER = "Approov-TraceID";
 
+    // default header that reports the Approov token fetch status for every request
+    // processed by Approov, as the lowercased SDK status name (for example "success"
+    // or "no_network"), so that the backend can tell why a request carries no token
+    private static final String APPROOV_STATUS_HEADER = "Approov-Status";
+
     // default prefix to be added before the Approov token by default
     private static final String APPROOV_TOKEN_PREFIX = "";
 
@@ -88,11 +94,6 @@ public class ApproovService {
     // the config string used for initialization
     private static String configString;
 
-    // true if the Approov fetch status should be used as the token header value if
-    // the
-    // actual token fetch fails or returns an empty token
-    private static boolean useApproovStatusIfNoToken = false;
-
     // the Approov pinning interceptor to be used for all requests
     private static ApproovPinningInterceptor pinningInterceptor = null;
 
@@ -109,6 +110,10 @@ public class ApproovService {
     // SDK
     private static String approovTraceIDHeader = null;
 
+    // header used to report the Approov fetch status to the backend, or null if
+    // disabled
+    private static String approovStatusHeader = null;
+
     // any prefix String to be added before the transmitted Approov token
     private static String approovTokenPrefix = null;
 
@@ -121,11 +126,10 @@ public class ApproovService {
     private static long staleProtectionRefreshMS = DEFAULT_STALE_PROTECTION_REFRESH_MS;
 
     // The mutator instance used to control ApproovService behavior at key points in
-    // the flow.
-    // Unless set using the ApproovService.setServiceMutator() method, the default
-    // behaviour defined in the default implementation of ApproovServiceMutator will
-    // be used.
-    private static ApproovServiceMutator serviceMutator = ApproovServiceMutator.DEFAULT;
+    // the flow. Unless set using the ApproovService.setServiceMutator() method, the
+    // out-of-the-box mutator created by createDefaultServiceMutator() (message
+    // signing with both install and account signatures) is used.
+    private static ApproovServiceMutator serviceMutator = createDefaultServiceMutator();
 
     // map of headers that should have their values substituted for secure strings,
     // mapped to their
@@ -188,10 +192,11 @@ public class ApproovService {
         okHttpClients = new HashMap<>();
         approovTokenHeader = APPROOV_TOKEN_HEADER;
         approovTraceIDHeader = APPROOV_TRACE_ID_HEADER;
+        approovStatusHeader = APPROOV_STATUS_HEADER;
         approovTokenPrefix = APPROOV_TOKEN_PREFIX;
         bindingHeader = null;
         staleProtectionRefreshMS = DEFAULT_STALE_PROTECTION_REFRESH_MS;
-        serviceMutator = ApproovServiceMutator.DEFAULT;
+        serviceMutator = createDefaultServiceMutator();
         substitutionHeaders = new HashMap<>();
         substitutionQueryParams = new HashMap<>();
         exclusionURLRegexs = new HashMap<>();
@@ -244,74 +249,37 @@ public class ApproovService {
     static synchronized void reset() {
         isInitialized = false;
         configString = null;
-        useApproovStatusIfNoToken = false;
         pinningInterceptor = null;
         okHttpBuilders = null;
         okHttpClients = null;
         approovTokenHeader = null;
         approovTraceIDHeader = null;
+        approovStatusHeader = null;
         approovTokenPrefix = APPROOV_TOKEN_PREFIX;
         bindingHeader = null;
         staleProtectionRefreshMS = DEFAULT_STALE_PROTECTION_REFRESH_MS;
-        serviceMutator = ApproovServiceMutator.DEFAULT;
+        serviceMutator = createDefaultServiceMutator();
         substitutionHeaders = null;
         substitutionQueryParams = null;
         exclusionURLRegexs = null;
     }
 
     /**
-     * Sets a flag indicating if the network interceptor should proceed anyway if it
-     * is not possible to obtain an Approov token due to a networking failure.
-     * Note: This method is now obsolete and has no effect. The behavior is
-     * controlled via setServiceMutator.
+     * Creates the mutator that the service layer installs out of the box: the
+     * standard decisions of ApproovServiceMutator plus message signing of every
+     * request carrying an Approov token header with both the install (per app
+     * installation, ECDSA P-256 key held in the device secure hardware) and the
+     * account (shared account key, HMAC-SHA256) signatures. Both are produced so
+     * that devices without secure hardware still yield a verifiable signature;
+     * the backend decides which it accepts. Use setServiceMutator to install a
+     * customized ApproovDefaultMessageSigning, or ApproovServiceMutator.DEFAULT
+     * to switch message signing off.
      *
-     * @param proceed is ignored
-     * @deprecated Use setServiceMutator to control this behavior
+     * @return a new default service mutator instance
      */
-    @Deprecated
-    public static synchronized void setProceedOnNetworkFail(boolean proceed) {
-        Log.d(TAG, "setProceedOnNetworkFail " + proceed);
-    }
-
-    /**
-     * Gets a flag indicating if the network interceptor should proceed anyway if it
-     * is not possible to obtain an Approov token due to a networking failure.
-     * Note: This method is now obsolete and always returns false. The behavior is
-     * controlled via setServiceMutator.
-     *
-     * @return always returns false
-     * @deprecated Use setServiceMutator to control this behavior
-     */
-    @Deprecated
-    public static synchronized boolean getProceedOnNetworkFail() {
-        return false;
-    }
-
-    /**
-     * Sets a flag indicating if the Approov fetch status (e.g. "NO_NETWORK",
-     * "MITM_DETECTED")
-     * should be used as the token header value if the actual token fetch fails or
-     * returns an empty token.
-     * This allows passing error condition information to the backend via the
-     * Approov-Token header,
-     * which might otherwise be empty or missing.
-     *
-     * @param shouldUse is true if the status should be used as the token value
-     */
-    public static synchronized void setUseApproovStatusIfNoToken(boolean shouldUse) {
-        Log.d(TAG, "setUseApproovStatusIfNoToken " + shouldUse);
-        useApproovStatusIfNoToken = shouldUse;
-    }
-
-    /**
-     * Gets a flag indicating if the Approov fetch status should be used as the
-     * token header value
-     * if the actual token fetch fails or returns an empty token.
-     *
-     * @return true if the status should be used as the token value, false otherwise
-     */
-    public static synchronized boolean getUseApproovStatusIfNoToken() {
-        return useApproovStatusIfNoToken;
+    public static ApproovServiceMutator createDefaultServiceMutator() {
+        return new ApproovDefaultMessageSigning().setDefaultFactory(
+                ApproovDefaultMessageSigning.generateDefaultSignatureParametersFactory());
     }
 
     /**
@@ -346,15 +314,37 @@ public class ApproovService {
     /**
      * Sets the header that the Approov token is added on, as well as an optional
      * prefix String (such as "Bearer "). By default the token is provided on
-     * "Approov-Token" with no prefix.
+     * "Approov-Token" with no prefix. If no token could be obtained the header is
+     * still added with an empty value (after any prefix) as evidence that Approov
+     * processing occurred, and the reason is reported on the status header (see
+     * setStatusHeader). Failure information is never placed in this header.
      *
      * @param header is the header to place the Approov token on
-     * @param prefix is any prefix String for the Approov token header
+     * @param prefix is any prefix String for the Approov token header, or null
+     *               for none
      */
-    public static synchronized void setApproovHeader(String header, String prefix) {
-        Log.d(TAG, "setApproovHeader " + header + ", " + prefix);
+    public static synchronized void setTokenHeader(String header, String prefix) {
+        Log.d(TAG, "setTokenHeader " + header + ", " + prefix);
         approovTokenHeader = header;
         approovTokenPrefix = (prefix != null) ? prefix : APPROOV_TOKEN_PREFIX;
+    }
+
+    /**
+     * Gets the header that is used to add the Approov token.
+     *
+     * @return String of the header used for the Approov token
+     */
+    public static synchronized String getTokenHeader() {
+        return approovTokenHeader;
+    }
+
+    /**
+     * Gets the prefix that is added before the Approov token in the header.
+     *
+     * @return String of the prefix added before the Approov token
+     */
+    public static synchronized String getTokenPrefix() {
+        return approovTokenPrefix;
     }
 
     /**
@@ -365,18 +355,9 @@ public class ApproovService {
      * @param header is the name of the header on which to place the Approov
      *               TraceID, or null to disable the header
      */
-    public static synchronized void setApproovTraceIDHeader(String header) {
-        Log.d(TAG, "setApproovTraceIDHeader " + header);
+    public static synchronized void setTraceIDHeader(String header) {
+        Log.d(TAG, "setTraceIDHeader " + header);
         approovTraceIDHeader = header;
-    }
-
-    /**
-     * Gets the header that is used to add the Approov token.
-     *
-     * @return String of the header used for the Approov token
-     */
-    public static synchronized String getApproovTokenHeader() {
-        return approovTokenHeader;
     }
 
     /**
@@ -386,31 +367,105 @@ public class ApproovService {
      * @return String the name of the header used for the Approov TraceID, or
      *         null if disabled
      */
-    public static synchronized String getApproovTraceIDHeader() {
+    public static synchronized String getTraceIDHeader() {
         return approovTraceIDHeader;
     }
 
     /**
-     * Gets the prefix that is added before the Approov token in the header.
+     * Sets the header name that is used to report the Approov token fetch status to
+     * the backend on every request processed by Approov. By default this is
+     * "Approov-Status". The value is the SDK fetch status name in lowercase, for
+     * example "success", "no_network", "untrusted_network", "no_approov_service" or
+     * "rejected", identical on Android and iOS. It is sent on every processed
+     * request, including successful ones, so that the backend can distinguish a
+     * request whose Approov headers were stripped from one that this layer sent
+     * without a token because the fetch failed. It is not sent on requests to
+     * domains that are not protected by Approov. Passing null disables the header,
+     * in which case a request that could not be protected is sent with an empty
+     * token header and no explanation.
      *
-     * @return String of the prefix added before the Approov token
+     * @param header is the name of the header on which to report the Approov fetch
+     *               status, or null to disable the header
      */
-    public static synchronized String getApproovTokenPrefix() {
-        return approovTokenPrefix;
+    public static synchronized void setStatusHeader(String header) {
+        Log.d(TAG, "setStatusHeader " + header);
+        approovStatusHeader = header;
+    }
+
+    /**
+     * Gets the name of the header that is used to report the Approov fetch status.
+     *
+     * @return String the name of the header used for the Approov fetch status, or
+     *         null if disabled
+     */
+    public static synchronized String getStatusHeader() {
+        return approovStatusHeader;
+    }
+
+    /**
+     * Builds the value of the status header from a token fetch result: the SDK
+     * fetch status name in lowercase.
+     *
+     * @param approovResults the token fetch result
+     * @return the value to set on the status header
+     */
+    static String buildStatusHeaderValue(Approov.TokenFetchResult approovResults) {
+        return approovResults.getStatus().name().toLowerCase(Locale.ROOT);
+    }
+
+    /**
+     * @deprecated Use {@link #setTokenHeader(String, String)}, which is the name
+     *             used by every Approov service layer.
+     */
+    @Deprecated
+    public static void setApproovHeader(String header, String prefix) {
+        setTokenHeader(header, prefix);
+    }
+
+    /**
+     * @deprecated Use {@link #setTraceIDHeader(String)}, which is the name used
+     *             by every Approov service layer.
+     */
+    @Deprecated
+    public static void setApproovTraceIDHeader(String header) {
+        setTraceIDHeader(header);
+    }
+
+    /**
+     * @deprecated Use {@link #getTokenHeader()}.
+     */
+    @Deprecated
+    public static String getApproovTokenHeader() {
+        return getTokenHeader();
+    }
+
+    /**
+     * @deprecated Use {@link #getTraceIDHeader()}.
+     */
+    @Deprecated
+    public static String getApproovTraceIDHeader() {
+        return getTraceIDHeader();
+    }
+
+    /**
+     * @deprecated Use {@link #getTokenPrefix()}.
+     */
+    @Deprecated
+    public static String getApproovTokenPrefix() {
+        return getTokenPrefix();
     }
 
     /**
      * Builds the value to be used for the Approov token header from a token
-     * fetch result, accounting for the option to use the fetch status as the
-     * value when no actual token is available.
+     * fetch result. If no token was obtained the value is empty (after any
+     * prefix): failure information is never placed in the token header but is
+     * reported on the status header instead.
      *
      * @param approovResults the token fetch result
      * @return the value to set on the Approov token header
      */
     static String buildTokenHeaderValue(Approov.TokenFetchResult approovResults) {
-        if (approovResults.getToken().isEmpty() && getUseApproovStatusIfNoToken())
-            return getApproovTokenPrefix() + approovResults.getStatus().toString();
-        return getApproovTokenPrefix() + approovResults.getToken();
+        return getTokenPrefix() + approovResults.getToken();
     }
 
     /**
@@ -524,23 +579,17 @@ public class ApproovService {
      *
      * @param mutator is the ApproovServiceMutator with callback handlers that may
      *                override the default behavior of the ApproovService singleton.
-     *                Passing null to this method will reinstate the default
-     *                behavior.
+     *                Passing null to this method reinstates the out-of-the-box
+     *                mutator from createDefaultServiceMutator(), including default
+     *                message signing; pass ApproovServiceMutator.DEFAULT to keep
+     *                the standard decisions without message signing.
      */
     public static synchronized void setServiceMutator(ApproovServiceMutator mutator) {
         if (mutator == null) {
-            mutator = ApproovServiceMutator.DEFAULT;
+            mutator = createDefaultServiceMutator();
         }
         Log.d(TAG, "Applied ApproovServiceMutator:" + mutator.toString());
         serviceMutator = mutator;
-    }
-
-    /**
-     * @deprecated Use setServiceMutator instead
-     */
-    @Deprecated
-    public static void setApproovInterceptorExtensions(ApproovServiceMutator mutator) {
-        setServiceMutator(mutator);
     }
 
     /**
@@ -551,17 +600,6 @@ public class ApproovService {
      */
     public static synchronized ApproovServiceMutator getServiceMutator() {
         return serviceMutator;
-    }
-
-    /**
-     * Gets the interceptor extensions callback handlers.
-     *
-     * @return the interceptor extensions callback handlers or null if none set
-     * @deprecated Use getServiceMutator instead
-     */
-    @Deprecated
-    public static ApproovServiceMutator getApproovInterceptorExtensions() {
-        return getServiceMutator();
     }
 
     /**
@@ -1360,8 +1398,11 @@ class ApproovTokenInterceptor implements Interceptor {
 
     /**
      * Constructs a new interceptor that adds Approov tokens and substitutes headers
-     * or query
-     * parameters.
+     * or query parameters. The request always proceeds: if a token cannot be
+     * obtained the request is sent with an empty token header, and if a secure
+     * string substitution fails the placeholder value is left in place. The
+     * Approov fetch status is reported on the status header for every processed
+     * request.
      */
     public ApproovTokenInterceptor() {
     }
@@ -1388,10 +1429,8 @@ class ApproovTokenInterceptor implements Interceptor {
         Approov.TokenFetchResult approovResults = Approov.fetchApproovTokenAndWait(url.toString());
 
         // provide information about the obtained token or error (note "approov token
-        // -check" can
-        // be used to check the validity of the token and if you use token annotations
-        // they
-        // will appear here to determine why a request is being rejected)
+        // -check" can be used to check the validity of the token and if you use token
+        // annotations they will appear here to determine why a request is being rejected)
         Log.d(TAG, "Token for " + url.toString() + ": " + approovResults.getLoggableToken());
 
         // force a pinning rebuild if there is any dynamic config update
@@ -1403,13 +1442,19 @@ class ApproovTokenInterceptor implements Interceptor {
         String setTokenHeaderValue = null;
         String setTraceIDHeaderKey = null;
         String setTraceIDHeaderValue = null;
+        String setStatusHeaderKey = null;
+        String setStatusHeaderValue = null;
         if (mutator.handleInterceptorFetchTokenResult(approovResults, url.toString())) {
-            // we successfully obtained a token so add it to the header for the request
+            // the request is Approov processed so add the token header (empty if no
+            // token was obtained, as evidence that Approov processing occurred) and
+            // report the fetch status on the status header
             aChange = true;
-            setTokenHeaderKey = ApproovService.getApproovTokenHeader();
+            setTokenHeaderKey = ApproovService.getTokenHeader();
             setTokenHeaderValue = ApproovService.buildTokenHeaderValue(approovResults);
+            setStatusHeaderKey = ApproovService.getStatusHeader();
+            setStatusHeaderValue = ApproovService.buildStatusHeaderValue(approovResults);
 
-            String traceIDHeader = ApproovService.getApproovTraceIDHeader();
+            String traceIDHeader = ApproovService.getTraceIDHeader();
             String traceID = approovResults.getTraceID();
             // Emit the trace header whenever the SDK provides a value, even if it is empty, so the
             // backend has evidence that Approov processing occurred (see Missing Artifacts Fallback).
@@ -1419,18 +1464,15 @@ class ApproovTokenInterceptor implements Interceptor {
                 setTraceIDHeaderValue = traceID;
             }
         } else {
-            // we only continue additional processing if we had a valid status from Approov,
-            // to prevent additional delays
-            // by trying to fetch from Approov again and this also protects against header
-            // substitutions in domains not
-            // protected by Approov and therefore potential subject to a MitM
-            // setTokenHeaderKey and setTokenHeaderValue must be null
+            // the request is not for a domain protected by Approov (or the mutator has
+            // decided it must be sent untouched) so no Approov headers are added: this
+            // also protects against header substitutions in domains not protected by
+            // Approov and therefore potentially subject to a MitM
             return chain.proceed(request);
         }
 
         // we now deal with any header substitutions, which may require further fetches
-        // but these
-        // should be using cached results
+        // but these should be using cached results
         Map<String, String> substitutionHeaders = ApproovService.getSubstitutionHeaders();
         Map<String, String> setSubstitutionHeaders = new LinkedHashMap<>(substitutionHeaders.size());
         for (Map.Entry<String, String> entry : substitutionHeaders.entrySet()) {
@@ -1440,6 +1482,8 @@ class ApproovTokenInterceptor implements Interceptor {
             if ((value != null) && value.startsWith(prefix) && (value.length() > prefix.length())) {
                 approovResults = Approov.fetchSecureStringAndWait(value.substring(prefix.length()), null);
                 Log.d(TAG, "Substituting header: " + header + ", " + approovResults.getStatus().toString());
+                // a failed substitution leaves the placeholder value in the header and the
+                // request proceeds: the backend sees the placeholder and decides
                 if (mutator.handleInterceptorHeaderSubstitutionResult(approovResults, header)) {
                     aChange = true;
                     setSubstitutionHeaders.put(header, prefix + approovResults.getSecureString());
@@ -1448,8 +1492,7 @@ class ApproovTokenInterceptor implements Interceptor {
         }
 
         // we now deal with any query parameter substitutions, which may require further
-        // fetches but these
-        // should be using cached results
+        // fetches but these should be using cached results
         String originalURL = request.url().toString();
         String replacementURL = originalURL;
         Map<String, Pattern> substitutionQueryParams = ApproovService.getSubstitutionQueryParams();
@@ -1460,8 +1503,7 @@ class ApproovTokenInterceptor implements Interceptor {
             Matcher matcher = pattern.matcher(replacementURL);
             if (matcher.find()) {
                 // we have found an occurrence of the query parameter to be replaced so we look
-                // up the existing
-                // value as a key for a secure string
+                // up the existing value as a key for a secure string
                 String queryValue = matcher.group(1);
                 approovResults = Approov.fetchSecureStringAndWait(queryValue, null);
                 Log.d(TAG, "Substituting query parameter: " + queryKey + ", " + approovResults.getStatus().toString());
@@ -1474,6 +1516,7 @@ class ApproovTokenInterceptor implements Interceptor {
                 }
             }
         }
+
         // gather the request changes applied to the request
         ApproovRequestMutations changes = new ApproovRequestMutations();
         // apply all the changes to the request
@@ -1493,6 +1536,12 @@ class ApproovTokenInterceptor implements Interceptor {
             if (setTraceIDHeaderKey != null) {
                 builder.header(setTraceIDHeaderKey, setTraceIDHeaderValue);
                 changes.setTraceIDHeaderKey(setTraceIDHeaderKey);
+            }
+            // report the fetch status on the status header, replacing any value the app
+            // may have set itself so that the backend only sees what this layer observed
+            if (setStatusHeaderKey != null) {
+                builder.header(setStatusHeaderKey, setStatusHeaderValue);
+                changes.setStatusHeaderKey(setStatusHeaderKey);
             }
             if (!setSubstitutionHeaders.isEmpty()) {
                 for (Map.Entry<String, String> entry : setSubstitutionHeaders.entrySet()) {
@@ -1612,6 +1661,10 @@ class ApproovFreshnessInterceptor implements Interceptor {
         // value, while null means the SDK supplied no replacement.
         if ((traceIDHeader != null) && (traceID != null))
             builder.header(traceIDHeader, traceID);
+        // the status header reflects the refreshed token fetch
+        String statusHeader = changes.getStatusHeaderKey();
+        if (statusHeader != null)
+            builder.header(statusHeader, ApproovService.buildStatusHeaderValue(approovResults));
         Request refreshedRequest = builder.build();
 
         // reapply the processed request callback so that any message signature is
@@ -1736,12 +1789,25 @@ class ApproovPinningInterceptor implements Interceptor {
             return chain.proceed(request);
         }
 
-        // certain requests, e.g. those that do not require Approov processing
+        // the pins may not have been available when this interceptor was constructed
+        // (the SDK only holds pins once a token has been fetched for the app
+        // installation) so build them now if there are still none
+        if (getCertificatePinner().getPins().isEmpty())
+            buildPins();
+
         String host = chain.request().url().host();
         Connection connection = chain.connection();
         Handshake handshake = (connection != null) ? connection.handshake() : null;
-        if (handshake == null)
-            throw new ApproovNetworkException("network interceptor has no connection information");
+        if (handshake == null) {
+            // there is no TLS handshake, so this is a cleartext connection: a pinned
+            // host must never be reached without TLS, and the failure is reported with
+            // the same network stack exception as a pin mismatch rather than an Approov
+            // specific one, while an unpinned host is left to the app's own policy
+            if (getCertificatePinner().findMatchingPins(host).isEmpty())
+                return chain.proceed(chain.request());
+            Log.d(TAG, "Pinning failure: cleartext connection to pinned host " + host);
+            throw new SSLPeerUnverifiedException("Approov pinning: cleartext connection to pinned host " + host);
+        }
         if (!isValidHandshake(handshake)) {
             // if we haven't seen this handshake and pins combination before then we
             // need to check it

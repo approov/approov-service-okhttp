@@ -26,6 +26,7 @@ import java.util.List;
 public class ApproovRequestMutations {
     private String tokenHeaderKey;
     private String traceIDHeaderKey;
+    private String statusHeaderKey;
     private List<String> substitutionHeaderKeys;
     private String originalURL;
     private List<String> substitutionQueryParamKeys;
@@ -65,6 +66,26 @@ public class ApproovRequestMutations {
      */
     public void setTraceIDHeaderKey(String traceIDHeaderKey) {
         this.traceIDHeaderKey = traceIDHeaderKey;
+    }
+
+    /**
+     * Gets the header key used for the Approov status header, which reports the
+     * Approov token fetch status (lowercased) for every processed request.
+     *
+     * @return the Approov status header key. Null if the status header is
+     *         disabled.
+     */
+    public String getStatusHeaderKey() {
+        return statusHeaderKey;
+    }
+
+    /**
+     * Sets the header key used for the Approov status header.
+     *
+     * @param statusHeaderKey the Approov status header key
+     */
+    public void setStatusHeaderKey(String statusHeaderKey) {
+        this.statusHeaderKey = statusHeaderKey;
     }
 
     /**

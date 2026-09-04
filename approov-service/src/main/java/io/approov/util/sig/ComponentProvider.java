@@ -78,7 +78,9 @@ public interface ComponentProvider {
 				}
 				sb.append(replacedField);
 			}
-			return sb.length() > 0 ? sb.toString() : null;
+			// RFC 9421 §2.1: a field that is present with an empty value has the
+			// empty string as its component value; only an absent field has none
+			return fields.isEmpty() ? null : sb.toString();
 		}
 	}
 

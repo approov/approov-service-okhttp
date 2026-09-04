@@ -4,6 +4,36 @@ All notable changes to this package will be documented in this file.
 
 The format is based on Keep a Changelog and this project adheres to Semantic Versioning.
 
+## [3.7.0] - Unreleased
+
+This release targets the Approov SDK 3.7.0 and changes the request contract every integration has been coded against. It is the 3.7.x line; the 3.5.x line keeps its current behaviour. See the 3.7.0 behaviour specification for the cross-layer rules.
+
+### Changed
+- **Requests always proceed.** No runtime condition aborts a request on the service layer's behalf any more. A token fetch that fails for any reason (`NO_NETWORK`, `POOR_NETWORK`, `UNTRUSTED_NETWORK`, `NO_APPROOV_SERVICE`, `REJECTED`, `INTERNAL_ERROR`, ...) sends the request with an **empty** `Approov-Token` header, and a secure string substitution that fails leaves the placeholder value in the header or query parameter and sends the request. `UNKNOWN_URL` and `UNPROTECTED_URL` still send the request with no Approov headers at all. The backend is the enforcement point. The default `ApproovServiceMutator` interceptor decisions (`handleInterceptorFetchTokenResult`, `handleInterceptorHeaderSubstitutionResult`, `handleInterceptorQueryParamSubstitutionResult`) no longer throw; a custom mutator may still throw to fail closed, which is an explicit integrator decision.
+- **Message signing is on by default, with both signatures.** `ApproovService.initialize` installs an `ApproovDefaultMessageSigning` mutator (see the new `ApproovService.createDefaultServiceMutator()`) so every request carrying an Approov token header is signed with both the install (`ecdsa-p256-sha256`, member `install`) and the account (`hmac-sha256`, member `account`) signatures, emitted as two members of the same `Signature` and `Signature-Input` dictionaries over the same covered components. A signature that cannot be produced is omitted and the request proceeds with the other, or unsigned. Pass `ApproovServiceMutator.DEFAULT` to `setServiceMutator` to switch signing off; `setServiceMutator(null)` now reinstates the signing default rather than `ApproovServiceMutator.DEFAULT`.
+- `SignatureParametersFactory` gains `setUseInstallAndAccountMessageSigning()` (the new default of `generateDefaultSignatureParametersFactory()`), `getAlgs()` and `setAddApproovStatusHeader(boolean)`. `setUseInstallMessageSigning()` and `setUseAccountMessageSigning()` now select a single signature. The factory no longer sets `alg` on the built `SignatureParameters`; a subclass that does set one produces that single signature (backwards compatible).
+- `MITM_DETECTED` is gone from the Approov channel. The 3.7.0 SDK no longer pins its own attestation channel (an additional encryption layer replaces it), so an intercepting proxy on the attestation path no longer blocks a token fetch, and `Approov.TokenFetchStatus.MITM_DETECTED` is replaced by `UNTRUSTED_NETWORK` (a fundamental TLS trust failure). This layer classifies `UNTRUSTED_NETWORK` as a network failure alongside `NO_NETWORK` and `POOR_NETWORK` (`ApproovServiceMutator.isNetworkFailure`). Pinning of the integrator's own API domains is unchanged and a pin mismatch there still fails the connection.
+- Header configuration uses the common service layer names: `setTokenHeader(header, prefix)`, `getTokenHeader()`, `getTokenPrefix()`, `setTraceIDHeader(header)`, `getTraceIDHeader()`. The okhttp-specific `setApproovHeader`, `setApproovTraceIDHeader`, `getApproovTokenHeader`, `getApproovTokenPrefix` and `getApproovTraceIDHeader` remain as deprecated aliases.
+- `ApproovPinningInterceptor` reports a cleartext (non-TLS) connection to a pinned host with `javax.net.ssl.SSLPeerUnverifiedException`, the same network stack exception as a pin mismatch, instead of the Approov-specific `ApproovNetworkException`; a cleartext connection to a host with no pins is no longer blocked by this layer. The interceptor also rebuilds its pins on first use if none were available when it was constructed, since the 3.7.0 SDK only holds pins once a token has been fetched for the installation.
+
+### Added
+- **`Approov-Status` header** (`setStatusHeader(header)`, `getStatusHeader()`), on by default, carrying the SDK token fetch status in lowercase (`success`, `no_network`, `untrusted_network`, `no_approov_service`, `rejected`, ...) on **every** request processed by Approov, successful ones included, and identical on Android and iOS. It lets the backend distinguish a request whose Approov headers were stripped from one sent without a token because the fetch failed. Not sent to domains that are not protected by Approov. `setStatusHeader(null)` disables it. Failure information is never placed in the token header. `ApproovRequestMutations.getStatusHeaderKey()` exposes it to mutators, and the default message signing covers it so the reported status cannot be stripped or altered without invalidating the signature.
+- `ApproovService.createDefaultServiceMutator()` returns the out-of-the-box mutator (message signing with both signatures).
+- Tests for the 3.7.0 contract: every failure status proceeds with an empty token header and the lowercased status on the status header; a successful request reports `success`; the status header can be renamed and disabled; secure string header and query failures proceed with the placeholder in place; the out-of-the-box mutator signs with both signatures (guarding the default); one signature falls back to the other when a key is unavailable; a custom mutator can still suppress all headers or fail closed by throwing.
+
+### Removed
+- `setProceedOnNetworkFail` / `getProceedOnNetworkFail` (no-ops since 3.5.7).
+- `setUseApproovStatusIfNoToken` / `getUseApproovStatusIfNoToken`: the fetch status is reported on `Approov-Status`, never in the token header.
+- `setApproovInterceptorExtensions` / `getApproovInterceptorExtensions` and the `ApproovInterceptorExtensions` interface: use `setServiceMutator` / `getServiceMutator` with an `ApproovServiceMutator`.
+- `ApproovDefaultMessageSigning.processedRequest(request, changes)` (deprecated): the implementation is `handleInterceptorProcessedRequest`.
+- `USAGE.md` is replaced by `ADVANCED.md`, since the standard integration needs none of it: message signing is on by default and requests always proceed.
+
+### Fixed
+- A header that is present with an empty value is now a valid covered component for message signing (RFC 9421 §2.1), so a request sent with an empty `Approov-Token` is still signed. Previously the signature base build failed and the request went out unsigned. This is in the shared `io.approov.util.sig.ComponentProvider` and applies to every layer carrying a copy of it.
+
+### Notes
+- The `approov-android-sdk` dependency still points at 3.5.3 because the 3.7.0 SDK is not yet published. `UNTRUSTED_NETWORK` is matched by name until then (`ApproovServiceMutator.isNetworkFailure`), and the `UNTRUSTED_NETWORK` tests wait on the mini SDK carrying the 3.7.0 enum.
+
 ## [3.5.8] - 2026-07-16
 
 ### Added
