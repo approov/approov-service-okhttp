@@ -1,6 +1,6 @@
 # Advanced Options
 
-A standard Approov integration needs nothing in this document: add the dependency, initialize, use the client (see the [README](README.md)). The options below change the defaults, and are for apps with specific requirements. Every method is documented in [REFERENCE.md](REFERENCE.md).
+A standard integration of the Approov Package for OkHttp needs nothing in this document: add the dependency, initialize, use the client (see the [README](README.md)). The options below change the defaults, and are for apps with specific requirements. Every method is documented in [REFERENCE.md](REFERENCE.md).
 
 ## What happens by default
 
@@ -77,7 +77,7 @@ ApproovService.setStatusHeader("X-Approov-Fetch-Status")          // default "Ap
 
 ## Bypass initialization
 
-Initializing with an empty configuration string keeps the service layer initialized but returns plain `OkHttpClient` instances with no Approov processing (no token, signing, secure strings or pinning). This is a bootstrap or fallback state, for example when initialization with the real configuration failed. A later `initialize` with a valid configuration enables Approov at runtime; reinitializing from one valid configuration to a different one is rejected by the SDK.
+Initializing with an empty configuration string keeps the package initialized but returns plain `OkHttpClient` instances with no Approov processing (no token, signing, secure strings or pinning). This is a bootstrap or fallback state, for example while a configuration is fetched remotely, or as the guard in the README example against a configuration string that was not copied exactly. A later `initialize` with a valid configuration enables Approov at runtime; reinitializing from one valid configuration to a different one is rejected by the SDK.
 
 ```java
 ApproovService.initialize(context, "");

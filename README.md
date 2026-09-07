@@ -1,4 +1,4 @@
-# Approov Service for OkHttp
+# Approov Package for OkHttp
 
 ![Java](https://img.shields.io/badge/Java-8%2B-007396?logo=openjdk&logoColor=white)
 ![Android](https://img.shields.io/badge/Android-minSdk%2023-3DDC84?logo=android&logoColor=white)
@@ -29,7 +29,7 @@ The app manifest needs the following permissions, and the minimum supported SDK 
 
 ## INITIALIZING
 
-Initialize the `ApproovService` when the app is created, usually in `onCreate` of your `Application`, with the configuration string from your Approov onboarding email. Wrap the call so that a failure is logged and the app keeps working, unprotected, by re-initializing in bypass mode with an empty configuration:
+Initialize the `ApproovService` when the app is created, usually in `onCreate` of your `Application`, with the configuration string from your Approov onboarding email. Initialization does not fail in normal operation: the only cause is a configuration string that was not copied exactly (truncated or altered), which the SDK rejects. The example still guards the call so that such a mistake can never take the app down: it is logged and the app continues unprotected, in bypass mode with an empty configuration, which the backend will see as requests without a token.
 
 ### Java
 ```java
@@ -45,7 +45,8 @@ public class YourApp extends Application {
             if (ApproovService.isApproovEnabled())
                 Log.i("YourApp", "Approov initialized; deviceID=" + ApproovService.getDeviceID());
         } catch (Exception e) {
-            Log.e("YourApp", "Approov init failed; continuing unprotected", e);
+            // only reached with a mistyped or truncated configuration string
+            Log.e("YourApp", "Approov configuration rejected; continuing unprotected", e);
             ApproovService.initialize(getApplicationContext(), "");
         }
     }
@@ -65,7 +66,8 @@ class YourApp : Application() {
             if (ApproovService.isApproovEnabled())
                 Log.i("YourApp", "Approov initialized; deviceID=${ApproovService.getDeviceID()}")
         } catch (e: Exception) {
-            Log.e("YourApp", "Approov init failed; continuing unprotected", e)
+            // only reached with a mistyped or truncated configuration string
+            Log.e("YourApp", "Approov configuration rejected; continuing unprotected", e)
             ApproovService.initialize(applicationContext, "")
         }
     }

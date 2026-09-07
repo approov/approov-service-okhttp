@@ -1,5 +1,5 @@
 # Reference
-This provides a reference for all of the static methods defined on `ApproovService`. These are available if you import:
+This provides a reference for all of the static methods defined on `ApproovService`, the entry point of the Approov Package for OkHttp. These are available if you import:
 
 **Java:**
 ```Java
@@ -36,7 +36,7 @@ fun initialize(context: Context, config: String)
 
 The [application context](https://developer.android.com/reference/android/content/Context#getApplicationContext()) must be provided using the `context` parameter.
 
-It is possible to pass an empty `config` string to bypass Approov SDK initialization. In that case the service layer still reports itself as initialized, but any `OkHttpClient` obtained from it behaves as a plain client with no Approov token injection, message signing, secure strings, or pinning.
+It is possible to pass an empty `config` string to bypass Approov SDK initialization. In that case the package still reports itself as initialized, but any `OkHttpClient` obtained from it behaves as a plain client with no Approov token injection, message signing, secure strings, or pinning.
 
 This empty-config mode is intended as a bootstrap or bypass state for advanced integrations. A later call to `initialize()` with a valid non-empty config string is allowed and will then enable the native Approov SDK at runtime. By contrast, reinitializing from one non-empty config string to a different non-empty config string is rejected by the platform SDK.
 
@@ -61,7 +61,7 @@ Please refer to the [Approov SDK documentation](https://approov.io/docs/latest/a
 
 
 ## isInitialized
-Returns whether the service layer itself has been initialized.
+Returns whether the package itself has been initialized.
 
 **Java:**
 ```java
@@ -88,7 +88,7 @@ boolean isApproovEnabled()
 fun isApproovEnabled(): Boolean
 ```
 
-Returns `true` only when the service layer was initialized with a valid, non-empty configuration string and the native Approov SDK is active. Returns `false` in all other cases: not initialized, or initialized in bypass mode (empty config). All direct Approov SDK methods (such as `fetchToken`, `precheck`, `fetchSecureString`) will throw `ApproovException` if called when this returns `false`.
+Returns `true` only when the package was initialized with a valid, non-empty configuration string and the native Approov SDK is active. Returns `false` in all other cases: not initialized, or initialized in bypass mode (empty config). All direct Approov SDK methods (such as `fetchToken`, `precheck`, `fetchSecureString`) will throw `ApproovException` if called when this returns `false`.
 
 
 ## getOkHttpClient
@@ -104,7 +104,7 @@ OkHttpClient getOkHttpClient()
 fun getOkHttpClient(): OkHttpClient
 ```
 
-You must initialize the service layer before calling this method. If initialization used an empty config string then this provides a plain `OkHttpClient` without any Approov protection.
+You must initialize the package before calling this method. If initialization used an empty config string then this provides a plain `OkHttpClient` without any Approov protection.
 
 Use `setOkHttpClientBuilder` to provide any special builder properties. If you wish to use multiple different builders in your application you can set them by also providing a builder name to `setOkHttpClientBuilder`. In this case you get an `OkHttpClient` using a specific builder using:
 
@@ -307,7 +307,7 @@ fun getStatusHeader(): String?
 ```
 
 ## Deprecated header aliases
-`setApproovHeader(header, prefix)`, `setApproovTraceIDHeader(header)`, `getApproovTokenHeader()`, `getApproovTokenPrefix()` and `getApproovTraceIDHeader()` remain as deprecated aliases of `setTokenHeader`, `setTraceIDHeader`, `getTokenHeader`, `getTokenPrefix` and `getTraceIDHeader`, which are the names used by every Approov service layer.
+`setApproovHeader(header, prefix)`, `setApproovTraceIDHeader(header)`, `getApproovTokenHeader()`, `getApproovTokenPrefix()` and `getApproovTraceIDHeader()` remain as deprecated aliases of `setTokenHeader`, `setTraceIDHeader`, `getTokenHeader`, `getTokenPrefix` and `getTraceIDHeader`, which are the names used by every Approov package.
 
 ## setBindingHeader
 Sets a binding `header` that may be present on requests being made. This is for the [token binding](https://approov.io/docs/latest/approov-usage-documentation/#token-binding) feature. A header should be chosen whose value is unchanging for most requests (such as an Authorization header). If the `header` is present, then its SHA256 hash is supplied to Approov so the issued token can carry the corresponding `pay` claim and be bound to the value. This may then be verified by the backend API integration.
@@ -383,7 +383,7 @@ fun getSubstitutionHeaders(): Map<String, String>
 ## addSubstitutionQueryParam
 Adds a `key` name for a query parameter that should be subject to [secure strings](https://approov.io/docs/latest/approov-usage-documentation/#secure-strings) substitution. This means that if the query parameter is present in a URL then the value will be used as a key to look up a secure string value which will be substituted as the query parameter value instead. This allows easy migration to the use of secure strings.
 
-> **Note**: The service layer inserts secure strings into the URL exactly as they are returned by the Approov cloud. It does **not** automatically apply URL encoding. If your secure strings contain reserved characters (like `&`, `=`, `#`, or spaces), you must ensure they are properly URL-encoded when adding them via the Approov CLI to avoid mangling the query parameters.
+> **Note**: The package inserts secure strings into the URL exactly as they are returned by the Approov cloud. It does **not** automatically apply URL encoding. If your secure strings contain reserved characters (like `&`, `=`, `#`, or spaces), you must ensure they are properly URL-encoded when adding them via the Approov CLI to avoid mangling the query parameters.
 
 **Java:**
 ```Java
