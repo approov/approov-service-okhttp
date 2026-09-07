@@ -29,7 +29,17 @@ The app manifest needs the following permissions, and the minimum supported SDK 
 
 ## INITIALIZING
 
-Initialize the `ApproovService` when the app is created, usually in `onCreate` of your `Application`, with the configuration string from your Approov onboarding email. Initialization does not fail in normal operation: the only cause is a configuration string that was not copied exactly (truncated or altered), which the SDK rejects. The example still guards the call so that such a mistake can never take the app down: it is logged and the app continues unprotected, in bypass mode with an empty configuration, which the backend will see as requests without a token.
+Initialize the `ApproovService` when the app is created, usually in `onCreate` of your `Application`, with your Approov account ID.
+
+Your Approov account ID is in your onboarding email, or from the Approov CLI at any time (the CLI calls it the SDK config string):
+
+```
+approov sdk -getConfigString
+```
+
+It looks like `#your-account#p6nZ...=` and identifies your account to the SDK: which Approov service to attest against, and how to verify what it downloads. It is not a secret and is the same for every app in your account, so it is fine to keep it in source control. Registering your app with Approov is a separate step described in the documentation.
+
+Initialization does not fail in normal operation: the only cause is an account ID that was not copied exactly (truncated or altered), which the SDK rejects. The example still guards the call so that such a mistake can never take the app down: it is logged and the app continues unprotected, in bypass mode with an empty string, which the backend will see as requests without a token.
 
 ### Java
 ```java
@@ -41,12 +51,13 @@ public class YourApp extends Application {
     public void onCreate() {
         super.onCreate();
         try {
-            ApproovService.initialize(getApplicationContext(), "<enter-your-config-string-here>");
+            // your Approov account ID, from your onboarding email or "approov sdk -getConfigString"
+            ApproovService.initialize(getApplicationContext(), "<your-approov-account-id>");
             if (ApproovService.isApproovEnabled())
                 Log.i("YourApp", "Approov initialized; deviceID=" + ApproovService.getDeviceID());
         } catch (Exception e) {
-            // only reached with a mistyped or truncated configuration string
-            Log.e("YourApp", "Approov configuration rejected; continuing unprotected", e);
+            // only reached with a mistyped or truncated account ID
+            Log.e("YourApp", "Approov account ID rejected; continuing unprotected", e);
             ApproovService.initialize(getApplicationContext(), "");
         }
     }
@@ -62,12 +73,13 @@ class YourApp : Application() {
     override fun onCreate() {
         super.onCreate()
         try {
-            ApproovService.initialize(applicationContext, "<enter-your-config-string-here>")
+            // your Approov account ID, from your onboarding email or "approov sdk -getConfigString"
+            ApproovService.initialize(applicationContext, "<your-approov-account-id>")
             if (ApproovService.isApproovEnabled())
                 Log.i("YourApp", "Approov initialized; deviceID=${ApproovService.getDeviceID()}")
         } catch (e: Exception) {
-            // only reached with a mistyped or truncated configuration string
-            Log.e("YourApp", "Approov configuration rejected; continuing unprotected", e)
+            // only reached with a mistyped or truncated account ID
+            Log.e("YourApp", "Approov account ID rejected; continuing unprotected", e)
             ApproovService.initialize(applicationContext, "")
         }
     }

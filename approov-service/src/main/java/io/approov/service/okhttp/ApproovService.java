@@ -158,7 +158,9 @@ public class ApproovService {
      * Initializes the ApproovService with an account configuration and comment.
      *
      * @param context the Application context
-     * @param config  the configuration string, or empty for no SDK initialization
+     * @param config  your Approov account ID (the SDK config string from the
+     *                onboarding email or "approov sdk -getConfigString"), or empty
+     *                for bypass mode with no SDK initialization
      * @param comment the comment string, or null for no comment
      */
     public static synchronized void initialize(Context context, String config, String comment) {
@@ -219,7 +221,9 @@ public class ApproovService {
      * Initializes the ApproovService with an account configuration
      *
      * @param context the Application context
-     * @param config  the configuration string, or empty for no SDK initialization
+     * @param config  your Approov account ID (the SDK config string from the
+     *                onboarding email or "approov sdk -getConfigString"), or empty
+     *                for bypass mode with no SDK initialization
      */
     public static void initialize(Context context, String config) {
         // default uses null comment

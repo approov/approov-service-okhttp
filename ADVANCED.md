@@ -77,7 +77,7 @@ ApproovService.setStatusHeader("X-Approov-Fetch-Status")          // default "Ap
 
 ## Bypass initialization
 
-Initializing with an empty configuration string keeps the package initialized but returns plain `OkHttpClient` instances with no Approov processing (no token, signing, secure strings or pinning). This is a bootstrap or fallback state, for example while a configuration is fetched remotely, or as the guard in the README example against a configuration string that was not copied exactly. A later `initialize` with a valid configuration enables Approov at runtime; reinitializing from one valid configuration to a different one is rejected by the SDK.
+Initializing with an empty string instead of the Approov account ID keeps the package initialized but returns plain `OkHttpClient` instances with no Approov processing (no token, signing, secure strings or pinning). This is a bootstrap or fallback state, for example while the account ID is fetched remotely, or as the guard in the README example against an account ID that was not copied exactly. A later `initialize` with the account ID enables Approov at runtime; reinitializing from one account ID to a different one is rejected by the SDK.
 
 ```java
 ApproovService.initialize(context, "");

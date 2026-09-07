@@ -20,7 +20,7 @@ If a method throws an `ApproovNetworkException` (a subclass of `ApproovFetchStat
 If a method throws an `ApproovRejectionException` (a subclass of `ApproovException`) the this indicates the problem was that the app failed attestation. An additional method `getARC()` provides the [Attestation Response Code](https://approov.io/docs/latest/approov-usage-documentation/#attestation-response-code), which could be provided to the user for communication with your app support to determine the reason for failure, without this being revealed to the end user. The method `getRejectionReasons()` provides the [Rejection Reasons](https://approov.io/docs/latest/approov-usage-documentation/#rejection-reasons) if the feature is enabled, providing a comma separated list of reasons why the app attestation was rejected.
 
 ## initialize
-Initializes the Approov SDK and thus enables the Approov features. The `config` will have been provided in the initial onboarding or email or can be [obtained](https://approov.io/docs/latest/approov-usage-documentation/#getting-the-initial-sdk-configuration) using the approov CLI. This will generate an error if a second attempt is made at initialization with a different `config`.
+Initializes the Approov SDK and thus enables the Approov features. The `config` parameter is your Approov account ID: the string from your onboarding email, also available from the CLI with `approov sdk -getConfigString` (the CLI and the SDK call it the SDK config string). It identifies your account to the SDK, is not a secret, and is the same for every app in the account. See [obtaining it](https://approov.io/docs/latest/approov-usage-documentation/#getting-the-initial-sdk-configuration). Initialization throws `IllegalArgumentException` only if the account ID was not copied exactly, and `IllegalStateException` if a second attempt is made with a different account ID.
 
 This is the standard form and should be used in most cases. The `comment` parameter defaults to `null` when not supplied.
 
@@ -36,9 +36,9 @@ fun initialize(context: Context, config: String)
 
 The [application context](https://developer.android.com/reference/android/content/Context#getApplicationContext()) must be provided using the `context` parameter.
 
-It is possible to pass an empty `config` string to bypass Approov SDK initialization. In that case the package still reports itself as initialized, but any `OkHttpClient` obtained from it behaves as a plain client with no Approov token injection, message signing, secure strings, or pinning.
+It is possible to pass an empty string instead of the account ID to bypass Approov SDK initialization. In that case the package still reports itself as initialized, but any `OkHttpClient` obtained from it behaves as a plain client with no Approov token injection, message signing, secure strings, or pinning.
 
-This empty-config mode is intended as a bootstrap or bypass state for advanced integrations. A later call to `initialize()` with a valid non-empty config string is allowed and will then enable the native Approov SDK at runtime. By contrast, reinitializing from one non-empty config string to a different non-empty config string is rejected by the platform SDK.
+This bypass mode is intended as a bootstrap state for advanced integrations. A later call to `initialize()` with the account ID is allowed and will then enable the native Approov SDK at runtime. By contrast, reinitializing from one account ID to a different one is rejected by the platform SDK.
 
 If you need to supply a `comment` to the native SDK (for example to pass `options:...` startup flags or trigger a `reinit...` flow), use the extended form instead:
 
@@ -73,7 +73,7 @@ boolean isInitialized()
 fun isInitialized(): Boolean
 ```
 
-Returns `true` if `initialize` has been called successfully, including when bypass mode is active (empty config string). Returns `false` if `initialize` has never been called or if the last initialization attempt failed. Use `isApproovEnabled()` to distinguish between bypass and protected modes.
+Returns `true` if `initialize` has been called successfully, including when bypass mode is active (empty string instead of the account ID). Returns `false` if `initialize` has never been called or if the last initialization attempt failed. Use `isApproovEnabled()` to distinguish between bypass and protected modes.
 
 ## isApproovEnabled
 Returns whether Approov protection is currently enabled.
@@ -88,7 +88,7 @@ boolean isApproovEnabled()
 fun isApproovEnabled(): Boolean
 ```
 
-Returns `true` only when the package was initialized with a valid, non-empty configuration string and the native Approov SDK is active. Returns `false` in all other cases: not initialized, or initialized in bypass mode (empty config). All direct Approov SDK methods (such as `fetchToken`, `precheck`, `fetchSecureString`) will throw `ApproovException` if called when this returns `false`.
+Returns `true` only when the package was initialized with the Approov account ID and the native Approov SDK is active. Returns `false` in all other cases: not initialized, or initialized in bypass mode (empty string). All direct Approov SDK methods (such as `fetchToken`, `precheck`, `fetchSecureString`) will throw `ApproovException` if called when this returns `false`.
 
 
 ## getOkHttpClient
@@ -104,7 +104,7 @@ OkHttpClient getOkHttpClient()
 fun getOkHttpClient(): OkHttpClient
 ```
 
-You must initialize the package before calling this method. If initialization used an empty config string then this provides a plain `OkHttpClient` without any Approov protection.
+You must initialize the package before calling this method. If initialization used an empty string instead of the account ID then this provides a plain `OkHttpClient` without any Approov protection.
 
 Use `setOkHttpClientBuilder` to provide any special builder properties. If you wish to use multiple different builders in your application you can set them by also providing a builder name to `setOkHttpClientBuilder`. In this case you get an `OkHttpClient` using a specific builder using:
 
