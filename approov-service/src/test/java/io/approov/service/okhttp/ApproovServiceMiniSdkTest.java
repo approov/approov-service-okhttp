@@ -820,14 +820,16 @@ public class ApproovServiceMiniSdkTest {
     }
 
     /**
-     * §3 Service Mutator Override / 3.7.0 §1 explicit caller error (M37-02)
+     * §3 Service Mutator Override / 3.7.0 §1 opt-in abort (M37-02)
      *
-     * A custom mutator remains free to fail closed by throwing: the exception
-     * reaches the caller and no request is sent. This is the integrator's explicit
+     * A custom mutator may opt in to aborting a request for an outcome the app does
+     * not accept by throwing. The exception is a standard network stack exception
+     * chosen by the app (here java.net.ConnectException), not an Approov type, and
+     * reaches the caller with no request sent. This is the integrator's explicit
      * decision, not a default of the layer.
      */
     @Test
-    public void testServiceMutatorCanStillFailClosedByThrowing() throws Exception {
+    public void testServiceMutatorCanOptInToAbortWithNetworkStackException() throws Exception {
         reinitializeServiceWithTargetHost("");
         setDirective("{" +
             "  \"operation\": \"fetchApproovToken\"," +
@@ -837,9 +839,9 @@ public class ApproovServiceMiniSdkTest {
             "}");
         ApproovService.setServiceMutator(new ApproovServiceMutator() {
             @Override
-            public boolean handleInterceptorFetchTokenResult(Approov.TokenFetchResult approovResults, String url) throws ApproovException {
+            public boolean handleInterceptorFetchTokenResult(Approov.TokenFetchResult approovResults, String url) throws IOException {
                 if (approovResults.getStatus() != Approov.TokenFetchStatus.SUCCESS)
-                    throw new ApproovFetchStatusException(approovResults.getStatus(), "custom: " + approovResults.getStatus());
+                    throw new java.net.ConnectException("attestation unavailable: " + approovResults.getStatus());
                 return true;
             }
         });
@@ -847,9 +849,11 @@ public class ApproovServiceMiniSdkTest {
         OkHttpClient client = ApproovService.getOkHttpClient();
         Request request = new Request.Builder().url(getTargetURL()).get().build();
         try (Response response = client.newCall(request).execute()) {
-            fail("Expected ApproovFetchStatusException");
-        } catch (ApproovFetchStatusException e) {
-            assertTrue(e.getMessage().contains("custom: NO_NETWORK"));
+            fail("Expected ConnectException");
+        } catch (ApproovException e) {
+            fail("An opt-in abort must not surface as an Approov exception type: " + e);
+        } catch (java.net.ConnectException e) {
+            assertTrue(e.getMessage().contains("attestation unavailable: NO_NETWORK"));
         }
     }
 

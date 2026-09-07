@@ -11,7 +11,7 @@ import io.approov.service.okhttp.ApproovService;
 import io.approov.service.okhttp.ApproovService
 ```
 
-The request path never throws for a runtime condition: a request made through an `OkHttpClient` from `getOkHttpClient` always proceeds, with the fetch status on the `Approov-Status` header and an empty `Approov-Token` header if it could not be protected (see [ADVANCED.md](ADVANCED.md)). The exceptions below are thrown by the direct methods (`precheck`, `fetchToken`, `fetchSecureString`, `fetchCustomJWT`, ...), which return a value to the caller, and by a custom `ApproovServiceMutator` that chooses to fail closed.
+The request path never throws for a runtime condition: a request made through an `OkHttpClient` from `getOkHttpClient` always proceeds, with the fetch status on the `Approov-Status` header and an empty `Approov-Token` header if it could not be protected (see [ADVANCED.md](ADVANCED.md)). The exceptions below are thrown by the direct methods (`precheck`, `fetchToken`, `fetchSecureString`, `fetchCustomJWT`, ...), which return a value to the caller, A custom `ApproovServiceMutator` that opts in to aborting requests throws a standard network stack exception (`IOException` or a subclass), never an Approov type.
 
 Various methods may throw an `ApproovException` (an `IOException`) if there is a problem. The method `getMessage()` provides a descriptive message. An `ApproovFetchStatusException` (a subclass of `ApproovException`) carries the SDK fetch status in `getStatus()`.
 
@@ -174,7 +174,7 @@ The mutator installed by `initialize` is the one returned by `createDefaultServi
                 .setUseInstallMessageSigning()))
 ```
 
-The default decisions of `ApproovServiceMutator` never abort a request: `handleInterceptorFetchTokenResult` returns `true` for every status except `UNKNOWN_URL` and `UNPROTECTED_URL` (for which it returns `false` so that no Approov headers are sent), and the substitution decisions return `true` only for `SUCCESS`. A custom mutator may throw an `ApproovException` from any interceptor hook to fail closed; that is an explicit integrator decision.
+The default decisions of `ApproovServiceMutator` never abort a request: `handleInterceptorFetchTokenResult` returns `true` for every status except `UNKNOWN_URL` and `UNPROTECTED_URL` (for which it returns `false` so that no Approov headers are sent), and the substitution decisions return `true` only for `SUCCESS`. A custom mutator may opt in to aborting a request from any interceptor hook by throwing a standard network stack exception (`java.io.IOException` or a platform subclass), never an Approov specific type, so that the abort surfaces to the app as an ordinary network failure; that is an explicit integrator decision.
 
 ## createDefaultServiceMutator
 Creates the mutator that `initialize` installs out of the box: an `ApproovDefaultMessageSigning` configured with `generateDefaultSignatureParametersFactory()`, producing both the install (`ecdsa-p256-sha256`) and the account (`hmac-sha256`) signatures as members `install` and `account` of the `Signature` and `Signature-Input` headers.

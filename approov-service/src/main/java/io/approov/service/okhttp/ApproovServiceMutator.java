@@ -20,6 +20,7 @@ package io.approov.service.okhttp;
 
 import com.criticalblue.approovsdk.Approov;
 import okhttp3.Request;
+import java.io.IOException;
 import java.util.regex.Pattern;
 import java.util.regex.Matcher;
 
@@ -33,16 +34,23 @@ import java.util.regex.Matcher;
  * implementing classes can choose to override only the methods they are
  * interested in.
  *
- * From 3.7.0 the default interceptor decisions always proceed with the request:
- * no runtime condition (no network, no Approov service, rejection, failed
- * secure string substitution) aborts a request on the service layer's behalf.
- * Instead the request is sent with an empty Approov token header, a failed
- * secure string substitution leaves its placeholder in place, and the Approov
- * fetch status is reported on the status header (see
- * ApproovService.setStatusHeader) so that the backend, which is the enforcement
- * point, can decide. The direct fetch APIs (fetchToken, fetchSecureString,
- * fetchCustomJWT, precheck) return a value to the caller and therefore still
- * report failures by throwing an ApproovException subclass.
+ * From 3.7.0 the default interceptor decisions always proceed with the request.
+ * A token fetch outcome other than SUCCESS (no network, untrusted network, no
+ * Approov service, rejection, ...) is an outcome, not a failure: the request is
+ * sent with an empty Approov token header, a failed secure string substitution
+ * leaves its placeholder in place, and the Approov fetch status is reported on
+ * the status header (see ApproovService.setStatusHeader) so that the backend,
+ * which is the enforcement point, can decide.
+ *
+ * An app that wants a request aborted for some outcome opts in by overriding the
+ * relevant interceptor hook and throwing. Such an exception must be a standard
+ * network stack exception (java.io.IOException or one of its platform subclasses
+ * such as java.net.ConnectException or javax.net.ssl.SSLException), not an
+ * Approov specific type: the abort is the app's own policy and must surface to
+ * the app's error handling and support as an ordinary network failure. The
+ * interceptor hooks therefore declare IOException. The direct fetch APIs
+ * (fetchToken, fetchSecureString, fetchCustomJWT, precheck) return a value to
+ * the caller and continue to report failures with an ApproovException subclass.
  */
 public interface ApproovServiceMutator {
     /**
@@ -219,11 +227,11 @@ public interface ApproovServiceMutator {
      * @param request the request property extracted from the interceptor chain
      * @return true if the request should be processed by the Approov interceptor,
      *         false if it should be issued unchanged
-     * @throws ApproovException The implementation can either return to indicate the
-     *                          action described above or throw an ApproovException
-     *                          encoding the cause of the failure
+     * @throws IOException an overriding implementation may throw a standard network
+     *                     stack exception (never an Approov specific type) to abort
+     *                     the request, which the default never does
      */
-    default boolean handleInterceptorShouldProcessRequest(Request request) throws ApproovException {
+    default boolean handleInterceptorShouldProcessRequest(Request request) throws IOException {
         if (request == null)
             throw new ApproovException(
                     "handleInterceptorShouldProcessRequest method was passed a request that is null!");
@@ -256,12 +264,12 @@ public interface ApproovServiceMutator {
      * @return true if the token header should be added (its value is empty if no
      *         token was obtained), false if the request should proceed without
      *         any Approov headers
-     * @throws ApproovException The implementation can either return to indicate the
-     *                          action described above or throw an ApproovException
-     *                          to abort the request, which the default never does
+     * @throws IOException an overriding implementation may throw a standard network
+     *                     stack exception (never an Approov specific type) to abort
+     *                     the request, which the default never does
      */
     default boolean handleInterceptorFetchTokenResult(Approov.TokenFetchResult approovResults, String url)
-            throws ApproovException {
+            throws IOException {
         switch (approovResults.getStatus()) {
             case UNKNOWN_URL:
             case UNPROTECTED_URL:
@@ -288,12 +296,12 @@ public interface ApproovServiceMutator {
      * @param approovResults the TokenFetchResult from Approov
      * @param header         the header being substituted
      * @return true if substitution should proceed, false if it should be skipped
-     * @throws ApproovException The implementation can either return to indicate the
-     *                          action described above or throw an ApproovException
-     *                          to abort the request, which the default never does
+     * @throws IOException an overriding implementation may throw a standard network
+     *                     stack exception (never an Approov specific type) to abort
+     *                     the request, which the default never does
      */
     default boolean handleInterceptorHeaderSubstitutionResult(Approov.TokenFetchResult approovResults, String header)
-            throws ApproovException {
+            throws IOException {
         return approovResults.getStatus() == Approov.TokenFetchStatus.SUCCESS;
     }
 
@@ -311,12 +319,12 @@ public interface ApproovServiceMutator {
      * @param approovResults the TokenFetchResult from Approov
      * @param queryKey       the query parameter key being substituted
      * @return true if substitution should proceed, false if it should be skipped
-     * @throws ApproovException The implementation can either return to indicate the
-     *                          action described above or throw an ApproovException
-     *                          to abort the request, which the default never does
+     * @throws IOException an overriding implementation may throw a standard network
+     *                     stack exception (never an Approov specific type) to abort
+     *                     the request, which the default never does
      */
     default boolean handleInterceptorQueryParamSubstitutionResult(Approov.TokenFetchResult approovResults,
-            String queryKey) throws ApproovException {
+            String queryKey) throws IOException {
         return approovResults.getStatus() == Approov.TokenFetchStatus.SUCCESS;
     }
 
@@ -327,12 +335,11 @@ public interface ApproovServiceMutator {
      * @param request the processed request
      * @param changes the mutations applied to the request by Approov
      * @return the final request to use to complete the Approov interceptor step.
-     * @throws ApproovException The implementation can either return as described
-     *                          above or throw an ApproovException encoding the
-     *                          cause of the failure
+     * @throws IOException an overriding implementation may throw a standard network
+     *                     stack exception to abort the request
      */
     default Request handleInterceptorProcessedRequest(Request request, ApproovRequestMutations changes)
-            throws ApproovException {
+            throws IOException {
         // No further changes to the request are required
         return request;
     }

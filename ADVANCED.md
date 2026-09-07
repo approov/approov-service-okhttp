@@ -12,7 +12,7 @@ For a request to a protected API domain, the `ApproovService` interceptor fetche
 | `UNKNOWN_URL`, `UNPROTECTED_URL` | proceeds untouched | not sent | not sent |
 | any other status (`NO_NETWORK`, `POOR_NETWORK`, `UNTRUSTED_NETWORK`, `NO_APPROOV_SERVICE`, `REJECTED`, `INTERNAL_ERROR`, ...) | proceeds | sent **empty** | the status, lowercased (`no_network`, ...) |
 
-A secure string substitution (see [Secure strings](#secure-strings)) that fails leaves the placeholder value in the header or query parameter and the request proceeds; the backend sees the placeholder. No runtime condition aborts a request: the backend is the enforcement point and receives the evidence it needs to decide. The only failures an app sees as exceptions from the request path are its own configuration errors (for example a body digest configured as required that cannot be generated, or an unsupported signature algorithm), and pinning failures on its API domains, which fail the connection with `javax.net.ssl.SSLPeerUnverifiedException` like any OkHttp pinning failure.
+A secure string substitution (see [Secure strings](#secure-strings)) that fails leaves the placeholder value in the header or query parameter and the request proceeds; the backend sees the placeholder. A fetch outcome other than `SUCCESS` is an outcome, not a failure: no runtime condition aborts a request, the backend is the enforcement point and receives the evidence it needs to decide. The only exceptions an app sees from the request path are its own configuration errors (a body digest configured as required that cannot be generated, or an unsupported signature algorithm), pinning failures on its API domains, which fail the connection with `javax.net.ssl.SSLPeerUnverifiedException` like any OkHttp pinning failure, and aborts the app itself opted in to through a [service mutator](#service-mutators).
 
 The direct methods (`fetchToken`, `fetchSecureString`, `fetchCustomJWT`, `precheck`) return a value to the caller and therefore still report failures by throwing an `ApproovException`; see the [reference](REFERENCE.md).
 
@@ -122,7 +122,7 @@ An `ApproovServiceMutator` centralizes app-specific policy without forking the p
 | Hook | Decides |
 | :--- | :--- |
 | `handleInterceptorShouldProcessRequest` | whether a request gets Approov processing at all (default: unless excluded) |
-| `handleInterceptorFetchTokenResult` | given the token fetch result, `true` to add the token header (empty if there is no token), `false` to send the request with no Approov headers, or throw to fail closed |
+| `handleInterceptorFetchTokenResult` | given the token fetch result, `true` to add the token header (empty if there is no token), `false` to send the request with no Approov headers, or throw a standard network stack exception to abort the request |
 | `handleInterceptorHeaderSubstitutionResult`, `handleInterceptorQueryParamSubstitutionResult` | whether to apply a secure string substitution |
 | `handleInterceptorProcessedRequest` | final changes to the processed request; this is where `ApproovDefaultMessageSigning` signs |
 | `supportsProtectionRefresh` | whether the processed request callback may run again on a stale request (see below) |
@@ -131,9 +131,14 @@ An `ApproovServiceMutator` centralizes app-specific policy without forking the p
 
 The status header is set by the interceptor from the token fetch result whenever the mutator returns `true` from `handleInterceptorFetchTokenResult`; returning `false` sends the request with no Approov headers at all.
 
+### Opting in to aborting requests
+
+An app may decide that some outcomes must not reach its backend at all, for example that a payments host only ever receives requests carrying a token. That is the app's policy, so it is expressed by overriding the hook and throwing. The exception must be a standard network stack exception (`java.io.IOException` or a platform subclass such as `java.net.ConnectException` or `javax.net.ssl.SSLException`), not an Approov type: the abort then surfaces to the app's own error handling, retry logic and support tooling exactly like any other network failure, with the Approov status available from the result for the app's own logging. The interceptor hooks declare `IOException` for this purpose; the default implementations never throw.
+
 Extend `ApproovDefaultMessageSigning` to keep the default signing while changing other decisions:
 
 ```kotlin
+import android.util.Log
 import com.criticalblue.approovsdk.Approov
 import io.approov.service.okhttp.*
 import okhttp3.Request
@@ -141,10 +146,13 @@ import okhttp3.Request
 class AppPolicy : ApproovDefaultMessageSigning() {
     init { setDefaultFactory(ApproovDefaultMessageSigning.generateDefaultSignatureParametersFactory()) }
 
-    // deliberately fail closed for one host: an explicit app decision, not a layer default
+    // opt in to aborting for one host: an explicit app decision, surfaced as an
+    // ordinary network failure rather than an Approov exception type
     override fun handleInterceptorFetchTokenResult(result: Approov.TokenFetchResult, url: String): Boolean {
-        if (java.net.URI(url).host == "payments.example.com" && result.status != Approov.TokenFetchStatus.SUCCESS)
-            throw ApproovFetchStatusException(result.status, "payments require a token: ${result.status}")
+        if (java.net.URI(url).host == "payments.example.com" && result.status != Approov.TokenFetchStatus.SUCCESS) {
+            Log.w("AppPolicy", "payments request aborted, Approov status ${result.status}")
+            throw java.net.ConnectException("payments unavailable")
+        }
         return super.handleInterceptorFetchTokenResult(result, url)
     }
 
