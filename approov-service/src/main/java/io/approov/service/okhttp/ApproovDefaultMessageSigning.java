@@ -215,7 +215,7 @@ public class ApproovDefaultMessageSigning implements ApproovServiceMutator {
      */
     @Override
     public Request handleInterceptorProcessedRequest(Request request, ApproovRequestMutations changes)
-            throws ApproovException {
+            throws IOException {
         if (changes == null || changes.getTokenHeaderKey() == null) {
             // the request doesn't have an Approov token header, so we don't need to sign it
             return request;

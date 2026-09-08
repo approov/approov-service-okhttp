@@ -59,10 +59,15 @@ val factory = ApproovDefaultMessageSigning.generateDefaultSignatureParametersFac
     .setBodyDigestConfig(ApproovDefaultMessageSigning.DIGEST_SHA256, true) // digest required: a body that
                                             // cannot be digested fails the request (a configuration error)
 
+// a factory is shared by every request it is installed for, so use a separate
+// instance for a host that needs different settings
+val paymentsFactory = ApproovDefaultMessageSigning.generateDefaultSignatureParametersFactory()
+    .setExpiresLifetime(5)
+
 ApproovService.setServiceMutator(
     ApproovDefaultMessageSigning()
         .setDefaultFactory(factory)
-        .putHostFactory("payments.example.com", factory.setExpiresLifetime(5)))
+        .putHostFactory("payments.example.com", paymentsFactory))
 ```
 
 A host factory applies to requests to that host; the default factory to every other protected host. Return `null` from a custom factory to leave a request unsigned.
@@ -173,7 +178,7 @@ Keep hooks fast and free of side effects: they run on the request path. A mutato
 
 ## Stale protection refresh
 
-A request held between Approov processing and transmission, for example by a device doze period or an app-level queue, would otherwise go out with an expired token or signature. A network interceptor refreshes the token, the status header and the signatures immediately before transmission when the request has been held for longer than the refresh period (default 3000 ms). It also runs on OkHttp's own retries and redirects.
+A request held between Approov processing and transmission, for example by a device doze period or an app-level queue, would otherwise go out with an expired token or signature. A network interceptor strips and reapplies the protection immediately before transmission when the request has been held for longer than the refresh period (default 3000 ms): the token is refetched (from the SDK cache when still valid), the status header reflects the new result, substitutions are redone and the signatures regenerated. It runs on every network attempt, so OkHttp's own retries are refreshed too, and a **redirect** is reclassified for its new URL: a redirect to a domain Approov does not protect leaves with no Approov headers, and a redirect within a protected domain is re-signed over the new target.
 
 ```kotlin
 ApproovService.setStaleProtectionRefreshPeriod(1000)   // <= 0 disables

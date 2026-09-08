@@ -25,6 +25,7 @@ import java.util.List;
  */
 public class ApproovRequestMutations {
     private String tokenHeaderKey;
+    private String tokenHeaderPrefix;
     private String traceIDHeaderKey;
     private String statusHeaderKey;
     private List<String> substitutionHeaderKeys;
@@ -47,6 +48,25 @@ public class ApproovRequestMutations {
      */
     public void setTokenHeaderKey(String tokenHeaderKey) {
         this.tokenHeaderKey = tokenHeaderKey;
+    }
+
+    /**
+     * Gets the prefix placed before the Approov token in the token header, as
+     * configured when the request was processed. Empty if there is no prefix.
+     *
+     * @return the token header prefix
+     */
+    public String getTokenHeaderPrefix() {
+        return (tokenHeaderPrefix != null) ? tokenHeaderPrefix : "";
+    }
+
+    /**
+     * Sets the prefix placed before the Approov token in the token header.
+     *
+     * @param tokenHeaderPrefix the token header prefix
+     */
+    public void setTokenHeaderPrefix(String tokenHeaderPrefix) {
+        this.tokenHeaderPrefix = tokenHeaderPrefix;
     }
 
     /**

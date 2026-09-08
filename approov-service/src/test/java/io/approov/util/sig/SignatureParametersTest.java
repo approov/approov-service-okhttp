@@ -74,4 +74,20 @@ public class SignatureParametersTest {
         String actual = params.toComponentValue().serialize();
         assertEquals("Params failure - "+name, expected, actual);
     }
+
+    /**
+     * A leading empty field value keeps its separator when repeated field values are
+     * combined (RFC 9421 section 2.1); separation is by element, not by accumulated
+     * length. A single empty value canonicalises to the empty string, an absent field
+     * to null.
+     */
+    @org.junit.Test
+    public void testCombineFieldValuesKeepsSeparatorAfterEmptyLeadingValue() {
+        org.junit.Assert.assertEquals(", value", ComponentProvider.combineFieldValues(java.util.Arrays.asList("", "value")));
+        org.junit.Assert.assertEquals(", ", ComponentProvider.combineFieldValues(java.util.Arrays.asList("", "")));
+        org.junit.Assert.assertEquals("", ComponentProvider.combineFieldValues(java.util.Arrays.asList("   ")));
+        org.junit.Assert.assertEquals("a, b", ComponentProvider.combineFieldValues(java.util.Arrays.asList(" a ", "b")));
+        org.junit.Assert.assertNull(ComponentProvider.combineFieldValues(null));
+        org.junit.Assert.assertNull(ComponentProvider.combineFieldValues(java.util.Collections.emptyList()));
+    }
 }

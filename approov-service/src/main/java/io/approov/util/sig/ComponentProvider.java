@@ -70,12 +70,16 @@ public interface ComponentProvider {
 			return null;
 		} else {
 			StringBuilder sb = new StringBuilder();
+			boolean first = true;
 			for (String field : fields) {
 				String trimmedField = field.trim();
 				String replacedField = PATTERN_WHITESPACE.matcher(trimmedField).replaceAll(" ");
-				if (sb.length() > 0) {
+				// separate on element count, not accumulated length, so that an empty
+				// leading value keeps its separator (RFC 9421 section 2.1)
+				if (!first) {
 					sb.append(", ");
 				}
+				first = false;
 				sb.append(replacedField);
 			}
 			// RFC 9421 §2.1: a field that is present with an empty value has the

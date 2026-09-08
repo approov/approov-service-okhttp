@@ -91,7 +91,7 @@ public class ApproovService {
     // true if the Approov SDK initialized okay
     private static boolean isInitialized = false;
 
-    // the config string used for initialization
+    // the Approov account ID (SDK config string) used for initialization, or empty in bypass mode
     private static String configString;
 
     // the Attestation Response Code (ARC) from the most recent token fetch result
@@ -241,7 +241,7 @@ public class ApproovService {
 
     /**
      * Indicates whether Approov protection is enabled for this service layer
-     * instance. If initialization used an empty config string then the layer is
+     * instance. If initialization used an empty string instead of the account ID then the layer is
      * initialized but Approov protection is bypassed.
      *
      * @return true if Approov protection is enabled, false otherwise
@@ -474,8 +474,19 @@ public class ApproovService {
      * @param approovResults the token fetch result
      * @return the value to set on the Approov token header
      */
-    static String buildTokenHeaderValue(Approov.TokenFetchResult approovResults) {
-        return getTokenPrefix() + approovResults.getToken();
+    static String buildTokenHeaderValue(String prefix, Approov.TokenFetchResult approovResults) {
+        return prefix + approovResults.getToken();
+    }
+
+    /**
+     * Reads the token header name and prefix as one consistent snapshot, so that a
+     * request never combines the header name of one configuration with the prefix
+     * of another when the app reconfigures them while requests are in flight.
+     *
+     * @return a two element array of header name and prefix
+     */
+    static synchronized String[] snapshotTokenHeader() {
+        return new String[] { approovTokenHeader, approovTokenPrefix };
     }
 
     /**
@@ -1375,6 +1386,7 @@ final class PrefetchCallbackHandler implements Approov.TokenFetchCallback {
 
     @Override
     public void approovCallback(Approov.TokenFetchResult result) {
+        ApproovService.recordLastARC(result);
         if ((result.getStatus() == Approov.TokenFetchStatus.SUCCESS) ||
                 (result.getStatus() == Approov.TokenFetchStatus.UNKNOWN_URL))
             Log.d(TAG, "Prefetch success");
@@ -1401,15 +1413,37 @@ class ApproovTokenInterceptor implements Interceptor {
 
     @Override
     public Response intercept(Chain chain) throws IOException {
-
-        Request request = chain.request();
         // cache the mutator for the duration of the interceptor to make sure
         // it is not changed mid-flight
         ApproovServiceMutator mutator = ApproovService.getServiceMutator();
+        return chain.proceed(applyProtection(chain.request(), mutator, true));
+    }
+
+    /**
+     * Applies Approov protection to a request: decides whether the request is
+     * processed at all, fetches a token for its URL, adds the token, trace and
+     * status headers, performs secure string substitutions and invokes the
+     * mutator's processed request callback. The returned request carries an
+     * ApproovRequestFreshness marker describing exactly the protection applied
+     * to it, so that the network layer can strip and reapply that protection on
+     * a stale attempt or on a redirect followup. A request that is not processed
+     * (excluded, or to a domain Approov does not protect) is returned unchanged
+     * with no marker.
+     *
+     * @param request         the request to protect, carrying no Approov protection
+     * @param mutator         the service mutator to consult
+     * @param invokeProcessed whether the mutator's processed request callback may
+     *                        be invoked (false when reapplying protection under a
+     *                        mutator that does not support refresh)
+     * @return the protected request
+     * @throws IOException if the mutator opts in to aborting the request
+     */
+    static Request applyProtection(Request request, ApproovServiceMutator mutator, boolean invokeProcessed)
+            throws IOException {
         // first check if we are to proceed with any Approov processing
         if (!mutator.handleInterceptorShouldProcessRequest(request)) {
             // we are not to proceed with any Approov processing so just continue
-            return chain.proceed(request);
+            return request;
         }
 
         // update the data hash based on any token binding header (presence is optional)
@@ -1432,6 +1466,7 @@ class ApproovTokenInterceptor implements Interceptor {
         // check the status of Approov token fetch using decision maker
         boolean aChange = false;
         String setTokenHeaderKey = null;
+        String setTokenHeaderPrefix = null;
         String setTokenHeaderValue = null;
         String setTraceIDHeaderKey = null;
         String setTraceIDHeaderValue = null;
@@ -1440,10 +1475,13 @@ class ApproovTokenInterceptor implements Interceptor {
         if (mutator.handleInterceptorFetchTokenResult(approovResults, url.toString())) {
             // the request is Approov processed so add the token header (empty if no
             // token was obtained, as evidence that Approov processing occurred) and
-            // report the fetch status on the status header
+            // report the fetch status on the status header; the token header name and
+            // prefix are read as one snapshot
             aChange = true;
-            setTokenHeaderKey = ApproovService.getTokenHeader();
-            setTokenHeaderValue = ApproovService.buildTokenHeaderValue(approovResults);
+            String[] tokenHeader = ApproovService.snapshotTokenHeader();
+            setTokenHeaderKey = tokenHeader[0];
+            setTokenHeaderPrefix = tokenHeader[1];
+            setTokenHeaderValue = ApproovService.buildTokenHeaderValue(setTokenHeaderPrefix, approovResults);
             setStatusHeaderKey = ApproovService.getStatusHeader();
             setStatusHeaderValue = ApproovService.buildStatusHeaderValue(approovResults);
 
@@ -1461,13 +1499,15 @@ class ApproovTokenInterceptor implements Interceptor {
             // decided it must be sent untouched) so no Approov headers are added: this
             // also protects against header substitutions in domains not protected by
             // Approov and therefore potentially subject to a MitM
-            return chain.proceed(request);
+            return request;
         }
 
         // we now deal with any header substitutions, which may require further fetches
-        // but these should be using cached results
+        // but these should be using cached results; the original values are kept so
+        // that the substitution can be undone if the protection is reapplied
         Map<String, String> substitutionHeaders = ApproovService.getSubstitutionHeaders();
         Map<String, String> setSubstitutionHeaders = new LinkedHashMap<>(substitutionHeaders.size());
+        Map<String, String> originalHeaderValues = new LinkedHashMap<>(substitutionHeaders.size());
         for (Map.Entry<String, String> entry : substitutionHeaders.entrySet()) {
             String header = entry.getKey();
             String prefix = entry.getValue();
@@ -1481,6 +1521,7 @@ class ApproovTokenInterceptor implements Interceptor {
                 if (mutator.handleInterceptorHeaderSubstitutionResult(approovResults, header)) {
                     aChange = true;
                     setSubstitutionHeaders.put(header, prefix + approovResults.getSecureString());
+                    originalHeaderValues.put(header, value);
                 }
             }
         }
@@ -1521,11 +1562,13 @@ class ApproovTokenInterceptor implements Interceptor {
             if (setTokenHeaderKey != null) {
                 builder.header(setTokenHeaderKey, setTokenHeaderValue);
                 changes.setTokenHeaderKey(setTokenHeaderKey);
+                changes.setTokenHeaderPrefix(setTokenHeaderPrefix);
 
                 // tag the request so that the freshness interceptor can determine at the
                 // network layer whether the protection was applied too long ago and must
-                // be refreshed before transmission
+                // be refreshed before transmission, or whether the request was redirected
                 freshness = new ApproovRequestFreshness(url.toString(), changes);
+                freshness.setOriginalHeaderValues(originalHeaderValues);
                 builder.tag(ApproovRequestFreshness.class, freshness);
             }
             if (setTraceIDHeaderKey != null) {
@@ -1552,20 +1595,62 @@ class ApproovTokenInterceptor implements Interceptor {
             request = builder.build();
         }
 
-        // call the processed request callback
-        Request processedRequest = mutator.handleInterceptorProcessedRequest(request, changes);
+        // call the processed request callback, unless protection is being reapplied
+        // under a mutator whose callback is not safe to invoke again
+        Request processedRequest = request;
+        if (invokeProcessed)
+            processedRequest = mutator.handleInterceptorProcessedRequest(request, changes);
+        else
+            Log.d(TAG, "Protection reapplied without the processed request callback of " + mutator);
 
-        // record the time at which the protection was applied, along with the names
-        // of any headers added by the processed request callback (normally message
-        // signature headers), so that the freshness interceptor can refresh the
-        // protection at the network layer if the request is held too long before
-        // transmission
-        if (freshness != null)
+        // record the time at which the protection was applied, the URL it was applied
+        // to, and the names of any headers added by the processed request callback
+        // (normally message signature headers), so that the freshness interceptor can
+        // strip and reapply the protection at the network layer if the request is
+        // held too long before transmission or is redirected
+        if (freshness != null) {
             freshness.markProtected(SystemClock.elapsedRealtime(),
                     ApproovRequestFreshness.addedHeaderNames(request, processedRequest));
+            freshness.setAppliedURL(processedRequest.url().toString());
+        }
 
-        // proceed with the rest of the chain
-        return chain.proceed(processedRequest);
+        return processedRequest;
+    }
+
+    /**
+     * Removes the Approov protection described by a freshness marker from a
+     * request: the token, trace and status headers, the headers added by the
+     * mutator's processed request callback, the marker itself, and the secure
+     * string substitutions, whose placeholder values are restored. The URL is
+     * restored to its pre-substitution form only when the request has not been
+     * redirected, since a redirect target is the server's URL, not ours.
+     *
+     * @param request    the request carrying the protection
+     * @param freshness  the marker describing the protection
+     * @param restoreURL whether to restore the pre-substitution URL
+     * @return the request with no Approov protection
+     */
+    static Request stripProtection(Request request, ApproovRequestFreshness freshness, boolean restoreURL) {
+        ApproovRequestMutations changes = freshness.getChanges();
+        Request.Builder builder = request.newBuilder();
+        for (String header : freshness.getMutatorAddedHeaders())
+            builder.removeHeader(header);
+        if (changes.getTokenHeaderKey() != null)
+            builder.removeHeader(changes.getTokenHeaderKey());
+        if (changes.getTraceIDHeaderKey() != null)
+            builder.removeHeader(changes.getTraceIDHeaderKey());
+        if (changes.getStatusHeaderKey() != null)
+            builder.removeHeader(changes.getStatusHeaderKey());
+        for (Map.Entry<String, String> entry : freshness.getOriginalHeaderValues().entrySet()) {
+            if (entry.getValue() == null)
+                builder.removeHeader(entry.getKey());
+            else
+                builder.header(entry.getKey(), entry.getValue());
+        }
+        if (restoreURL && (changes.getOriginalURL() != null))
+            builder.url(changes.getOriginalURL());
+        builder.tag(ApproovRequestFreshness.class, null);
+        return builder.build();
     }
 }
 
@@ -1585,7 +1670,8 @@ class ApproovFreshnessInterceptor implements Interceptor {
     private final static String TAG = "ApproovFreshness";
 
     /**
-     * Constructs a new interceptor that refreshes stale Approov protection.
+     * Constructs a new interceptor that refreshes stale Approov protection and
+     * reclassifies redirected requests.
      */
     public ApproovFreshnessInterceptor() {
     }
@@ -1594,86 +1680,64 @@ class ApproovFreshnessInterceptor implements Interceptor {
     public Response intercept(Chain chain) throws IOException {
         Request request = chain.request();
 
-        // only requests given a token by the ApproovTokenInterceptor carry a
-        // freshness marker and are candidates for a refresh
+        // only requests given protection by the ApproovTokenInterceptor carry a
+        // freshness marker and are candidates for a refresh or a reclassification
         ApproovRequestFreshness freshness = request.tag(ApproovRequestFreshness.class);
         if (freshness == null)
             return chain.proceed(request);
 
-        // measure how long the request has been held since the protection was
-        // applied, using a clock that advances during device sleep, and proceed
-        // unchanged if within the refresh period or if the refresh is disabled
-        long refreshPeriodMS = ApproovService.getStaleProtectionRefreshPeriod();
-        if ((refreshPeriodMS <= 0) || (freshness.getProtectedAtMillis() < 0))
-            return chain.proceed(request);
-        long heldMS = SystemClock.elapsedRealtime() - freshness.getProtectedAtMillis();
-        if (heldMS <= refreshPeriodMS)
-            return chain.proceed(request);
+        // a network attempt whose URL differs from the one the protection was applied
+        // to is a redirect followup built by OkHttp: the destination may be a
+        // different host, so the protection of the original destination must never
+        // travel with it and the new destination is classified afresh
+        String appliedURL = freshness.getAppliedURL();
+        boolean redirected = (appliedURL != null) && !request.url().toString().equals(appliedURL);
 
-        // cache the mutator for the duration of the interceptor to make sure
-        // it is not changed mid-flight - a refresh reinvokes the mutator's
-        // processed request callback so it is only performed if the mutator
-        // declares that this is safe
-        ApproovServiceMutator mutator = ApproovService.getServiceMutator();
-        if (!mutator.supportsProtectionRefresh()) {
-            Log.d(TAG, "Request held for " + heldMS + "ms but " + mutator +
-                    " does not support protection refresh");
-            return chain.proceed(request);
+        ApproovServiceMutator mutator;
+        boolean invokeProcessed;
+        if (redirected) {
+            Log.d(TAG, "Request redirected from " + appliedURL + " to " + request.url() +
+                    ", reclassifying Approov protection");
+            // cache the mutator for the duration of the interceptor to make sure it is
+            // not changed mid-flight; a mutator that does not support refresh has its
+            // headers stripped (they must not leak to the new destination) but its
+            // processed request callback is not invoked again
+            mutator = ApproovService.getServiceMutator();
+            invokeProcessed = mutator.supportsProtectionRefresh();
+        } else {
+            // measure how long the request has been held since the protection was
+            // applied, using a clock that advances during device sleep, and proceed
+            // unchanged if within the refresh period or if the refresh is disabled
+            long refreshPeriodMS = ApproovService.getStaleProtectionRefreshPeriod();
+            if ((refreshPeriodMS <= 0) || (freshness.getProtectedAtMillis() < 0))
+                return chain.proceed(request);
+            long heldMS = SystemClock.elapsedRealtime() - freshness.getProtectedAtMillis();
+            if (heldMS <= refreshPeriodMS)
+                return chain.proceed(request);
+
+            // a refresh reinvokes the mutator's processed request callback so it is
+            // only performed if the mutator declares that this is safe
+            mutator = ApproovService.getServiceMutator();
+            if (!mutator.supportsProtectionRefresh()) {
+                Log.d(TAG, "Request held for " + heldMS + "ms but " + mutator +
+                        " does not support protection refresh");
+                return chain.proceed(request);
+            }
+            Log.d(TAG, "Request held for " + heldMS + "ms since Approov protection was applied, " +
+                    "refreshing before transmission");
+            invokeProcessed = true;
         }
-        Log.d(TAG, "Request held for " + heldMS + "ms since Approov protection was applied, " +
-                "refreshing before transmission");
 
-        // update the data hash based on any token binding header (presence is optional)
-        ApproovService.updateBindingDataHash(request);
-
-        // refetch the Approov token using the URL from the original fetch - if the
-        // cached token is still valid this returns immediately, otherwise a fresh
-        // token is fetched
-        Approov.TokenFetchResult approovResults = Approov.fetchApproovTokenAndWait(freshness.getFetchURL());
-        ApproovService.recordLastARC(approovResults);
-        Log.d(TAG, "Refreshed token for " + freshness.getFetchURL() + ": " + approovResults.getLoggableToken());
-
-        // force a pinning rebuild if there is any dynamic config update
-        ApproovService.updatePinsIfConfigChanged(approovResults);
-
-        // check the status of the Approov token fetch using the decision maker - if
-        // no token is available (but this is not an error) then the request is sent
-        // unchanged
-        if (!mutator.handleInterceptorFetchTokenResult(approovResults, freshness.getFetchURL()))
-            return chain.proceed(request);
-
-        // rebuild the request by removing the headers previously added by the
-        // processed request callback (normally the message signature headers) and
-        // updating the token header with the fresh token
-        ApproovRequestMutations changes = freshness.getChanges();
-        Request.Builder builder = request.newBuilder();
-        for (String header : freshness.getMutatorAddedHeaders())
-            builder.removeHeader(header);
-        builder.header(changes.getTokenHeaderKey(), ApproovService.buildTokenHeaderValue(approovResults));
-        String traceIDHeader = changes.getTraceIDHeaderKey();
-        String traceID = approovResults.getTraceID();
-        // Preserve the missing-artifacts semantics from the application-layer
-        // interceptor: an empty trace ID is meaningful and must replace any stale
-        // value, while null means the SDK supplied no replacement.
-        if ((traceIDHeader != null) && (traceID != null))
-            builder.header(traceIDHeader, traceID);
-        // the status header reflects the refreshed token fetch
-        String statusHeader = changes.getStatusHeaderKey();
-        if (statusHeader != null)
-            builder.header(statusHeader, ApproovService.buildStatusHeaderValue(approovResults));
-        Request refreshedRequest = builder.build();
-
-        // reapply the processed request callback so that any message signature is
-        // regenerated over the fresh token with new created/expires timestamps
-        Request processedRequest = mutator.handleInterceptorProcessedRequest(refreshedRequest, changes);
-
-        // update the marker so that any subsequent attempts with this request
-        // measure the held time from this refresh
-        freshness.markProtected(SystemClock.elapsedRealtime(),
-                ApproovRequestFreshness.addedHeaderNames(refreshedRequest, processedRequest));
-
-        // proceed with the rest of the chain
-        return chain.proceed(processedRequest);
+        // strip the protection described by the marker and apply protection afresh for
+        // the request's current URL: the token is refetched (usually from the SDK cache
+        // when it is still valid), the token, trace and status headers reflect the new
+        // result, substitutions are redone and the signatures regenerated. The refreshed
+        // request carries its own marker; the original request keeps the marker that
+        // describes its own headers, so that a retry of the original request by OkHttp
+        // is refreshed again rather than sent with stale headers under a fresh marker.
+        Request stripped = ApproovTokenInterceptor.stripProtection(request, freshness, !redirected);
+        Request refreshed = ApproovTokenInterceptor.applyProtection(stripped, mutator, invokeProcessed);
+        return chain.proceed(refreshed);
     }
 }
 
@@ -1697,6 +1761,10 @@ class ApproovPinningInterceptor implements Interceptor {
     // maxCachedHandshakes
     // to prevent a memory leak for long running apps
     private LinkedHashSet<Handshake> knownValidHandshakes;
+
+    // incremented on every rebuild of the pins so that a handshake checked against an
+    // earlier generation of pins is never cached as valid for the current one
+    private long pinGeneration = 0;
 
     /**
      * Construct a new pinning interceptor.
@@ -1734,6 +1802,16 @@ class ApproovPinningInterceptor implements Interceptor {
         }
         certificatePinner = pinBuilder.build();
         knownValidHandshakes.clear();
+        pinGeneration++;
+    }
+
+    /**
+     * Gets the current pin generation, which changes on every rebuild of the pins.
+     *
+     * @return the pin generation
+     */
+    synchronized long getPinGeneration() {
+        return pinGeneration;
     }
 
     /**
@@ -1765,7 +1843,13 @@ class ApproovPinningInterceptor implements Interceptor {
      *
      * @param handshake to be added as known valid
      */
-    synchronized private void addValidHandshake(Handshake handshake) {
+    synchronized private void addValidHandshake(Handshake handshake, long generation) {
+        // a verdict reached against an earlier generation of pins is not cached: the
+        // pins were rebuilt while this handshake was being checked
+        if (generation != pinGeneration) {
+            Log.d(TAG, "Pins rebuilt during check, handshake verdict not cached");
+            return;
+        }
         while (knownValidHandshakes.size() >= maxCachedHandshakes) {
             Iterator<Handshake> it = knownValidHandshakes.iterator();
             if (it.hasNext()) { // can't really fail, but this keeps it safe
@@ -1790,6 +1874,11 @@ class ApproovPinningInterceptor implements Interceptor {
         // installation) so build them now if there are still none
         if (getCertificatePinner().getPins().isEmpty())
             buildPins();
+
+        // the generation is read before the pinner so that a rebuild between the two
+        // reads, or between the check and the caching of the verdict, is detected and
+        // the verdict is not cached against the new pins
+        long generation = getPinGeneration();
 
         String host = chain.request().url().host();
         Connection connection = chain.connection();
@@ -1818,8 +1907,8 @@ class ApproovPinningInterceptor implements Interceptor {
                 throw e;
             }
 
-            // pins were valid for the handshake so cache it
-            addValidHandshake(handshake);
+            // pins were valid for the handshake so cache it, unless the pins changed
+            addValidHandshake(handshake, generation);
             Log.d(TAG, "Valid pinning for: " + handshake.toString());
         }
         return chain.proceed(chain.request());

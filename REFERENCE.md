@@ -11,7 +11,7 @@ import io.approov.service.okhttp.ApproovService;
 import io.approov.service.okhttp.ApproovService
 ```
 
-The request path never throws for a runtime condition: a request made through an `OkHttpClient` from `getOkHttpClient` always proceeds, with the fetch status on the `Approov-Status` header and an empty `Approov-Token` header if it could not be protected (see [ADVANCED.md](ADVANCED.md)). The exceptions below are thrown by the direct methods (`precheck`, `fetchToken`, `fetchSecureString`, `fetchCustomJWT`, ...), which return a value to the caller, A custom `ApproovServiceMutator` that opts in to aborting requests throws a standard network stack exception (`IOException` or a subclass), never an Approov type.
+The request path never throws for a runtime Approov condition: a request made through an `OkHttpClient` from `getOkHttpClient` always proceeds, with the fetch status on the `Approov-Status` header and an empty `Approov-Token` header if it could not be protected (see [ADVANCED.md](ADVANCED.md)). The exceptions that can reach the caller from the request path are the app's own configuration errors (`IllegalStateException` for a required body digest that cannot be generated or an unsupported signing algorithm), pinning failures on the app's API domains (`javax.net.ssl.SSLPeerUnverifiedException`, as for any OkHttp pinning failure), and aborts the app itself opted in to through a service mutator. The exceptions below are thrown by the direct methods (`precheck`, `fetchToken`, `fetchSecureString`, `fetchCustomJWT`, ...), which return a value to the caller, A custom `ApproovServiceMutator` that opts in to aborting requests throws a standard network stack exception (`IOException` or a subclass), never an Approov type.
 
 Various methods may throw an `ApproovException` (an `IOException`) if there is a problem. The method `getMessage()` provides a descriptive message. An `ApproovFetchStatusException` (a subclass of `ApproovException`) carries the SDK fetch status in `getStatus()`.
 
@@ -73,7 +73,7 @@ boolean isInitialized()
 fun isInitialized(): Boolean
 ```
 
-Returns `true` if `initialize` has been called successfully, including when bypass mode is active (empty string instead of the account ID). Returns `false` if `initialize` has never been called or if the last initialization attempt failed. Use `isApproovEnabled()` to distinguish between bypass and protected modes.
+Returns `true` if `initialize` has been called successfully, including when bypass mode is active (empty string instead of the account ID). Returns `false` only if `initialize` has never been called successfully. A rejected later call (for example with a different account ID) throws and leaves the previous state in place, so this keeps returning `true`. Use `isApproovEnabled()` to distinguish between bypass and protected modes.
 
 ## isApproovEnabled
 Returns whether Approov protection is currently enabled.
@@ -649,3 +649,80 @@ void setInstallAttrsInToken(String attrs) throws ApproovException
 @Throws(ApproovException::class)
 fun setInstallAttrsInToken(attrs: String)
 ```
+
+# Extension classes
+
+The following classes complete the public surface of the package. A standard integration never touches them; see [ADVANCED.md](ADVANCED.md) for when they are needed.
+
+## ApproovServiceMutator
+
+Interface with default methods, installed with `setServiceMutator`. Every interceptor hook declares `IOException` so that an implementation opting in to aborting a request can throw a standard network stack exception; the defaults never throw.
+
+| Method | Default decision |
+| :--- | :--- |
+| `boolean handleInterceptorShouldProcessRequest(Request) throws IOException` | `false` if the URL matches an exclusion regex, else `true` |
+| `boolean handleInterceptorFetchTokenResult(TokenFetchResult, String url) throws IOException` | `false` for `UNKNOWN_URL` and `UNPROTECTED_URL` (no Approov headers), `true` for every other status (token header, empty if no token, and status header) |
+| `boolean handleInterceptorHeaderSubstitutionResult(TokenFetchResult, String header) throws IOException` | `true` only for `SUCCESS` |
+| `boolean handleInterceptorQueryParamSubstitutionResult(TokenFetchResult, String queryKey) throws IOException` | `true` only for `SUCCESS` |
+| `Request handleInterceptorProcessedRequest(Request, ApproovRequestMutations) throws IOException` | returns the request unchanged; `ApproovDefaultMessageSigning` signs here |
+| `boolean supportsProtectionRefresh()` | `false`; `true` for `ApproovServiceMutator.DEFAULT` and `ApproovDefaultMessageSigning` |
+| `boolean handlePinningShouldProcessRequest(Request) throws IOException` | `true` |
+| `void handlePrecheckResult(TokenFetchResult) throws ApproovException` | throws for every status except `SUCCESS` and `UNKNOWN_KEY` |
+| `void handleFetchTokenResult(TokenFetchResult) throws ApproovException` | throws for every status except `SUCCESS` |
+| `void handleFetchSecureStringResult(TokenFetchResult, String operation, String key) throws ApproovException` | throws for every status except `SUCCESS` and `UNKNOWN_KEY` |
+| `void handleFetchCustomJWTResult(TokenFetchResult) throws ApproovException` | throws for every status except `SUCCESS` |
+| `static boolean isNetworkFailure(TokenFetchStatus)` | `true` for `NO_NETWORK`, `POOR_NETWORK`, `UNTRUSTED_NETWORK` |
+
+`ApproovServiceMutator.DEFAULT` is an instance with these defaults and no message signing.
+
+## ApproovRequestMutations
+
+Passed to `handleInterceptorProcessedRequest`, describing what the interceptor did to the request.
+
+| Method | Meaning |
+| :--- | :--- |
+| `String getTokenHeaderKey()` | name of the token header added, or `null` if none |
+| `String getTokenHeaderPrefix()` | prefix placed before the token, empty if none |
+| `String getTraceIDHeaderKey()` | name of the trace header added, or `null` |
+| `String getStatusHeaderKey()` | name of the status header added, or `null` if disabled |
+| `List<String> getSubstitutionHeaderKeys()` | headers whose values were substituted with secure strings, or `null` |
+| `String getOriginalURL()` | the URL before query parameter substitution, or `null` |
+| `List<String> getSubstitutionQueryParamKeys()` | query parameters substituted, or `null` |
+
+The setters exist for the interceptor and for tests; a mutator does not call them.
+
+## ApproovDefaultMessageSigning
+
+The out-of-the-box mutator (see `createDefaultServiceMutator`). Public surface beyond the mutator hooks:
+
+| Member | Meaning |
+| :--- | :--- |
+| `ApproovDefaultMessageSigning()` | constructs a signer with no factory; install one with `setDefaultFactory` |
+| `ApproovDefaultMessageSigning setDefaultFactory(SignatureParametersFactory)` | factory used for every host without a host factory |
+| `ApproovDefaultMessageSigning putHostFactory(String host, SignatureParametersFactory)` | factory for one host (authority) |
+| `static SignatureParametersFactory generateDefaultSignatureParametersFactory()` | the default factory: both signatures, method and target URI, token, trace and status headers, `Authorization`, `Content-Length`, `Content-Type` when present, optional SHA-256 body digest, `created`, 15 second `expires` |
+| `static SignatureParametersFactory generateDefaultSignatureParametersFactory(SignatureParameters base)` | as above over a custom base component set |
+| `DIGEST_SHA256`, `DIGEST_SHA512` | body digest algorithms |
+| `ALG_ES256`, `ALG_HS256` | signature algorithms (`ecdsa-p256-sha256`, `hmac-sha256`) |
+| `SIG_ID_INSTALL`, `SIG_ID_ACCOUNT` | dictionary member names `install` and `account` |
+| `RequiredBodyDigestException` | `IllegalStateException` thrown when a required body digest cannot be generated |
+
+## ApproovDefaultMessageSigning.SignatureParametersFactory
+
+Builds the signature parameters for each request. All setters return the factory for chaining. A factory is shared by every request it is installed for, so configure it fully before installing it and use a separate instance per distinct configuration.
+
+| Method | Meaning |
+| :--- | :--- |
+| `setBaseParameters(SignatureParameters)` | components always covered |
+| `setUseInstallMessageSigning()` | produce the install signature only |
+| `setUseAccountMessageSigning()` | produce the account signature only |
+| `setUseInstallAndAccountMessageSigning()` | produce both (default) |
+| `List<String> getAlgs()` | the configured algorithms in emission order; throws `IllegalStateException` if none |
+| `setAddCreated(boolean)` | add the `created` parameter |
+| `setExpiresLifetime(long seconds)` | add `expires` this many seconds after `created`; `0` omits it |
+| `setAddApproovTokenHeader(boolean)` | cover the token header |
+| `setAddApproovTraceIDHeader(boolean)` | cover the trace header when present |
+| `setAddApproovStatusHeader(boolean)` | cover the status header when present |
+| `addOptionalHeaders(String...)` | cover these headers when present |
+| `setBodyDigestConfig(String algorithm, boolean required)` | compute `Content-Digest` with `DIGEST_SHA256` or `DIGEST_SHA512`, or `null` for none; `required` fails the request when the digest cannot be generated |
+| `protected SignatureParameters buildSignatureParameters(OkHttpComponentProvider, ApproovRequestMutations)` | override point; a returned parameter set with an explicit `alg` produces that single signature |

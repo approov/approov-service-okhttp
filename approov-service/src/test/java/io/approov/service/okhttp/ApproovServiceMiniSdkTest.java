@@ -1323,7 +1323,7 @@ public class ApproovServiceMiniSdkTest {
 
         @Override
         public Request handleInterceptorProcessedRequest(Request request, ApproovRequestMutations changes)
-                throws ApproovException {
+                throws IOException {
             processedCount.incrementAndGet();
             return super.handleInterceptorProcessedRequest(request, changes);
         }
@@ -1453,6 +1453,251 @@ public class ApproovServiceMiniSdkTest {
         try (Response response = client.newCall(request).execute()) {
             assertEquals(200, response.code());
             assertEquals(1, processedCount.get());
+        }
+    }
+
+    // ==================================================================================
+    // Review findings 2026-09-08 (external review of feature/3.7.0): regressions kept
+    // as permanent tests. SPECIFICATION 2.4, 2.5, 4.5, 6.3, 7.1.
+    // ==================================================================================
+
+    /**
+     * Control: a held request whose refreshed fetch fails is sent with an empty token,
+     * the refreshed status and fresh signatures (both members).
+     */
+    @Test
+    public void testStaleFailureRewritesStatusOnWire() throws Exception {
+        reinitializeServiceWithTargetHost("");
+        ApproovService.setOkHttpClientBuilder(new OkHttpClient.Builder().addNetworkInterceptor(chain -> {
+            ShadowSystemClock.advanceBy(Duration.ofSeconds(10));
+            setDirective("{\"operation\":\"fetchApproovToken\",\"response\":{\"status\":\"NO_NETWORK\"}}");
+            return chain.proceed(chain.request());
+        }));
+        try (Response response = ApproovService.getOkHttpClient().newCall(new Request.Builder().url(getTargetURL()).build()).execute()) {
+            JSONObject reply = new JSONObject(response.body().string());
+            assertEquals("", getHeader(reply, "Approov-Token"));
+            assertEquals("no_network", getHeader(reply, "Approov-Status"));
+            assertTrue(getHeader(reply, "Signature-Input").contains(", account=("));
+        }
+    }
+
+    /**
+     * Finding 4: a refresh whose fetch says the URL is no longer protected must strip
+     * the previously applied protection rather than send it unchanged.
+     */
+    @Test
+    public void testStaleUnprotectedRemovesHeadersOnWire() throws Exception {
+        reinitializeServiceWithTargetHost("");
+        ApproovService.setOkHttpClientBuilder(new OkHttpClient.Builder().addNetworkInterceptor(chain -> {
+            ShadowSystemClock.advanceBy(Duration.ofSeconds(10));
+            setDirective("{\"operation\":\"fetchApproovToken\",\"response\":{\"status\":\"UNPROTECTED_URL\"}}");
+            return chain.proceed(chain.request());
+        }));
+        try (Response response = ApproovService.getOkHttpClient().newCall(new Request.Builder().url(getTargetURL()).build()).execute()) {
+            JSONObject reply = new JSONObject(response.body().string());
+            assertNull("Stale success status must not survive UNPROTECTED_URL", getHeader(reply, "Approov-Status"));
+            assertNull(getHeader(reply, "Approov-Token"));
+            assertNull(getHeader(reply, "Signature"));
+        }
+    }
+
+    /**
+     * Finding 2: a redirect from a protected host to an unprotected one must not carry
+     * the protected host's token, status or signatures (SPECIFICATION 1.5, 7.1).
+     */
+    @Test
+    public void testRedirectToUnprotectedHostRemovesProtectionOnWire() throws Exception {
+        reinitializeServiceWithTargetHost("");
+        AtomicInteger attempts = new AtomicInteger();
+        ApproovService.setOkHttpClientBuilder(new OkHttpClient.Builder().addNetworkInterceptor(chain -> {
+            Response response = chain.proceed(chain.request());
+            if (attempts.getAndIncrement() == 0) {
+                return response.newBuilder().code(302).message("Found")
+                    .header("Location", getUnprotectedURL()).build();
+            }
+            return response;
+        }));
+        try (Response response = ApproovService.getOkHttpClient().newCall(new Request.Builder().url(getTargetURL()).build()).execute()) {
+            assertEquals(2, attempts.get());
+            JSONObject reply = new JSONObject(response.body().string());
+            assertNull("Unprotected redirect received protected origin status", getHeader(reply, "Approov-Status"));
+            assertNull(getHeader(reply, "Approov-Token"));
+            assertNull(getHeader(reply, "Signature"));
+        }
+    }
+
+    /**
+     * Finding 2 (same host): a redirect to another path on the protected host is
+     * re-protected for the new URL, with signatures regenerated over the new target.
+     */
+    @Test
+    public void testRedirectWithinProtectedHostReprotectsForNewURL() throws Exception {
+        reinitializeServiceWithTargetHost("");
+        AtomicInteger attempts = new AtomicInteger();
+        ApproovService.setOkHttpClientBuilder(new OkHttpClient.Builder().addNetworkInterceptor(chain -> {
+            Response response = chain.proceed(chain.request());
+            if (attempts.getAndIncrement() == 0) {
+                return response.newBuilder().code(302).message("Found")
+                    .header("Location", getTargetURL() + "/redirected").build();
+            }
+            return response;
+        }));
+        try (Response response = ApproovService.getOkHttpClient().newCall(new Request.Builder().url(getTargetURL()).build()).execute()) {
+            assertEquals(2, attempts.get());
+            JSONObject reply = new JSONObject(response.body().string());
+            assertTrue(reply.getString("url").endsWith("/redirected"));
+            String token = getHeader(reply, "Approov-Token");
+            assertNotNull(token);
+            assertFalse(token.isEmpty());
+            assertEquals("success", getHeader(reply, "Approov-Status"));
+            assertNotNull(getHeader(reply, "Signature"));
+            // one set of signature members, not the original plus a new one
+            String signature = getHeader(reply, "Signature");
+            assertEquals(signature.indexOf("install="), signature.lastIndexOf("install="));
+        }
+    }
+
+    /**
+     * Finding 3: a refresh must not mutate the marker of the original request. A retry
+     * that reuses the original request object must be refreshed again rather than
+     * sent with its stale headers under a marker that now looks fresh.
+     */
+    @Test
+    public void testRetryOfOriginalRequestIsRefreshedAgain() throws Exception {
+        reinitializeServiceWithTargetHost("");
+        AtomicInteger attempts = new AtomicInteger();
+        ApproovService.setOkHttpClientBuilder(new OkHttpClient.Builder().addNetworkInterceptor(chain -> {
+            if (attempts.getAndIncrement() == 0) {
+                ShadowSystemClock.advanceBy(Duration.ofSeconds(10));
+                setDirective("{\"operation\":\"fetchApproovToken\",\"response\":{\"status\":\"NO_NETWORK\"}}");
+            } else {
+                setDirective("{\"operation\":\"fetchApproovToken\",\"response\":{\"status\":\"NO_NETWORK\"}}");
+            }
+            return chain.proceed(chain.request());
+        }));
+        // RetryAndFollowUpInterceptor reuses its original Request after a recoverable
+        // IOException; this application interceptor, appended after token processing,
+        // repeats the same request object to exercise the same ownership problem
+        OkHttpClient client = ApproovService.getOkHttpClient().newBuilder().addInterceptor(chain -> {
+            try (Response first = chain.proceed(chain.request())) {
+                try {
+                    JSONObject reply = new JSONObject(first.body().string());
+                    assertEquals("no_network", getHeader(reply, "Approov-Status"));
+                } catch (Exception e) {
+                    throw new IOException(e);
+                }
+            }
+            return chain.proceed(chain.request());
+        }).build();
+        try (Response response = client.newCall(new Request.Builder().url(getTargetURL()).build()).execute()) {
+            assertEquals(2, attempts.get());
+            JSONObject reply = new JSONObject(response.body().string());
+            assertEquals("Retry must use refreshed status, not mark the original status fresh", "no_network", getHeader(reply, "Approov-Status"));
+            assertEquals("", getHeader(reply, "Approov-Token"));
+        }
+    }
+
+    /**
+     * Finding 7: the prefetch callback records the ARC of its result like every other
+     * fetch this layer performs (SPECIFICATION 5.3).
+     */
+    @Test
+    public void testPrefetchCallbackRecordsARC() throws Exception {
+        reinitializeServiceWithTargetHost("");
+        setDirective("{\"operation\":\"fetchApproovToken\",\"response\":{\"status\":\"REJECTED\",\"arc\":\"PREFETCH-ARC\"}}");
+        Approov.TokenFetchResult result = Approov.fetchApproovTokenAndWait("https://approov.io");
+        new PrefetchCallbackHandler().approovCallback(result);
+        assertEquals("PREFETCH-ARC", ApproovService.getLastARC());
+    }
+
+    /**
+     * Control: a factory subclass setting an explicit algorithm produces that single
+     * signature, and debug mode emits a per-member Signature-Base-Digest.
+     */
+    @Test
+    public void testExplicitAlgorithmAndDebugDigest() throws Exception {
+        reinitializeServiceWithTargetHost("");
+        ApproovDefaultMessageSigning.SignatureParametersFactory factory = new ApproovDefaultMessageSigning.SignatureParametersFactory() {
+            @Override
+            protected io.approov.util.sig.SignatureParameters buildSignatureParameters(ApproovDefaultMessageSigning.OkHttpComponentProvider provider, ApproovRequestMutations changes) {
+                io.approov.util.sig.SignatureParameters params = super.buildSignatureParameters(provider, changes);
+                params.setAlg(ApproovDefaultMessageSigning.ALG_HS256);
+                params.setDebugMode(true);
+                return params;
+            }
+        };
+        factory.setAddApproovTokenHeader(true).setAddApproovStatusHeader(true).setUseInstallAndAccountMessageSigning();
+        ApproovService.setServiceMutator(new ApproovDefaultMessageSigning().setDefaultFactory(factory));
+        try (Response response = ApproovService.getOkHttpClient().newCall(new Request.Builder().url(getTargetURL()).build()).execute()) {
+            JSONObject reply = new JSONObject(response.body().string());
+            assertTrue(getHeader(reply, "Signature").startsWith("account=:"));
+            assertFalse(getHeader(reply, "Signature-Input").contains("install="));
+            assertTrue(getHeader(reply, "Signature-Base-Digest").startsWith("account=:"));
+        }
+    }
+
+    /**
+     * Findings 5 and 6: every interceptor hook, including the pinning hook and the
+     * default signing class's processed request override, declares IOException so
+     * that an opt-in abort can be a standard network exception (SPECIFICATION 6.3).
+     */
+    @Test
+    public void testAllInterceptorHooksDeclareIOException() throws Exception {
+        assertTrue(java.util.Arrays.asList(ApproovServiceMutator.class.getMethod("handlePinningShouldProcessRequest", Request.class).getExceptionTypes()).contains(IOException.class));
+        assertTrue(java.util.Arrays.asList(ApproovDefaultMessageSigning.class.getMethod("handleInterceptorProcessedRequest", Request.class, ApproovRequestMutations.class).getExceptionTypes()).contains(IOException.class));
+        // a signing subclass may declare the standard exception on its override
+        ApproovDefaultMessageSigning signer = new ApproovDefaultMessageSigning() {
+            @Override
+            public Request handleInterceptorProcessedRequest(Request request, ApproovRequestMutations changes) throws IOException {
+                return super.handleInterceptorProcessedRequest(request, changes);
+            }
+            @Override
+            public boolean handlePinningShouldProcessRequest(Request request) throws IOException {
+                return true;
+            }
+        };
+        assertNotNull(signer);
+    }
+
+    /**
+     * Finding 1: a handshake verdict reached against one generation of pins must not
+     * be cached once the pins have been rebuilt (SPECIFICATION 2.4, 2.5).
+     */
+    @Test
+    public void testPinUpdateCannotCacheOldGenerationVerdict() throws Exception {
+        reinitializeServiceWithTargetHost("");
+        java.security.cert.Certificate peer;
+        try (Response response = new OkHttpClient().newCall(new Request.Builder().url(getTargetURL()).build()).execute()) {
+            peer = response.handshake().peerCertificates().get(0);
+        }
+        CertificatePinner valid = new CertificatePinner.Builder().add(getTargetHost(), CertificatePinner.pin(peer)).build();
+        AtomicInteger reads = new AtomicInteger();
+        ApproovPinningInterceptor interceptor = new ApproovPinningInterceptor() {
+            @Override synchronized CertificatePinner getCertificatePinner() {
+                CertificatePinner snapshot = super.getCertificatePinner();
+                if (reads.incrementAndGet() == 2) {
+                    // inject the interleaving: another dispatcher finishes a config change
+                    // rebuild after this request obtains its old pinner, before this request
+                    // checks and caches its old generation verdict
+                    AttesterProxyController.setNextPinningDirectiveJson("{\"operation\":\"getPins\",\"shouldFail\":true}");
+                    buildPins();
+                }
+                return snapshot;
+            }
+        };
+        java.lang.reflect.Field pinnerField = ApproovPinningInterceptor.class.getDeclaredField("certificatePinner");
+        pinnerField.setAccessible(true);
+        pinnerField.set(interceptor, valid);
+        OkHttpClient client = new OkHttpClient.Builder().addNetworkInterceptor(interceptor).build();
+        Request request = new Request.Builder().url(getTargetURL()).build();
+        try (Response response = client.newCall(request).execute()) {
+            assertEquals(200, response.code());
+        }
+        assertTrue(interceptor.getCertificatePinner().getPins().toString().contains("AAAAAAAA"));
+        try (Response response = client.newCall(request).execute()) {
+            fail("Request succeeded after pins rotated to a nonmatching pin: stale verdict was reinserted in cache");
+        } catch (javax.net.ssl.SSLPeerUnverifiedException expected) {
+            // the new pin generation is enforced on the next request
         }
     }
 

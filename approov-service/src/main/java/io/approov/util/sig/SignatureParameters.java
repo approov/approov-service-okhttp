@@ -60,6 +60,7 @@ public class SignatureParameters implements Cloneable {
 		componentIdentifiers = new ArrayList<>(base.componentIdentifiers);
 		// Parameters are immutable (except for custom params with byte arrays but we ignore those)
 		parameters = new LinkedHashMap<>(base.parameters);
+		debugMode = base.debugMode;
 	}
 
 	/**

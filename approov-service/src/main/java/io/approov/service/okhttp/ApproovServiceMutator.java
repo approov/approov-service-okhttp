@@ -372,8 +372,11 @@ public interface ApproovServiceMutator {
      *
      * @param request the request being processed
      * @return true if pinning should be applied, false to skip it
+     * @throws IOException an overriding implementation may throw a standard network
+     *                     stack exception to abort the request, which the default
+     *                     never does
      */
-    default boolean handlePinningShouldProcessRequest(Request request) {
+    default boolean handlePinningShouldProcessRequest(Request request) throws IOException {
         // By default do not skip pinning for any requests
         return true;
     }
