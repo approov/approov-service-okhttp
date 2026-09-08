@@ -63,9 +63,14 @@ class ApproovRequestFreshness {
     // differs is a redirect followup that must be reclassified
     private volatile String appliedURL;
 
-    // the values the substituted headers had before substitution, so that the
-    // placeholders can be restored when the protection is stripped
-    private volatile Map<String, String> originalHeaderValues;
+    // the complete ordered values each substituted header had before substitution,
+    // so that the placeholders can be restored when the protection is stripped
+    private volatile Map<String, List<String>> originalHeaderValues;
+
+    // the value each substituted header was given, so that the placeholder is only
+    // restored if the header still holds what this layer installed and not a value
+    // the app changed afterwards (for example from an OkHttp authenticator)
+    private volatile Map<String, String> installedHeaderValues;
 
     /**
      * Constructs a marker for protection applied to a request.
@@ -80,6 +85,7 @@ class ApproovRequestFreshness {
         this.mutatorAddedHeaders = Collections.emptyList();
         this.appliedURL = null;
         this.originalHeaderValues = Collections.emptyMap();
+        this.installedHeaderValues = Collections.emptyMap();
     }
 
     String getFetchURL() {
@@ -118,12 +124,23 @@ class ApproovRequestFreshness {
         this.appliedURL = appliedURL;
     }
 
-    Map<String, String> getOriginalHeaderValues() {
+    Map<String, List<String>> getOriginalHeaderValues() {
         return originalHeaderValues;
     }
 
-    void setOriginalHeaderValues(Map<String, String> originalHeaderValues) {
+    Map<String, String> getInstalledHeaderValues() {
+        return installedHeaderValues;
+    }
+
+    /**
+     * Records the secure string substitutions applied to the request.
+     *
+     * @param originalHeaderValues the complete values each header had before
+     * @param installedHeaderValues the value each header was given
+     */
+    void setSubstitutions(Map<String, List<String>> originalHeaderValues, Map<String, String> installedHeaderValues) {
         this.originalHeaderValues = originalHeaderValues;
+        this.installedHeaderValues = installedHeaderValues;
     }
 
     /**

@@ -178,7 +178,12 @@ Keep hooks fast and free of side effects: they run on the request path. A mutato
 
 ## Stale protection refresh
 
-A request held between Approov processing and transmission, for example by a device doze period or an app-level queue, would otherwise go out with an expired token or signature. A network interceptor strips and reapplies the protection immediately before transmission when the request has been held for longer than the refresh period (default 3000 ms): the token is refetched (from the SDK cache when still valid), the status header reflects the new result, substitutions are redone and the signatures regenerated. It runs on every network attempt, so OkHttp's own retries are refreshed too, and a **redirect** is reclassified for its new URL: a redirect to a domain Approov does not protect leaves with no Approov headers, and a redirect within a protected domain is re-signed over the new target.
+A request held between Approov processing and transmission, for example by a device doze period or an app-level queue, would otherwise go out with an expired token or signature. A network interceptor strips and reapplies the protection immediately before transmission when the request has been held for longer than the refresh period (default 3000 ms): the token is refetched (from the SDK cache when still valid), the status header reflects the new result, substitutions are redone and the signatures regenerated. It runs on every network attempt, so OkHttp's own retries are refreshed too, and a **redirect** is reclassified for its new URL: a redirect to a domain Approov does not protect leaves with no Approov headers, and a redirect within a protected domain is re-signed over the new target. A header the app changed between attempts (for example an OkHttp `Authenticator` swapping a key) is kept and substituted afresh; only headers still holding the value this layer installed are restored to their placeholders.
+
+Two limits, accepted by design:
+
+* Only requests that were given protection are reclassified on redirect. A request to a domain that is not in Approov which redirects into a protected domain arrives at the protected domain without protection and the backend rejects it. Add every domain the app calls, including legacy or alias domains that redirect, to Approov.
+* The layer restores what it added, not what it replaced. If the app itself sets `Signature` or `Signature-Input` headers on a request that Approov also signs, the value this layer wrote is treated as the app's on a redirect and travels with it. Do not set those headers yourself on Approov-protected requests.
 
 ```kotlin
 ApproovService.setStaleProtectionRefreshPeriod(1000)   // <= 0 disables

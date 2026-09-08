@@ -1761,6 +1761,72 @@ public class ApproovServiceMiniSdkTest {
     }
 
     /**
+     * Re-review finding 4: a refresh must not undo a header change the app made after
+     * the substitution. An OkHttp authenticator replaces the placeholder with a second
+     * key; the stale refresh substitutes that key, not the first one.
+     */
+    @Test
+    public void testRefreshedSubstitutionHonoursAuthenticatorHeaderReplacement() throws Exception {
+        String targetHost = getTargetHost();
+        reinitializeService(scenarioJson(uniqueCaseName("auth-rotates-key"),
+            "\"protectedDomains\": [\"" + targetHost + "\"]," +
+            "\"initialSecureStrings\": {\"first-key\": \"first-secret\", \"second-key\": \"second-secret\"}"
+        ));
+        ApproovService.addSubstitutionHeader("Api-Key", null);
+        AtomicInteger attempts = new AtomicInteger();
+        ApproovService.setOkHttpClientBuilder(new OkHttpClient.Builder()
+            .addNetworkInterceptor(chain -> {
+                Response response = chain.proceed(chain.request());
+                if (attempts.getAndIncrement() == 0) {
+                    // the app's authenticator will retry after this; make the retry stale
+                    ShadowSystemClock.advanceBy(Duration.ofSeconds(10));
+                    return response.newBuilder().code(401).message("Unauthorized").build();
+                }
+                return response;
+            })
+            .authenticator((route, response) -> {
+                if ("second-key".equals(response.request().header("Api-Key")) ||
+                        "second-secret".equals(response.request().header("Api-Key")))
+                    return null;
+                return response.request().newBuilder().header("Api-Key", "second-key").build();
+            }));
+        Request request = new Request.Builder().url(getTargetURL()).header("Api-Key", "first-key").build();
+        try (Response response = ApproovService.getOkHttpClient().newCall(request).execute()) {
+            assertEquals(200, response.code());
+            assertEquals(2, attempts.get());
+            JSONObject reply = new JSONObject(response.body().string());
+            assertEquals("second-secret", getHeader(reply, "Api-Key"));
+            assertEquals("success", getHeader(reply, "Approov-Status"));
+        }
+    }
+
+    /**
+     * Re-review finding 5: stripping a substitution restores every original field of
+     * a repeated header, in order.
+     */
+    @Test
+    public void testStaleUnprotectedRestoresAllOriginalHeaderValues() throws Exception {
+        String targetHost = getTargetHost();
+        reinitializeService(scenarioJson(uniqueCaseName("repeated-header"),
+            "\"protectedDomains\": [\"" + targetHost + "\"]," +
+            "\"initialSecureStrings\": {\"second-key\": \"second-secret\"}"
+        ));
+        ApproovService.addSubstitutionHeader("X-List", null);
+        ApproovService.setOkHttpClientBuilder(new OkHttpClient.Builder().addNetworkInterceptor(chain -> {
+            ShadowSystemClock.advanceBy(Duration.ofSeconds(10));
+            setDirective("{\"operation\":\"fetchApproovToken\",\"response\":{\"status\":\"UNPROTECTED_URL\"}}");
+            return chain.proceed(chain.request());
+        }));
+        Request request = new Request.Builder().url(getTargetURL())
+            .addHeader("X-List", "first-key").addHeader("X-List", "second-key").build();
+        try (Response response = ApproovService.getOkHttpClient().newCall(request).execute()) {
+            JSONObject reply = new JSONObject(response.body().string());
+            assertNull(getHeader(reply, "Approov-Status"));
+            assertEquals(java.util.Arrays.asList("first-key", "second-key"), getHeaderValues(reply, "X-List"));
+        }
+    }
+
+    /**
      * T37-06 with signing on: a renamed status header is covered by the default
      * signature under its new name.
      */
@@ -2024,6 +2090,21 @@ public class ApproovServiceMiniSdkTest {
         return null;
     }
  
+    // all values of a header from the echo reply, whether reported as an array or as a
+    // single comma joined field
+    private List<String> getHeaderValues(JSONObject reply, String key) throws Exception {
+        JSONObject headers = reply.getJSONObject("headers");
+        Object val = headers.has(key.toLowerCase()) ? headers.get(key.toLowerCase()) : headers.opt(key);
+        List<String> values = new ArrayList<>();
+        if (val instanceof org.json.JSONArray) {
+            org.json.JSONArray arr = (org.json.JSONArray) val;
+            for (int i = 0; i < arr.length(); i++) values.add(arr.getString(i));
+        } else if (val instanceof String) {
+            for (String part : ((String) val).split(",")) values.add(part.trim());
+        }
+        return values;
+    }
+
     private JSONObject decodeJWTBody(String jwt) throws Exception {
         String[] parts = jwt.split("\\.");
         if (parts.length != 3) return null;

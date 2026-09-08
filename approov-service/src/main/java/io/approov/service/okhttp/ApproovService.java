@@ -1507,7 +1507,7 @@ class ApproovTokenInterceptor implements Interceptor {
         // that the substitution can be undone if the protection is reapplied
         Map<String, String> substitutionHeaders = ApproovService.getSubstitutionHeaders();
         Map<String, String> setSubstitutionHeaders = new LinkedHashMap<>(substitutionHeaders.size());
-        Map<String, String> originalHeaderValues = new LinkedHashMap<>(substitutionHeaders.size());
+        Map<String, List<String>> originalHeaderValues = new LinkedHashMap<>(substitutionHeaders.size());
         for (Map.Entry<String, String> entry : substitutionHeaders.entrySet()) {
             String header = entry.getKey();
             String prefix = entry.getValue();
@@ -1521,7 +1521,8 @@ class ApproovTokenInterceptor implements Interceptor {
                 if (mutator.handleInterceptorHeaderSubstitutionResult(approovResults, header)) {
                     aChange = true;
                     setSubstitutionHeaders.put(header, prefix + approovResults.getSecureString());
-                    originalHeaderValues.put(header, value);
+                    // every field of the name, in order, so that all can be restored
+                    originalHeaderValues.put(header, new ArrayList<>(request.headers(header)));
                 }
             }
         }
@@ -1568,7 +1569,7 @@ class ApproovTokenInterceptor implements Interceptor {
                 // network layer whether the protection was applied too long ago and must
                 // be refreshed before transmission, or whether the request was redirected
                 freshness = new ApproovRequestFreshness(url.toString(), changes);
-                freshness.setOriginalHeaderValues(originalHeaderValues);
+                freshness.setSubstitutions(originalHeaderValues, setSubstitutionHeaders);
                 builder.tag(ApproovRequestFreshness.class, freshness);
             }
             if (setTraceIDHeaderKey != null) {
@@ -1621,9 +1622,13 @@ class ApproovTokenInterceptor implements Interceptor {
      * Removes the Approov protection described by a freshness marker from a
      * request: the token, trace and status headers, the headers added by the
      * mutator's processed request callback, the marker itself, and the secure
-     * string substitutions, whose placeholder values are restored. The URL is
-     * restored to its pre-substitution form only when the request has not been
-     * redirected, since a redirect target is the server's URL, not ours.
+     * string substitutions, whose placeholder values (every field of the name, in
+     * order) are restored. A substituted header is only restored if it still holds
+     * the value this layer installed: a value the app changed afterwards, for
+     * example from an OkHttp authenticator, is left in place and is substituted
+     * afresh when protection is reapplied. The URL is restored to its
+     * pre-substitution form only when the request has not been redirected, since a
+     * redirect target is the server's URL, not ours.
      *
      * @param request    the request carrying the protection
      * @param freshness  the marker describing the protection
@@ -1641,11 +1646,15 @@ class ApproovTokenInterceptor implements Interceptor {
             builder.removeHeader(changes.getTraceIDHeaderKey());
         if (changes.getStatusHeaderKey() != null)
             builder.removeHeader(changes.getStatusHeaderKey());
-        for (Map.Entry<String, String> entry : freshness.getOriginalHeaderValues().entrySet()) {
-            if (entry.getValue() == null)
-                builder.removeHeader(entry.getKey());
-            else
-                builder.header(entry.getKey(), entry.getValue());
+        for (Map.Entry<String, List<String>> entry : freshness.getOriginalHeaderValues().entrySet()) {
+            String header = entry.getKey();
+            List<String> current = request.headers(header);
+            String installed = freshness.getInstalledHeaderValues().get(header);
+            if ((current.size() != 1) || !current.get(0).equals(installed))
+                continue;
+            builder.removeHeader(header);
+            for (String value : entry.getValue())
+                builder.addHeader(header, value);
         }
         if (restoreURL && (changes.getOriginalURL() != null))
             builder.url(changes.getOriginalURL());
