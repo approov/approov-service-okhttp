@@ -483,8 +483,9 @@ public class ApproovDefaultMessageSigning implements ApproovServiceMutator {
         // installation key).
         protected boolean useInstallMessageSigning = true;
         // True to produce the account message signature (HMAC-SHA256 with the shared
-        // account key). Both may be set to produce both signatures.
-        protected boolean useAccountMessageSigning;
+        // account key). Both are true by default so that a bare factory produces both
+        // signatures unless one is selected explicitly.
+        protected boolean useAccountMessageSigning = true;
         // True to add the "created" timestamp field to the signature parameters.
         protected boolean addCreated;
         // Expiration lifetime in seconds; if >0 the "expires" field is added to the
@@ -565,7 +566,7 @@ public class ApproovDefaultMessageSigning implements ApproovServiceMutator {
          * Configures the factory to produce both the install and the account
          * message signatures, as members "install" and "account" of the same
          * Signature and Signature-Input dictionaries over the same covered
-         * components. This is the default.
+         * components. This is the default of a newly constructed factory.
          *
          * @return The current instance for method chaining.
          */

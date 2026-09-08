@@ -688,8 +688,37 @@ Passed to `handleInterceptorProcessedRequest`, describing what the interceptor d
 | `List<String> getSubstitutionHeaderKeys()` | headers whose values were substituted with secure strings, or `null` |
 | `String getOriginalURL()` | the URL before query parameter substitution, or `null` |
 | `List<String> getSubstitutionQueryParamKeys()` | query parameters substituted, or `null` |
+| `void setTokenHeaderKey(String)` | sets the token header name |
+| `void setTokenHeaderPrefix(String)` | sets the token prefix |
+| `void setTraceIDHeaderKey(String)` | sets the trace header name |
+| `void setStatusHeaderKey(String)` | sets the status header name |
+| `void setSubstitutionHeaderKeys(List<String>)` | sets the substituted header names |
+| `void setSubstitutionQueryParamResults(String originalURL, List<String> keys)` | sets the pre-substitution URL and the substituted query parameters |
 
-The setters exist for the interceptor and for tests; a mutator does not call them.
+The setters are used by the interceptor and by tests that construct a mutations object for a custom mutator; a mutator receiving the object reads it and does not need to call them.
+
+## SignatureParameters
+
+`io.approov.util.sig.SignatureParameters` holds the covered components and the signature parameters of one signature (RFC 9421 section 2.3). It is what `SignatureParametersFactory.setBaseParameters` takes, what `generateDefaultSignatureParametersFactory(SignatureParameters)` accepts, and what a factory subclass returns from `buildSignatureParameters`.
+
+| Method | Meaning |
+| :--- | :--- |
+| `SignatureParameters()` | empty parameter set |
+| `SignatureParameters(SignatureParameters base)` | copy of the components, parameters and debug flag of another set |
+| `SignatureParameters addComponentIdentifier(String)` / `(StringItem)` | cover a component: a derived component such as `ComponentProvider.DC_METHOD` (`@method`) or `DC_TARGET_URI` (`@target-uri`), or a header name |
+| `boolean containsComponentIdentifier(String)` / `(StringItem)` | whether a component is covered |
+| `String getAlg()` / `SignatureParameters setAlg(String)` | signature algorithm; left unset by the default factory so that one signature per configured algorithm is produced, set explicitly to produce a single signature |
+| `Long getCreated()` / `setCreated(Long)` | the `created` parameter, seconds since the epoch |
+| `Long getExpires()` / `setExpires(Long)` | the `expires` parameter |
+| `String getKeyid()` / `setKeyid(String)` | the `keyid` parameter, unused by Approov signatures |
+| `String getNonce()` / `setNonce(String)` | the `nonce` parameter |
+| `String getTag()` / `setTag(String)` | the `tag` parameter |
+| `Object getCustomParameter(String)` / `setCustomParameter(String, Object)` | any other signature parameter |
+| `SignatureParameters setParameters(Map<String, Object>)` | replaces all signature parameters |
+| `boolean isDebugMode()` / `void setDebugMode(boolean)` | when true the signer adds `Signature-Base-Digest`, a SHA-256 of each signature base, for verifier debugging |
+| `StringItem toComponentIdentifier()` | the `@signature-params` identifier |
+| `InnerList toComponentValue()` | the `Signature-Input` member value for this set |
+| `static SignatureParameters fromDictionaryEntry(Dictionary, String sigId)` | parses a `Signature-Input` member back into a parameter set |
 
 ## ApproovDefaultMessageSigning
 
@@ -716,7 +745,7 @@ Builds the signature parameters for each request. All setters return the factory
 | `setBaseParameters(SignatureParameters)` | components always covered |
 | `setUseInstallMessageSigning()` | produce the install signature only |
 | `setUseAccountMessageSigning()` | produce the account signature only |
-| `setUseInstallAndAccountMessageSigning()` | produce both (default) |
+| `setUseInstallAndAccountMessageSigning()` | produce both; this is also the state of a newly constructed factory |
 | `List<String> getAlgs()` | the configured algorithms in emission order; throws `IllegalStateException` if none |
 | `setAddCreated(boolean)` | add the `created` parameter |
 | `setExpiresLifetime(long seconds)` | add `expires` this many seconds after `created`; `0` omits it |

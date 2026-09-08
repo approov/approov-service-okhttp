@@ -1030,6 +1030,24 @@ public class ApproovServiceMiniSdkTest {
     }
 
     /**
+     * M37-25: a bare SignatureParametersFactory produces both signatures unless one
+     * is selected explicitly, so a custom factory does not silently drop to install
+     * only.
+     */
+    @Test
+    public void testBareFactoryDefaultsToBothSignatures() {
+        ApproovDefaultMessageSigning.SignatureParametersFactory factory =
+            new ApproovDefaultMessageSigning.SignatureParametersFactory();
+        assertEquals(java.util.Arrays.asList(ApproovDefaultMessageSigning.ALG_ES256,
+            ApproovDefaultMessageSigning.ALG_HS256), factory.getAlgs());
+        assertEquals(java.util.Collections.singletonList(ApproovDefaultMessageSigning.ALG_ES256),
+            factory.setUseInstallMessageSigning().getAlgs());
+        assertEquals(java.util.Collections.singletonList(ApproovDefaultMessageSigning.ALG_HS256),
+            factory.setUseAccountMessageSigning().getAlgs());
+        assertEquals(2, factory.setUseInstallAndAccountMessageSigning().getAlgs().size());
+    }
+
+    /**
      * 3.7.0 §3: when one of the two default signatures cannot be produced the
      * request proceeds with the other, rather than unsigned or aborted.
      */
