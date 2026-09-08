@@ -354,7 +354,8 @@ public class ApproovServiceMiniSdkTest {
      */
     @Test
     public void testEveryTokenFetchFailureProceedsAndReportsOnStatusHeader() throws Exception {
-        String[] statuses = {"NO_NETWORK", "POOR_NETWORK", "NO_APPROOV_SERVICE", "INTERNAL_ERROR", "REJECTED"};
+        String[] statuses = {"NO_NETWORK", "POOR_NETWORK", "UNTRUSTED_NETWORK", "NO_APPROOV_SERVICE",
+            "INTERNAL_ERROR", "REJECTED", "BAD_URL", "NO_NETWORK_PERMISSION", "MISSING_LIB_DEPENDENCY", "DISABLED"};
         for (String status : statuses) {
             reinitializeServiceWithTargetHost("");
             setDirective("{" +
@@ -495,6 +496,9 @@ public class ApproovServiceMiniSdkTest {
             JSONObject reply = new JSONObject(response.body().string());
             assertTrue(reply.getString("url").contains("api_key=query-key"));
             assertEquals("success", getHeader(reply, "Approov-Status"));
+            String token = getHeader(reply, "Approov-Token");
+            assertNotNull(token);
+            assertFalse(token.isEmpty());
         }
 
         Request unknown = new Request.Builder().url(getTargetURL() + "?api_key=not-a-secure-string").get().build();
@@ -702,32 +706,62 @@ public class ApproovServiceMiniSdkTest {
     }
 
     /**
-     * 3.7.0 §2 (Behaviour-Spec): MITM_DETECTED is dropped on the Approov channel.
-     *
-     * The 3.7.0 SDK replaces MITM_DETECTED with UNTRUSTED_NETWORK in
-     * Approov.TokenFetchStatus. UNTRUSTED_NETWORK is a network failure and
-     * fetchToken must map it to ApproovNetworkException (T37-03). This cannot be
-     * exercised until the mini SDK carries the 3.7.0 enum (M37-19); the transitional
-     * behaviour asserted here is that MITM_DETECTED, still emitted by the 3.5.x mini
-     * SDK, is no longer classified as a network failure by this layer.
+     * T37-03 / SPECIFICATION 2.2: UNTRUSTED_NETWORK (the 3.7.0 replacement of
+     * MITM_DETECTED) is a network failure for the direct methods: fetchToken,
+     * fetchSecureString, fetchCustomJWT and precheck throw ApproovNetworkException.
      */
     @Test
-    public void testFetchTokenMitmDetectedIsNoLongerANetworkFailure() throws Exception {
+    @SuppressWarnings("deprecation")
+    public void testDirectMethodsClassifyUntrustedNetworkAsNetworkFailure() throws Exception {
         reinitializeServiceWithTargetHost("");
-        setDirective("{" +
-            "  \"operation\": \"fetchApproovToken\"," +
-            "  \"response\": {" +
-            "    \"status\": \"MITM_DETECTED\"" +
-            "  }" +
-            "}");
+        String[][] ops = {
+            {"fetchApproovToken", "fetchToken"},
+            {"fetchSecureString", "fetchSecureString"},
+            {"fetchCustomJWT", "fetchCustomJWT"},
+            {"fetchSecureString", "precheck"}};
+        for (String[] op : ops) {
+            setDirective("{\"operation\": \"" + op[0] + "\", \"response\": {\"status\": \"UNTRUSTED_NETWORK\"}}");
+            try {
+                switch (op[1]) {
+                    case "fetchToken": ApproovService.fetchToken(getTargetURL()); break;
+                    case "fetchSecureString": ApproovService.fetchSecureString("header-key", null); break;
+                    case "fetchCustomJWT": ApproovService.fetchCustomJWT("{\"role\":\"tester\"}"); break;
+                    default: ApproovService.precheck();
+                }
+                fail(op[1] + ": expected ApproovNetworkException");
+            } catch (ApproovNetworkException e) {
+                assertTrue(op[1] + ": " + e.getMessage(), e.getMessage().contains("UNTRUSTED_NETWORK"));
+                assertEquals(Approov.TokenFetchStatus.UNTRUSTED_NETWORK, e.getTokenFetchStatus());
+            }
+        }
+    }
 
-        try {
-            ApproovService.fetchToken(getTargetURL());
-            fail("Expected ApproovFetchStatusException");
-        } catch (ApproovNetworkException e) {
-            fail("MITM_DETECTED must not be classified as a network failure on 3.7.x");
-        } catch (ApproovFetchStatusException e) {
-            assertTrue(e.getMessage().contains("fetchToken: MITM_DETECTED"));
+    /**
+     * T37-03 / SPECIFICATION 2.2: on the request path UNTRUSTED_NETWORK proceeds like
+     * NO_NETWORK, with an empty token, the lowercased status, and the default
+     * signatures covering both headers. An interception on the attestation path no
+     * longer blocks the request.
+     */
+    @Test
+    public void testUntrustedNetworkProceedsOnTheWire() throws Exception {
+        reinitializeServiceWithTargetHost("");
+        setDirective("{\"operation\": \"fetchApproovToken\", \"response\": {\"status\": \"UNTRUSTED_NETWORK\"}}");
+        OkHttpClient client = ApproovService.getOkHttpClient();
+        try (Response response = client.newCall(new Request.Builder().url(getTargetURL()).get().build()).execute()) {
+            assertEquals(200, response.code());
+            JSONObject reply = new JSONObject(response.body().string());
+            assertEquals("", getHeader(reply, "Approov-Token"));
+            assertEquals("untrusted_network", getHeader(reply, "Approov-Status"));
+            String signatureInput = getHeader(reply, "Signature-Input");
+            assertNotNull(signatureInput);
+            assertTrue(signatureInput, signatureInput.contains("\"approov-status\""));
+        }
+        // the mini SDK's attester channel interception directive now yields the same status
+        setDirective("{\"operation\": \"fetchApproovToken\", \"response\": {\"attesterChannelMitm\": true}}");
+        try (Response response = client.newCall(new Request.Builder().url(getTargetURL()).get().build()).execute()) {
+            assertEquals(200, response.code());
+            JSONObject reply = new JSONObject(response.body().string());
+            assertEquals("untrusted_network", getHeader(reply, "Approov-Status"));
         }
     }
 
@@ -846,6 +880,12 @@ public class ApproovServiceMiniSdkTest {
             }
         });
 
+        // count network attempts so that the abort is shown to send nothing
+        AtomicInteger attempts = new AtomicInteger();
+        ApproovService.setOkHttpClientBuilder(new OkHttpClient.Builder().addNetworkInterceptor(chain -> {
+            attempts.incrementAndGet();
+            return chain.proceed(chain.request());
+        }));
         OkHttpClient client = ApproovService.getOkHttpClient();
         Request request = new Request.Builder().url(getTargetURL()).get().build();
         try (Response response = client.newCall(request).execute()) {
@@ -855,6 +895,7 @@ public class ApproovServiceMiniSdkTest {
         } catch (java.net.ConnectException e) {
             assertTrue(e.getMessage().contains("attestation unavailable: NO_NETWORK"));
         }
+        assertEquals(0, attempts.get());
     }
 
     // ==================================================================================
@@ -1699,6 +1740,192 @@ public class ApproovServiceMiniSdkTest {
         } catch (javax.net.ssl.SSLPeerUnverifiedException expected) {
             // the new pin generation is enforced on the next request
         }
+    }
+
+    /**
+     * T37-06 with signing on: a renamed status header is covered by the default
+     * signature under its new name.
+     */
+    @Test
+    public void testRenamedStatusHeaderIsCoveredBySignature() throws Exception {
+        reinitializeServiceWithTargetHost("");
+        ApproovService.setStatusHeader("X-Approov-Fetch-Status");
+        try (Response response = ApproovService.getOkHttpClient().newCall(new Request.Builder().url(getTargetURL()).build()).execute()) {
+            JSONObject reply = new JSONObject(response.body().string());
+            assertEquals("success", getHeader(reply, "X-Approov-Fetch-Status"));
+            assertNull(getHeader(reply, "Approov-Status"));
+            String signatureInput = getHeader(reply, "Signature-Input");
+            assertTrue(signatureInput, signatureInput.contains("\"x-approov-fetch-status\""));
+            assertFalse(signatureInput, signatureInput.contains("\"approov-status\""));
+        }
+    }
+
+    /**
+     * T37-09 / SPECIFICATION 5.4: no failure cache. A request after a failed fetch is
+     * given a token as soon as the SDK provides one again; nothing in the layer
+     * replays the failure.
+     */
+    @Test
+    public void testNoFailureCacheBetweenRequests() throws Exception {
+        reinitializeServiceWithTargetHost("");
+        OkHttpClient client = ApproovService.getOkHttpClient();
+        setDirective("{\"operation\": \"fetchApproovToken\", \"response\": {\"status\": \"NO_NETWORK\"}}");
+        try (Response response = client.newCall(new Request.Builder().url(getTargetURL()).build()).execute()) {
+            JSONObject reply = new JSONObject(response.body().string());
+            assertEquals("no_network", getHeader(reply, "Approov-Status"));
+        }
+        try (Response response = client.newCall(new Request.Builder().url(getTargetURL()).build()).execute()) {
+            JSONObject reply = new JSONObject(response.body().string());
+            assertEquals("success", getHeader(reply, "Approov-Status"));
+            String token = getHeader(reply, "Approov-Token");
+            assertNotNull(token);
+            assertFalse(token.isEmpty());
+        }
+    }
+
+    /**
+     * T37-10 / SPECIFICATION 5.2: the removed APIs are absent from the public surface
+     * and the deprecated ones that must stay are present.
+     */
+    @Test
+    public void testRemovedApisAreAbsentAndRetainedDeprecatedOnesPresent() throws Exception {
+        java.util.Set<String> names = new java.util.HashSet<>();
+        for (java.lang.reflect.Method m : ApproovService.class.getMethods())
+            names.add(m.getName());
+        for (String removed : new String[] {"setProceedOnNetworkFail", "getProceedOnNetworkFail",
+                "setUseApproovStatusIfNoToken", "getUseApproovStatusIfNoToken",
+                "setApproovInterceptorExtensions", "getApproovInterceptorExtensions"})
+            assertFalse(removed + " must be removed on 3.7.x", names.contains(removed));
+        for (String retained : new String[] {"getMessageSignature", "prefetch", "setApproovHeader",
+                "setApproovTraceIDHeader", "setTokenHeader", "setTraceIDHeader", "setStatusHeader",
+                "createDefaultServiceMutator", "getLastARC"})
+            assertTrue(retained + " must be present", names.contains(retained));
+        try {
+            Class.forName("io.approov.service.okhttp.ApproovInterceptorExtensions");
+            fail("ApproovInterceptorExtensions must be removed on 3.7.x");
+        } catch (ClassNotFoundException expected) {
+            // removed
+        }
+        try {
+            ApproovDefaultMessageSigning.class.getMethod("processedRequest", Request.class, ApproovRequestMutations.class);
+            fail("deprecated processedRequest must be removed on 3.7.x");
+        } catch (NoSuchMethodException expected) {
+            // removed
+        }
+    }
+
+    /**
+     * T37-11 with the default (dual) signing: a refreshed request carries exactly one
+     * Signature header with both members, regenerated once, and the refreshed status.
+     */
+    @Test
+    public void testStaleRefreshRegeneratesBothSignaturesOnce() throws Exception {
+        reinitializeServiceWithTargetHost("");
+        CountingMessageSigning signing = new CountingMessageSigning();
+        signing.setDefaultFactory(ApproovDefaultMessageSigning.generateDefaultSignatureParametersFactory());
+        ApproovService.setServiceMutator(signing);
+        AtomicInteger attempts = new AtomicInteger();
+        ApproovService.setOkHttpClientBuilder(new OkHttpClient.Builder().addNetworkInterceptor(chain -> {
+            if (attempts.getAndIncrement() == 0)
+                ShadowSystemClock.advanceBy(Duration.ofSeconds(10));
+            return chain.proceed(chain.request());
+        }));
+        try (Response response = ApproovService.getOkHttpClient().newCall(new Request.Builder().url(getTargetURL()).build()).execute()) {
+            JSONObject reply = new JSONObject(response.body().string());
+            assertEquals(2, signing.processedCount.get());
+            String signature = getHeader(reply, "Signature");
+            assertTrue(signature, signature.startsWith("install=:"));
+            assertTrue(signature, signature.contains(", account=:"));
+            assertEquals(signature.indexOf("install="), signature.lastIndexOf("install="));
+            assertEquals(signature.indexOf("account="), signature.lastIndexOf("account="));
+            assertEquals("success", getHeader(reply, "Approov-Status"));
+            // the reply reports headers as arrays where repeated; a single value proves one header
+            assertEquals(1, reply.getJSONObject("headers").optJSONArray("signature") == null ? 1
+                    : reply.getJSONObject("headers").getJSONArray("signature").length());
+        }
+    }
+
+    /**
+     * T37-12 / SPECIFICATION 2.3: a cleartext connection (no TLS handshake) to a host
+     * with pins fails with the platform pinning exception, never an Approov type; to a
+     * host without pins it proceeds.
+     */
+    @Test
+    public void testCleartextConnectionToPinnedHostFailsWithPlatformException() throws Exception {
+        reinitializeServiceWithTargetHost("");
+        ApproovPinningInterceptor interceptor = new ApproovPinningInterceptor();
+        CertificatePinner pinned = new CertificatePinner.Builder()
+            .add("pinned.example.com", "sha256/AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA=").build();
+        java.lang.reflect.Field pinnerField = ApproovPinningInterceptor.class.getDeclaredField("certificatePinner");
+        pinnerField.setAccessible(true);
+        pinnerField.set(interceptor, pinned);
+
+        Request toPinned = new Request.Builder().url("http://pinned.example.com/").build();
+        try {
+            interceptor.intercept(new NoHandshakeChain(toPinned));
+            fail("Expected SSLPeerUnverifiedException");
+        } catch (ApproovException e) {
+            fail("A pinning failure must not be an Approov exception type: " + e);
+        } catch (javax.net.ssl.SSLPeerUnverifiedException expected) {
+            assertTrue(expected.getMessage().contains("pinned.example.com"));
+        }
+
+        Request toUnpinned = new Request.Builder().url("http://unpinned.example.com/").build();
+        NoHandshakeChain chain = new NoHandshakeChain(toUnpinned);
+        interceptor.intercept(chain);
+        assertSame(toUnpinned, chain.proceededWith);
+    }
+
+    /**
+     * SPECIFICATION 2.4: pins are rebuilt lazily until they exist and not afterwards.
+     */
+    @Test
+    public void testPinsNotRebuiltOnEveryRequestOncePresent() throws Exception {
+        reinitializeServiceWithTargetHost("");
+        AtomicInteger rebuilds = new AtomicInteger();
+        ApproovPinningInterceptor interceptor = new ApproovPinningInterceptor() {
+            @Override public synchronized void buildPins() {
+                rebuilds.incrementAndGet();
+                super.buildPins();
+            }
+        };
+        // the test scenario provides no pins for the host, so install a pinner holding the
+        // real peer pin: once pins are present no request may rebuild them
+        java.security.cert.Certificate peer;
+        try (Response response = new OkHttpClient().newCall(new Request.Builder().url(getTargetURL()).build()).execute()) {
+            peer = response.handshake().peerCertificates().get(0);
+        }
+        java.lang.reflect.Field pinnerField = ApproovPinningInterceptor.class.getDeclaredField("certificatePinner");
+        pinnerField.setAccessible(true);
+        pinnerField.set(interceptor, new CertificatePinner.Builder().add(getTargetHost(), CertificatePinner.pin(peer)).build());
+        int afterConstruction = rebuilds.get();
+        OkHttpClient client = new OkHttpClient.Builder().addNetworkInterceptor(interceptor).build();
+        for (int i = 0; i < 3; i++) {
+            try (Response response = client.newCall(new Request.Builder().url(getTargetURL()).build()).execute()) {
+                assertEquals(200, response.code());
+            }
+        }
+        assertEquals(afterConstruction, rebuilds.get());
+    }
+
+    // chain with no connection, standing for a cleartext attempt
+    private static class NoHandshakeChain implements okhttp3.Interceptor.Chain {
+        private final Request request;
+        Request proceededWith;
+        NoHandshakeChain(Request request) { this.request = request; }
+        @Override public Request request() { return request; }
+        @Override public Response proceed(Request request) {
+            proceededWith = request;
+            return new Response.Builder().request(request).protocol(okhttp3.Protocol.HTTP_1_1).code(200).message("OK").build();
+        }
+        @Override public okhttp3.Connection connection() { return null; }
+        @Override public okhttp3.Call call() { throw new UnsupportedOperationException(); }
+        @Override public int connectTimeoutMillis() { return 0; }
+        @Override public okhttp3.Interceptor.Chain withConnectTimeout(int t, java.util.concurrent.TimeUnit u) { return this; }
+        @Override public int readTimeoutMillis() { return 0; }
+        @Override public okhttp3.Interceptor.Chain withReadTimeout(int t, java.util.concurrent.TimeUnit u) { return this; }
+        @Override public int writeTimeoutMillis() { return 0; }
+        @Override public okhttp3.Interceptor.Chain withWriteTimeout(int t, java.util.concurrent.TimeUnit u) { return this; }
     }
 
     // ==================================================================================

@@ -41,7 +41,7 @@ This release targets the Approov SDK 3.7.0 and changes the request contract ever
 - A header that is present with an empty value is now a valid covered component for message signing (RFC 9421 §2.1), so a request sent with an empty `Approov-Token` is still signed. Previously the signature base build failed and the request went out unsigned. This is in the shared `io.approov.util.sig.ComponentProvider` and applies to every layer carrying a copy of it.
 
 ### Notes
-- The `approov-android-sdk` dependency still points at 3.5.3 because the 3.7.0 SDK is not yet published. `UNTRUSTED_NETWORK` is matched by name until then (`ApproovServiceMutator.isNetworkFailure`), and the `UNTRUSTED_NETWORK` tests wait on the mini SDK carrying the 3.7.0 enum.
+- The `approov-android-sdk` dependency still points at 3.5.3 because the 3.7.0 SDK is not yet published. `UNTRUSTED_NETWORK` is matched by name until then (`ApproovServiceMutator.isNetworkFailure`). The tests run against the mini SDK on the `feature/3.7.0` branch of `core-service-layers-testing`, which carries `UNTRUSTED_NETWORK`.
 
 ## [3.5.8] - 2026-07-16
 
