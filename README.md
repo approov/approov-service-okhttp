@@ -124,13 +124,13 @@ The client from `getOkHttpClient()` never holds back or fails a request because 
 
 ## VERIFYING
 
-Run your app and make a request. Each token fetch is logged by the package at debug level; paste the logged token into the CLI to see its claims and whether your device passed:
+Run your app and make a request. The package never logs a token. For each fetch it logs, at debug level, the [loggable form](https://approov.io/docs/latest/approov-usage-documentation/#loggable-tokens) of the result: the token's claims plus a short fragment of its signature, which cannot be turned back into a usable token. The claim to look at is `arc`, the [Attestation Response Code](https://approov.io/docs/latest/approov-usage-documentation/#attestation-response-code): it encodes why the attestation produced the result it did. Paste the logged value into the CLI to check it and decode the `arc`:
 
 ```sh
-approov token -check <token from logcat>
+approov token -check '<loggable token from logcat>'
 ```
 
-Your account's [live metrics](https://approov.io/docs/latest/approov-usage-documentation/#metrics-graphs) show the same within a minute. If the token says the device was rejected, [loggable tokens](https://approov.io/docs/latest/approov-usage-documentation/#loggable-tokens) explain the reason, and a [development signing certificate](https://approov.io/docs/latest/approov-usage-documentation/#development-app-signing-certificates) lets debug builds and emulators pass while you work.
+Your account's [live metrics](https://approov.io/docs/latest/approov-usage-documentation/#metrics-graphs) show the same within a minute. While you work, a [development signing certificate](https://approov.io/docs/latest/approov-usage-documentation/#development-app-signing-certificates) lets debug builds and emulators pass attestation.
 
 ## UPGRADING FROM 3.5.x
 
