@@ -6,21 +6,21 @@
 ![Message Signing](https://img.shields.io/badge/Message%20Signing-RFC%209421-1f6feb)
 ![Build](https://github.com/approov/approov-service-okhttp/actions/workflows/build_and_test.yml/badge.svg)
 
-The [Approov](https://www.approov.io) integration package for Android apps that make their API requests with [`OkHttp`](https://square.github.io/okhttp/). Adding this package to an app is integrating Approov: every request made through the `OkHttpClient` it provides carries a short lived Approov token and message signatures proving that it came from a genuine, unmodified app, and its TLS connections are pinned. The backend verifies these. The native Approov SDK that the package wraps is an implementation detail.
+Add [Approov](https://www.approov.io) protection to your Android app's API calls with [`OkHttp`](https://square.github.io/okhttp/). This package provides an `OkHttpClient` that handles Approov tokens, request signing and TLS pinning for the API domains you register with Approov. Your backend verifies the tokens and signatures to decide which requests to accept.
 
-The step by step guide for integrating Approov into an Android app using this package, registering the app and checking that it works is in the [Approov documentation](https://approov.io/docs/latest/). This repository holds the source of the package, its [reference](REFERENCE.md), the [advanced options](ADVANCED.md) that a standard integration does not need, and the [changelog](CHANGELOG.md). You will need a trial or paid Approov account.
+You'll need a trial or paid Approov account. The [Approov documentation](https://approov.io/docs/latest/) walks you through setting up your account, registering your app and checking the integration. The essentials for using this package are below; optional features are covered in [ADVANCED.md](ADVANCED.md), and the full API is in [REFERENCE.md](REFERENCE.md).
 
-> **3.7.x line.** This version targets the Approov SDK 3.7.0. Requests always proceed, message signing is on by default with both the install and the account signatures, and the Approov fetch status of every request is reported to the backend on the `Approov-Status` header. The 3.5.x line keeps its previous behaviour; see the [changelog](CHANGELOG.md) before upgrading.
+> **Breaking behaviour changes in 3.7.x — for existing users.** If you are upgrading from 3.5.x, review how your app and backend handle requests without an Approov token. Token fetch failures no longer stop API requests by default: the client sends an empty `Approov-Token` header and reports the fetch result in `Approov-Status`. Requests without a valid Approov token are rejected by your backend rather than stopped in the app. Message signing is also enabled by default with both install and account signatures. These changes may affect your existing integration, so review the [migration details in the changelog](CHANGELOG.md) and test your app and backend before upgrading.
 
 ## ADDING THE DEPENDENCY
 
-The package is available from [`mavenCentral`](https://mvnrepository.com/repos/central):
+Add the package to your app's Gradle dependencies, with `mavenCentral()` enabled in your repositories:
 
 ```groovy
 implementation("io.approov:service.okhttp:3.7.0")
 ```
 
-The app manifest needs the following permissions, and the minimum supported SDK version is 23 (Android 6.0):
+The package supports Android 6.0 (API level 23) and later. Add these permissions to your app manifest:
 
 ```xml
 <uses-permission android:name="android.permission.ACCESS_NETWORK_STATE" />
@@ -29,20 +29,20 @@ The app manifest needs the following permissions, and the minimum supported SDK 
 
 ## INITIALIZING
 
-Initialize the `ApproovService` when the app is created, usually in `onCreate` of your `Application`, with your Approov account ID.
+Initialize `ApproovService` when your app starts, usually in your `Application` class's `onCreate` method. Pass your **Approov account ID**, which you'll find in your onboarding email. You can also retrieve it with the Approov CLI:
 
-Your Approov account ID is in your onboarding email, or from the Approov CLI at any time (the CLI calls it the SDK config string):
-
-```
+```sh
 approov sdk -getConfigString
 ```
 
-It looks like `#your-account#p6nZ...=` and identifies your account to the SDK: which Approov service to attest against, and how to verify what it downloads. It is not a secret and is the same for every app in your account, so it is fine to keep it in source control. Registering your app with Approov is a separate step described in the documentation.
+The CLI calls this the **SDK config string**. It looks like `#your-account#p6nZ...=` and contains the information the package needs to connect to your Approov account. It is the same for every app in your account and is not a secret, so you can safely include it in your source code. Copy the whole value, including its punctuation. You'll register the app itself separately as part of the integration guide.
 
-Initialization does not fail in normal operation: the only cause is an account ID that was not copied exactly (truncated or altered), which the SDK rejects. The example still guards the call so that such a mistake can never take the app down: it is logged and the app continues unprotected, in bypass mode with an empty string, which the backend will see as requests without a token.
+The examples below guard against a mistyped or incomplete account ID so a setup mistake doesn't prevent your app from starting. If the value is invalid, the app logs the problem and starts in **bypass mode**, without Approov protection.
 
 ### Java
+
 ```java
+import android.app.Application;
 import android.util.Log;
 import io.approov.service.okhttp.ApproovService;
 
@@ -51,13 +51,12 @@ public class YourApp extends Application {
     public void onCreate() {
         super.onCreate();
         try {
-            // your Approov account ID, from your onboarding email or "approov sdk -getConfigString"
+            // Use the account ID from your onboarding email or "approov sdk -getConfigString".
             ApproovService.initialize(getApplicationContext(), "<your-approov-account-id>");
             if (ApproovService.isApproovEnabled())
                 Log.i("YourApp", "Approov initialized; deviceID=" + ApproovService.getDeviceID());
         } catch (Exception e) {
-            // only reached with a mistyped or truncated account ID
-            Log.e("YourApp", "Approov account ID rejected; continuing unprotected", e);
+            Log.e("YourApp", "Check your Approov account ID; starting in bypass mode", e);
             ApproovService.initialize(getApplicationContext(), "");
         }
     }
@@ -65,7 +64,9 @@ public class YourApp extends Application {
 ```
 
 ### Kotlin
+
 ```kotlin
+import android.app.Application
 import android.util.Log
 import io.approov.service.okhttp.ApproovService
 
@@ -73,49 +74,59 @@ class YourApp : Application() {
     override fun onCreate() {
         super.onCreate()
         try {
-            // your Approov account ID, from your onboarding email or "approov sdk -getConfigString"
+            // Use the account ID from your onboarding email or "approov sdk -getConfigString".
             ApproovService.initialize(applicationContext, "<your-approov-account-id>")
             if (ApproovService.isApproovEnabled())
                 Log.i("YourApp", "Approov initialized; deviceID=${ApproovService.getDeviceID()}")
         } catch (e: Exception) {
-            // only reached with a mistyped or truncated account ID
-            Log.e("YourApp", "Approov account ID rejected; continuing unprotected", e)
+            Log.e("YourApp", "Check your Approov account ID; starting in bypass mode", e)
             ApproovService.initialize(applicationContext, "")
         }
     }
 }
 ```
 
-Logging the Approov device ID lets a given installation be correlated between your logs and the Approov metrics.
+The optional device ID log helps you find this app installation in Approov metrics when troubleshooting.
+
+**If your account ID isn't available when the app starts**, you can also pass `""` to `initialize` to start in bypass mode. This lets you use the package's client while your app loads the account ID. In bypass mode the client behaves like a regular OkHttp client: it adds no Approov tokens or signatures and applies no Approov pinning. APIs that require a valid Approov token will reject those requests.
+
+Once the account ID is available, call `initialize` with it, reapply any custom settings, then obtain a new client with `getOkHttpClient()`. Clients obtained in bypass mode remain unprotected. See [initialization in the reference](REFERENCE.md#initialize) for more about switching modes.
 
 ## MAKING REQUESTS
 
-Use the `OkHttpClient` provided by the `ApproovService` for every API call you want to protect:
+Use the client returned by `ApproovService` for the API calls you want to protect:
 
 ### Java
+
 ```java
 OkHttpClient client = ApproovService.getOkHttpClient();
 ```
 
 ### Kotlin
+
 ```kotlin
 val client = ApproovService.getOkHttpClient()
 ```
 
-If your code already configures its own client (timeouts, interceptors, ...) pass the builder in once, and the returned client includes its settings:
+If you already configure an OkHttp client—for example, to set timeouts or add interceptors—pass its builder to `ApproovService` after initialization and before obtaining the client:
 
 ```kotlin
-ApproovService.setOkHttpClientBuilder(OkHttpClient.Builder().connectTimeout(5, TimeUnit.SECONDS))
+ApproovService.setOkHttpClientBuilder(
+    OkHttpClient.Builder().connectTimeout(5, TimeUnit.SECONDS)
+)
+val client = ApproovService.getOkHttpClient()
 ```
 
-For each request to an API domain you have added to Approov the client:
+For each request to an API domain registered with Approov, the client:
 
-* Adds the `Approov-Token` header, and the `Approov-Status` header carrying the Approov fetch status in lowercase (`success`, `no_network`, `rejected`, ...). If a token could not be obtained the token header is sent **empty** and the request still proceeds; the backend reads the status header to decide. No failure ever aborts a request on the app's behalf.
-* Signs the request with both the install and the account message signatures (`Signature` and `Signature-Input` headers, RFC 9421), so the backend can verify that the request and its token came from this app installation.
-* Pins the TLS connection to the certificates or managed trust roots configured for the domain in Approov. A pin mismatch fails the connection with `javax.net.ssl.SSLPeerUnverifiedException`, as any pinning failure does in OkHttp.
+* **Adds the token and fetch status.** `Approov-Token` carries the token, and `Approov-Status` reports the fetch result, such as `success`, `no_network` or `rejected`. If a token isn't available, the token header is empty and the request still proceeds. Your backend uses the status to decide how to handle it.
+* **Signs the request.** Install and account signatures are sent in the `Signature` and `Signature-Input` headers using RFC 9421 HTTP Message Signatures. If a signing key is unavailable, the client sends whichever signature it can produce. Your backend verifies the signatures alongside the token.
+* **Applies TLS pinning.** Connections are checked against the certificates or managed trust roots configured for the domain in Approov. A pin mismatch fails the connection with OkHttp's standard `SSLPeerUnverifiedException`.
 
-Requests to domains not added to Approov are sent untouched.
+Requests to domains you haven't added to Approov are sent unchanged.
 
 ## NEXT STEPS
 
-Follow the [Approov documentation](https://approov.io/docs/latest/) to add your API domains, register the app and verify the tokens and signatures in your backend. The options for changing the defaults (header names, disabling the status header, customizing or switching off message signing, secure strings, token binding, excluding URLs, service mutators) are described in [ADVANCED.md](ADVANCED.md), and every method is documented in [REFERENCE.md](REFERENCE.md).
+Follow the [Approov documentation](https://approov.io/docs/latest/) to add your API domains, register your app and set up token and signature verification on your backend.
+
+The defaults are ready to use; you don't need to configure a mutator or message signing to get started. If you need custom headers, secure strings, token binding or other options, see [ADVANCED.md](ADVANCED.md). Use [REFERENCE.md](REFERENCE.md) to look up individual methods.
