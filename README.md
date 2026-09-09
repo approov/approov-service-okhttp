@@ -27,7 +27,7 @@ The package supports Android 6.0 (API level 23) and later. Add these permissions
 
 ## INITIALIZING
 
-Initialize `ApproovService` when your app starts, usually in your `Application` class's `onCreate`, with your **Approov account ID**. Initialization throws if the value it receives is not a complete, unaltered account ID, so wrap the call: the app then logs the problem and starts in **bypass mode**, without Approov protection, instead of failing to start. The device ID log is optional. Approov identifies an app installation only by its device ID and knows nothing about your users or sessions, so logging the device ID next to your own user or session identifier is what lets you, and Approov support with you, connect an attestation result to a user when a case comes up.
+Initialize `ApproovService` when your app starts, usually in your `Application` class's `onCreate`, with your **Approov account ID**. Initialization throws if the value it receives is not a complete, unaltered account ID, so wrap the call: the app then logs the problem and starts in **bypass mode**, without Approov protection, instead of failing to start. The device ID log is optional. Approov knows an installation only by its device ID, so logging it next to your own user or session identifier gives you the correlation between the two.
 
 ```kotlin
 import android.util.Log
