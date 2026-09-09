@@ -124,13 +124,23 @@ The client from `getOkHttpClient()` never holds back or fails a request because 
 
 ## VERIFYING
 
-Run your app and make a request. The package never logs a token. For each fetch it logs, at debug level, the [loggable form](https://approov.io/docs/latest/approov-usage-documentation/#loggable-tokens) of the result: the token's claims plus a short fragment of its signature, which cannot be turned back into a usable token. The claim to look at is `arc`, the [Attestation Response Code](https://approov.io/docs/latest/approov-usage-documentation/#attestation-response-code): it encodes why the attestation produced the result it did. Paste the logged value into the CLI to check it and decode the `arc`:
+Run your app and make a request. The package never logs a token. For each fetch it logs, at debug level, the [loggable form](https://approov.io/docs/latest/approov-usage-documentation/#loggable-tokens) of the result: the token's claims plus a short fragment of its signature, which cannot be turned back into a usable token. The claim to look at is `arc`, the [Attestation Response Code](https://approov.io/docs/latest/approov-usage-documentation/#attestation-response-code): it encodes why the attestation produced the result it did, for example:
 
-```sh
-approov token -check '<loggable token from logcat>'
+```
+D/ApproovTokenInterceptor: Token for https://api.example.com/v1/items: {"did":"...","exp":1757400000,"arc":"IXPSB7TRK26LXE3M","sip":"a1b2c3", ...}
 ```
 
-Your account's [live metrics](https://approov.io/docs/latest/approov-usage-documentation/#metrics-graphs) show the same within a minute. While you work, a [development signing certificate](https://approov.io/docs/latest/approov-usage-documentation/#development-app-signing-certificates) lets debug builds and emulators pass attestation.
+To decode an `arc`, ask the CLI for the decoding command once; it prints a `curl` with your account's API key filled in and an `<arc>` placeholder:
+
+```sh
+approov token -showArcInfoCurl
+```
+
+```
+curl -H "Authorization: <api-key>" -H "Arc: <arc>" https://<management-url>/arc-info/
+```
+
+Run it with the `arc` value from the log in place of `<arc>` and the response lists the flags behind the result, for example `emulator` or `app-not-registered`. Your account's [live metrics](https://approov.io/docs/latest/approov-usage-documentation/#metrics-graphs) show the same reasons in aggregate within a minute. While you work, a [development signing certificate](https://approov.io/docs/latest/approov-usage-documentation/#development-app-signing-certificates) lets debug builds and emulators pass attestation.
 
 ## UPGRADING FROM 3.5.x
 
