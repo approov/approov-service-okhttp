@@ -12,7 +12,7 @@ For a request to a protected API domain, the `ApproovService` interceptor fetche
 | `UNKNOWN_URL`, `UNPROTECTED_URL` | proceeds untouched | not sent | not sent |
 | any other status (`NO_NETWORK`, `POOR_NETWORK`, `UNTRUSTED_NETWORK`, `NO_APPROOV_SERVICE`, `REJECTED`, `INTERNAL_ERROR`, ...) | proceeds | sent **empty** | the status, lowercased (`no_network`, ...) |
 
-A secure string substitution (see [Secure strings](#secure-strings)) that fails leaves the placeholder value in the header or query parameter and the request proceeds; the backend sees the placeholder. A fetch outcome other than `SUCCESS` is an outcome, not a failure: no runtime condition aborts a request, the backend is the enforcement point and receives the evidence it needs to decide. The only exceptions an app sees from the request path are its own configuration errors (a body digest configured as required that cannot be generated, or an unsupported signature algorithm), pinning failures on its API domains, which fail the connection with `javax.net.ssl.SSLPeerUnverifiedException` like any OkHttp pinning failure, and aborts the app itself opted in to through a [service mutator](#service-mutators).
+A secure string substitution (see [Secure strings](#secure-strings)) that fails leaves the placeholder value in the header or query parameter and the request proceeds; the backend sees the placeholder. A fetch outcome other than `SUCCESS` is an outcome, not a failure: no runtime condition aborts a request, the backend is the enforcement point and receives the evidence it needs to decide. The only exceptions an app sees from the request path are its own configuration errors (a body digest configured as required that cannot be generated, or an unsupported signature algorithm), TLS connections to its API domains that do not validate against the Managed Trust Roots or the certificate public keys configured for the domain, which fail with `javax.net.ssl.SSLPeerUnverifiedException` like any OkHttp certificate check, and aborts the app itself opted in to through a [service mutator](#service-mutators).
 
 The direct methods (`fetchToken`, `fetchSecureString`, `fetchCustomJWT`, `precheck`) return a value to the caller and therefore still report failures by throwing an `ApproovException`; see the [reference](REFERENCE.md).
 
@@ -86,7 +86,7 @@ The string passed to `initialize` (the CLI and the SDK call it the SDK config st
 
 ## Bypass initialization
 
-Initializing with an empty string instead of the Approov account ID keeps the package initialized but returns plain `OkHttpClient` instances with no Approov processing (no token, signing, secure strings or pinning). This is a bootstrap or fallback state, for example while the account ID is fetched remotely, or as the guard in the README example against an account ID that does not reach the app intact. A later `initialize` with the account ID enables Approov at runtime; reinitializing from one account ID to a different one is rejected by the SDK.
+Initializing with an empty string instead of the Approov account ID keeps the package initialized but returns plain `OkHttpClient` instances with no Approov processing (no token, signing, secure strings or Approov connection validation). This is a bootstrap or fallback state, for example while the account ID is fetched remotely, or as the guard in the README example against an account ID that does not reach the app intact. A later `initialize` with the account ID enables Approov at runtime; reinitializing from one account ID to a different one is rejected by the SDK.
 
 ```java
 ApproovService.initialize(context, "");
@@ -122,7 +122,7 @@ Requests whose URL matches an exclusion regular expression are sent untouched, w
 ApproovService.addExclusionURLRegex("https://api\\.example\\.com/health.*")
 ```
 
-Pinning still applies to excluded requests on pinned domains.
+Connection validation still applies to excluded requests on domains added to Approov.
 
 ## Service mutators
 
@@ -135,7 +135,7 @@ An `ApproovServiceMutator` centralizes app-specific policy without forking the p
 | `handleInterceptorHeaderSubstitutionResult`, `handleInterceptorQueryParamSubstitutionResult` | whether to apply a secure string substitution |
 | `handleInterceptorProcessedRequest` | final changes to the processed request; this is where `ApproovDefaultMessageSigning` signs |
 | `supportsProtectionRefresh` | whether the processed request callback may run again on a stale request (see below) |
-| `handlePinningShouldProcessRequest` | whether pinning applies to a request |
+| `handlePinningShouldProcessRequest` | whether Approov connection validation (Managed Trust Roots or configured public keys) applies to a request |
 | `handlePrecheckResult`, `handleFetchTokenResult`, `handleFetchSecureStringResult`, `handleFetchCustomJWTResult` | how the direct methods map a result to an exception |
 
 The status header is set by the interceptor from the token fetch result whenever the mutator returns `true` from `handleInterceptorFetchTokenResult`; returning `false` sends the request with no Approov headers at all.
@@ -170,7 +170,7 @@ class AppPolicy : ApproovDefaultMessageSigning() {
         super.handleInterceptorProcessedRequest(request, changes).newBuilder()
             .header("X-Client-Platform", "android").build()
 
-    // skip pinning for a telemetry host
+    // skip Approov connection validation for a telemetry host
     override fun handlePinningShouldProcessRequest(request: Request): Boolean =
         request.url.host != "metrics.example.com"
 }

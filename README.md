@@ -6,7 +6,7 @@
 ![Message Signing](https://img.shields.io/badge/Message%20Signing-RFC%209421-1f6feb)
 ![Build](https://github.com/approov/approov-service-okhttp/actions/workflows/build_and_test.yml/badge.svg)
 
-Add this package, initialize it with your Approov account ID, and every API call your Android app makes through its `OkHttpClient` carries an [Approov](https://www.approov.io) token and message signatures that your backend can verify, over a pinned TLS connection. Your backend then knows each request came from a genuine, unmodified instance of your app.
+Add this package, initialize it with your Approov account ID, and every API call your Android app makes through its `OkHttpClient` carries an [Approov](https://www.approov.io) token and message signatures that your backend can verify, over a TLS connection validated against the trust roots Approov manages for your account. Your backend then knows each request came from a genuine, unmodified instance of your app.
 
 You'll need a trial or paid Approov account. The [Approov documentation](https://approov.io/docs/latest/) walks you through setting up your account, registering your app and checking the integration. The essentials for using this package are below; optional features are in [ADVANCED.md](ADVANCED.md) and every method is in [REFERENCE.md](REFERENCE.md).
 
@@ -84,7 +84,7 @@ approov sdk -getConfigString
 
 It is the same for every app in your account and is not a secret, so it can live in your source code or be delivered with your app's configuration. Whichever way it reaches the app, the whole value must arrive intact, punctuation included; that is the only thing the guard above is for. More about what it is in [ADVANCED.md](ADVANCED.md#about-the-approov-account-id).
 
-**If your account ID isn't available when the app starts**, pass `""` to `initialize` to start in bypass mode, where the client behaves like a regular OkHttp client with no Approov tokens, signatures or pinning. Once the account ID is available, call `initialize` with it, reapply any custom settings, then obtain a new client with `getOkHttpClient()`; clients obtained in bypass mode stay unprotected. See [initialize in the reference](REFERENCE.md#initialize).
+**If your account ID isn't available when the app starts**, pass `""` to `initialize` to start in bypass mode, where the client behaves like a regular OkHttp client with no Approov tokens, signatures or connection validation. Once the account ID is available, call `initialize` with it, reapply any custom settings, then obtain a new client with `getOkHttpClient()`; clients obtained in bypass mode stay unprotected. See [initialize in the reference](REFERENCE.md#initialize).
 
 ## MAKING REQUESTS
 
@@ -120,7 +120,7 @@ For each request to an API domain you have added to Approov, the client adds:
 | `Signature`, `Signature-Input` | RFC 9421 message signatures, an `install` member (per installation key) and an `account` member (account key), over the method, URL and the headers above | verifies whichever signature it is configured for; a request cannot be replayed with a different token or URL |
 | `Approov-TraceID` | an optional debug header added by the SDK | nothing — it is a debug header; pass it through unchanged |
 
-A request always proceeds. If no token could be obtained the token header is sent empty and the status header says why; the decision to reject is your backend's. Connections are pinned to the certificates or managed trust roots configured for the domain in Approov, and a pin mismatch fails the connection with OkHttp's standard `SSLPeerUnverifiedException`. Requests to domains you haven't added to Approov are sent unchanged.
+A request always proceeds. If no token could be obtained the token header is sent empty and the status header says why; the decision to reject is your backend's. The TLS connection to each domain is validated against the [Managed Trust Roots](https://approov.io/docs/latest/approov-usage-documentation/#managed-trust-roots) that Approov maintains for your account, or against the specific certificate public keys you configure for that domain, and the validation set is updated dynamically without an app release. A connection that does not validate fails with OkHttp's standard `SSLPeerUnverifiedException`. Requests to domains you haven't added to Approov are sent unchanged.
 
 ## VERIFYING
 
