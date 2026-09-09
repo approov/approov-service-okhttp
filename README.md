@@ -27,16 +27,25 @@ The package supports Android 6.0 (API level 23) and later. Add these permissions
 
 ## INITIALIZING
 
-Initialize `ApproovService` when your app starts, usually in your `Application` class's `onCreate`, with your **Approov account ID**:
+Initialize `ApproovService` when your app starts, usually in your `Application` class's `onCreate`, with your **Approov account ID**. Initialization throws if the value it receives is not a complete, unaltered account ID, so wrap the call: the app then logs the problem and starts in **bypass mode**, without Approov protection, instead of failing to start. The device ID log is optional and helps you find this installation in the Approov metrics.
 
 ```kotlin
+import android.util.Log
 import io.approov.service.okhttp.ApproovService
 
 class YourApp : Application() {
     override fun onCreate() {
         super.onCreate()
-        // your Approov account ID, from your onboarding email or "approov sdk -getConfigString"
-        ApproovService.initialize(applicationContext, "<your-approov-account-id>")
+        try {
+            // your Approov account ID, from your onboarding email or "approov sdk -getConfigString"
+            ApproovService.initialize(applicationContext, "<your-approov-account-id>")
+            if (ApproovService.isApproovEnabled())
+                Log.i("YourApp", "Approov initialized; deviceID=${ApproovService.getDeviceID()}")
+        } catch (e: Exception) {
+            // the value passed was not a valid account ID; run without Approov rather than not at all
+            Log.e("YourApp", "Approov account ID rejected; starting in bypass mode", e)
+            ApproovService.initialize(applicationContext, "")
+        }
     }
 }
 ```
@@ -45,14 +54,23 @@ class YourApp : Application() {
 <summary>Java</summary>
 
 ```java
+import android.util.Log;
 import io.approov.service.okhttp.ApproovService;
 
 public class YourApp extends Application {
     @Override
     public void onCreate() {
         super.onCreate();
-        // your Approov account ID, from your onboarding email or "approov sdk -getConfigString"
-        ApproovService.initialize(getApplicationContext(), "<your-approov-account-id>");
+        try {
+            // your Approov account ID, from your onboarding email or "approov sdk -getConfigString"
+            ApproovService.initialize(getApplicationContext(), "<your-approov-account-id>");
+            if (ApproovService.isApproovEnabled())
+                Log.i("YourApp", "Approov initialized; deviceID=" + ApproovService.getDeviceID());
+        } catch (Exception e) {
+            // the value passed was not a valid account ID; run without Approov rather than not at all
+            Log.e("YourApp", "Approov account ID rejected; starting in bypass mode", e);
+            ApproovService.initialize(getApplicationContext(), "");
+        }
     }
 }
 ```
@@ -64,37 +82,7 @@ Your account ID is in your onboarding email, or from the Approov CLI at any time
 approov sdk -getConfigString
 ```
 
-It is the same for every app in your account and is not a secret, so it can live in your source code. Copy the whole value, including its punctuation. More about what it is in [ADVANCED.md](ADVANCED.md#about-the-approov-account-id).
-
-### Guarding against a mistyped account ID
-
-Initialization does not fail in normal operation. The one thing that makes it fail is an account ID that was not copied exactly, which the SDK rejects. If you want that mistake to be impossible to ship, guard the call so the app logs it and starts in **bypass mode**, without Approov protection, instead of crashing. The device ID log is optional and helps you find this installation in the Approov metrics:
-
-```kotlin
-try {
-    ApproovService.initialize(applicationContext, "<your-approov-account-id>")
-    if (ApproovService.isApproovEnabled())
-        Log.i("YourApp", "Approov initialized; deviceID=${ApproovService.getDeviceID()}")
-} catch (e: Exception) {
-    Log.e("YourApp", "Check your Approov account ID; starting in bypass mode", e)
-    ApproovService.initialize(applicationContext, "")
-}
-```
-
-<details>
-<summary>Java</summary>
-
-```java
-try {
-    ApproovService.initialize(getApplicationContext(), "<your-approov-account-id>");
-    if (ApproovService.isApproovEnabled())
-        Log.i("YourApp", "Approov initialized; deviceID=" + ApproovService.getDeviceID());
-} catch (Exception e) {
-    Log.e("YourApp", "Check your Approov account ID; starting in bypass mode", e);
-    ApproovService.initialize(getApplicationContext(), "");
-}
-```
-</details>
+It is the same for every app in your account and is not a secret, so it can live in your source code or be delivered with your app's configuration. Whichever way it reaches the app, the whole value must arrive intact, punctuation included; that is the only thing the guard above is for. More about what it is in [ADVANCED.md](ADVANCED.md#about-the-approov-account-id).
 
 **If your account ID isn't available when the app starts**, pass `""` to `initialize` to start in bypass mode, where the client behaves like a regular OkHttp client with no Approov tokens, signatures or pinning. Once the account ID is available, call `initialize` with it, reapply any custom settings, then obtain a new client with `getOkHttpClient()`; clients obtained in bypass mode stay unprotected. See [initialize in the reference](REFERENCE.md#initialize).
 
