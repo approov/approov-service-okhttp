@@ -155,7 +155,7 @@ The status header is set by the interceptor from the token fetch result whenever
 
 ### Opting in to aborting requests
 
-By default every outcome proceeds. An app may decide that some outcome should not: the common case is `NO_NETWORK`, where the device could not reach Approov and the API call is about to fail on the same network anyway, so the app would rather get a network error at once and show its offline state than send a request with an empty token. That is the app's policy, so it is expressed by overriding the hook and throwing. The exception must be a standard network stack exception (`java.io.IOException` or a platform subclass such as `java.net.ConnectException` or `javax.net.ssl.SSLException`), not an Approov type: the abort then surfaces to the app's own error handling, retry logic and support tooling exactly like any other network failure, with the Approov status available from the result for the app's own logging. The interceptor hooks declare `IOException` for this purpose; the default implementations never throw.
+By default every outcome proceeds. An app may decide that some outcome should not: the common case is `NO_NETWORK`, where the device could not reach Approov and the API call is about to fail on the same network anyway, so the app would rather get a network error at once and show its offline state than send a request that will not reach its backend. That is the app's policy, so it is expressed by overriding the hook and throwing. The exception must be a standard network stack exception (`java.io.IOException` or a platform subclass such as `java.net.ConnectException` or `javax.net.ssl.SSLException`), not an Approov type: the abort then surfaces to the app's own error handling, retry logic and support tooling exactly like any other network failure, with the Approov status available from the result for the app's own logging. The interceptor hooks declare `IOException` for this purpose; the default implementations never throw.
 
 Extend `ApproovDefaultMessageSigning` to keep the default signing while changing other decisions:
 
@@ -168,9 +168,9 @@ import okhttp3.Request
 class AppPolicy : ApproovDefaultMessageSigning() {
     init { setDefaultFactory(ApproovDefaultMessageSigning.generateDefaultSignatureParametersFactory()) }
 
-    // opt out of the default for one outcome: with no network the request would fail
-    // anyway, so fail it now as an ordinary network error rather than sending it with
-    // an empty token. Every other outcome keeps the default and proceeds.
+    // opt out of the default for one outcome: with no network the request will not
+    // reach the backend, so fail it now as an ordinary network error instead of
+    // sending it. Every other outcome keeps the default and proceeds.
     override fun handleInterceptorFetchTokenResult(result: Approov.TokenFetchResult, url: String): Boolean {
         if (result.status == Approov.TokenFetchStatus.NO_NETWORK) {
             Log.w("AppPolicy", "no network for Approov attestation, not sending $url")
