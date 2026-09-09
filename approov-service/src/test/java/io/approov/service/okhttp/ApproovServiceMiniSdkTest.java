@@ -1865,6 +1865,90 @@ public class ApproovServiceMiniSdkTest {
     }
 
     /**
+     * Fourth review round: a header-only rebuild (an Authenticator retry) must restore a
+     * substituted query parameter to its placeholder so that the reapply fetches the
+     * secure string afresh; a rotated value reaches the wire, not the one from the
+     * first attempt.
+     */
+    @Test
+    public void testAuthenticatorRetryRefreshesSubstitutedQueryParameter() throws Exception {
+        String targetHost = getTargetHost();
+        reinitializeService(scenarioJson(uniqueCaseName("query-rotates"),
+            "\"protectedDomains\": [\"" + targetHost + "\"]," +
+            "\"initialSecureStrings\": {\"query-key\": \"old-secret\"}"
+        ));
+        ApproovService.addSubstitutionQueryParam("api_key");
+        AtomicInteger attempts = new AtomicInteger();
+        ApproovService.setOkHttpClientBuilder(new OkHttpClient.Builder()
+            .addNetworkInterceptor(chain -> {
+                Response response = chain.proceed(chain.request());
+                if (attempts.getAndIncrement() == 0) {
+                    // the secure string is rotated before the authenticator retries
+                    setDirective("{\"operation\":\"fetchSecureString\",\"response\":{\"secureString\":\"new-secret\"}}");
+                    return response.newBuilder().code(401).message("Unauthorized").build();
+                }
+                return response;
+            })
+            .authenticator((route, response) -> {
+                if ("Bearer second".equals(response.request().header("Authorization")))
+                    return null;
+                return response.request().newBuilder().header("Authorization", "Bearer second").build();
+            }));
+        Request request = new Request.Builder().url(getTargetURL() + "?api_key=query-key")
+            .header("Authorization", "Bearer first").build();
+        try (Response response = ApproovService.getOkHttpClient().newCall(request).execute()) {
+            assertEquals(200, response.code());
+            assertEquals(2, attempts.get());
+            JSONObject reply = new JSONObject(response.body().string());
+            String url = reply.getString("url");
+            assertTrue(url, url.contains("api_key=new-secret"));
+            assertFalse(url, url.contains("old-secret"));
+            assertEquals("Bearer second", getHeader(reply, "Authorization"));
+        }
+    }
+
+    /**
+     * Fourth review round: a header-only rebuild whose refreshed fetch reports the URL
+     * as unprotected leaves the query placeholder, not the previously substituted
+     * secret, on the wire.
+     */
+    @Test
+    public void testAuthenticatorRetryToUnprotectedRestoresQueryPlaceholder() throws Exception {
+        String targetHost = getTargetHost();
+        reinitializeService(scenarioJson(uniqueCaseName("query-unprotected"),
+            "\"protectedDomains\": [\"" + targetHost + "\"]," +
+            "\"initialSecureStrings\": {\"query-key\": \"query-secret\"}"
+        ));
+        ApproovService.addSubstitutionQueryParam("api_key");
+        AtomicInteger attempts = new AtomicInteger();
+        ApproovService.setOkHttpClientBuilder(new OkHttpClient.Builder()
+            .addNetworkInterceptor(chain -> {
+                Response response = chain.proceed(chain.request());
+                if (attempts.getAndIncrement() == 0) {
+                    setDirective("{\"operation\":\"fetchApproovToken\",\"response\":{\"status\":\"UNPROTECTED_URL\"}}");
+                    return response.newBuilder().code(401).message("Unauthorized").build();
+                }
+                return response;
+            })
+            .authenticator((route, response) -> {
+                if ("Bearer second".equals(response.request().header("Authorization")))
+                    return null;
+                return response.request().newBuilder().header("Authorization", "Bearer second").build();
+            }));
+        Request request = new Request.Builder().url(getTargetURL() + "?api_key=query-key")
+            .header("Authorization", "Bearer first").build();
+        try (Response response = ApproovService.getOkHttpClient().newCall(request).execute()) {
+            assertEquals(2, attempts.get());
+            JSONObject reply = new JSONObject(response.body().string());
+            String url = reply.getString("url");
+            assertTrue(url, url.contains("api_key=query-key"));
+            assertFalse(url, url.contains("query-secret"));
+            assertNull(getHeader(reply, "Approov-Token"));
+            assertNull(getHeader(reply, "Approov-Status"));
+        }
+    }
+
+    /**
      * Re-review finding 4: a refresh must not undo a header change the app made after
      * the substitution. An OkHttp authenticator replaces the placeholder with a second
      * key; the stale refresh substitutes that key, not the first one.

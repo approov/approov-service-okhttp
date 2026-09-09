@@ -1718,13 +1718,14 @@ class ApproovFreshnessInterceptor implements Interceptor {
         okhttp3.Headers appliedHeaders = freshness.getAppliedHeaders();
         if (appliedHeaders == null)
             freshness.setAppliedHeaders(request.headers());
-        boolean redirected = ((appliedURL != null) && !request.url().toString().equals(appliedURL))
+        boolean urlChanged = (appliedURL != null) && !request.url().toString().equals(appliedURL);
+        boolean rebuilt = urlChanged
                 || ((appliedMethod != null) && !request.method().equals(appliedMethod))
                 || ((appliedHeaders != null) && !request.headers().equals(appliedHeaders));
 
         ApproovServiceMutator mutator;
         boolean invokeProcessed;
-        if (redirected) {
+        if (rebuilt) {
             Log.d(TAG, "Request rebuilt since protection was applied to " + appliedURL +
                     " (now " + request.method() + " " + request.url() + "), reapplying Approov protection");
             // cache the mutator for the duration of the interceptor to make sure it is
@@ -1764,7 +1765,10 @@ class ApproovFreshnessInterceptor implements Interceptor {
         // request carries its own marker; the original request keeps the marker that
         // describes its own headers, so that a retry of the original request by OkHttp
         // is refreshed again rather than sent with stale headers under a fresh marker.
-        Request stripped = ApproovTokenInterceptor.stripProtection(request, freshness, !redirected);
+        // The pre-substitution URL (query placeholders) is restored whenever the URL is
+        // the one the protection was applied to, whatever else changed; a redirect
+        // target is the server's URL and is left alone.
+        Request stripped = ApproovTokenInterceptor.stripProtection(request, freshness, !urlChanged);
         Request refreshed = ApproovTokenInterceptor.applyProtection(stripped, mutator, invokeProcessed);
         // the refreshed request is already at the network layer, so its header baseline
         // is what it carries now
