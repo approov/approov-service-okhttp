@@ -118,7 +118,7 @@ For each request to an API domain you have added to Approov, the client adds:
 | `Approov-Token` | the Approov token, a short lived signed JWT; **empty** if no token could be obtained | verifies the signature and expiry, rejects requests without a valid token |
 | `Approov-Status` | the fetch outcome in lowercase: `success`, `no_network`, `rejected`, ... | tells a genuine request that could not get a token apart from one whose headers were stripped |
 | `Signature`, `Signature-Input` | RFC 9421 message signatures, an `install` member (per installation key) and an `account` member (account key), over the method, URL and the headers above | verifies whichever signature it is configured for; a request cannot be replayed with a different token or URL |
-| `Approov-TraceID` | an optional debug header added by the SDK | nothing — it is a debug header; pass it through unchanged |
+| `Approov-TraceID` | an optional debug header added by the SDK | nothing, it is a debug header; pass it through unchanged |
 
 A request always proceeds. If no token could be obtained the token header is sent empty and the status header says why; the decision to reject is your backend's. The TLS connection to each domain is validated against the [Managed Trust Roots](https://approov.io/docs/latest/approov-usage-documentation/#managed-trust-roots) that Approov maintains for your account, or against the specific certificate public keys you configure for that domain, and the validation set is updated dynamically without an app release. A connection that does not validate fails with OkHttp's standard `SSLPeerUnverifiedException`. Requests to domains you haven't added to Approov are sent unchanged.
 
