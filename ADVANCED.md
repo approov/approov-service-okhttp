@@ -18,7 +18,7 @@ The direct methods (`fetchToken`, `fetchSecureString`, `fetchCustomJWT`, `preche
 
 ## The `Approov-Status` header
 
-Every request processed by Approov carries the `Approov-Status` header with the SDK token fetch status in lowercase, identical on Android and iOS: `success`, `no_network`, `poor_network`, `untrusted_network`, `no_approov_service`, `rejected`, `internal_error`, and so on. It is sent on successful requests too, so the backend can tell a request whose Approov headers were stripped from one this layer sent without a token because the fetch failed. It is not sent to domains that are not protected by Approov. Secure string substitution failures are not reported on it: the placeholder value left in the header or query parameter is the evidence.
+Every request processed by Approov carries the `Approov-Status` header with the SDK token fetch status in lowercase, identical on Android and iOS: `success`, `no_network`, `poor_network`, `untrusted_network`, `no_approov_service`, `rejected`, `internal_error`, and so on. It is sent on successful requests too. It says why this particular request carries no attestation proof, so the backend can log the reason against the request and act on it, rejecting it for example. It is not sent to domains that are not protected by Approov. Secure string substitution failures are not reported on it: the placeholder value left in the header or query parameter is the evidence.
 
 The header name can be changed, and the header disabled by passing `null`, in which case a request that could not be protected is sent with an empty token header and no explanation:
 

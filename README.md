@@ -116,11 +116,11 @@ For each request to an API domain you have added to Approov, the client adds:
 | Header | Value | What your backend does with it |
 | :--- | :--- | :--- |
 | `Approov-Token` | the Approov token, a short lived signed JWT; **empty** if no token could be obtained | verifies the signature and expiry, rejects requests without a valid token |
-| `Approov-Status` | the fetch outcome in lowercase: `success`, `no_network`, `rejected`, ... | tells a genuine request that could not get a token apart from one whose headers were stripped |
+| `Approov-Status` | the outcome of the attestation for this request, in lowercase: `success`, `no_network`, `rejected`, ... | says why this particular request carries no attestation proof, so you can log the reason against the request and reject it, for example |
 | `Signature`, `Signature-Input` | RFC 9421 message signatures, an `install` member (per installation key) and an `account` member (account key), over the method, URL and the headers above | verifies whichever signature it is configured for; a request cannot be replayed with a different token or URL |
 | `Approov-TraceID` | an optional debug header added by the SDK | nothing, it is a debug header; pass it through unchanged |
 
-A request always proceeds. If no token could be obtained the token header is sent empty and the status header says why, so your backend can tell that case apart from a request whose headers were stripped. The TLS connection to each domain is validated against the [Managed Trust Roots](https://approov.io/docs/latest/approov-usage-documentation/#managed-trust-roots) that Approov maintains for your account, or against the specific certificate public keys you configure for that domain, and the validation set is updated dynamically without an app release. A connection that does not validate fails with OkHttp's standard `SSLPeerUnverifiedException`. Requests to domains you haven't added to Approov are sent unchanged.
+A request always proceeds. If no token could be obtained the token header is sent empty and the status header says why, for that request. The TLS connection to each domain is validated against the [Managed Trust Roots](https://approov.io/docs/latest/approov-usage-documentation/#managed-trust-roots) that Approov maintains for your account, or against the specific certificate public keys you configure for that domain, and the validation set is updated dynamically without an app release. A connection that does not validate fails with OkHttp's standard `SSLPeerUnverifiedException`. Requests to domains you haven't added to Approov are sent unchanged.
 
 ## VERIFYING
 

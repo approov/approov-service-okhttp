@@ -281,7 +281,7 @@ fun getTraceIDHeader(): String?
 ```
 
 ## setStatusHeader
-Sets the name of the header used to report the Approov token fetch status to the backend on every request processed by Approov. By default this is `Approov-Status`. The value is the SDK fetch status name in lowercase (`success`, `no_network`, `poor_network`, `untrusted_network`, `no_approov_service`, `rejected`, `internal_error`, ...), identical on Android and iOS. It is sent on successful requests too, and never on requests to domains not protected by Approov. With the default message signing the header is covered by the signatures. Passing `null` disables the header, in which case a request that could not be protected is sent with an empty token header and no explanation.
+Sets the name of the header used to report the Approov token fetch status to the backend on every request processed by Approov. By default this is `Approov-Status`. The value is the SDK fetch status name in lowercase (`success`, `no_network`, `poor_network`, `untrusted_network`, `no_approov_service`, `rejected`, `internal_error`, ...), identical on Android and iOS. It is sent on successful requests too, and never on requests to domains not protected by Approov. It tells the backend why this particular request carries no attestation proof, to log against the request and act on. With the default message signing the header is covered by the signatures. Passing `null` disables the header, in which case a request that could not be protected is sent with an empty token header and no explanation.
 
 **Java:**
 ```java

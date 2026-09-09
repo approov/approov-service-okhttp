@@ -387,9 +387,9 @@ public class ApproovService {
      * "Approov-Status". The value is the SDK fetch status name in lowercase, for
      * example "success", "no_network", "untrusted_network", "no_approov_service" or
      * "rejected", identical on Android and iOS. It is sent on every processed
-     * request, including successful ones, so that the backend can distinguish a
-     * request whose Approov headers were stripped from one that this layer sent
-     * without a token because the fetch failed. It is not sent on requests to
+     * request, including successful ones, and tells the backend why this
+     * particular request carries no attestation proof, to log against the request
+     * and act on (rejecting it, for example). It is not sent on requests to
      * domains that are not protected by Approov. Passing null disables the header,
      * in which case a request that could not be protected is sent with an empty
      * token header and no explanation.
