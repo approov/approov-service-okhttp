@@ -2,6 +2,19 @@
 
 A standard integration of the Approov Package for OkHttp needs nothing in this document: add the dependency, initialize, use the client (see the [README](README.md)). The options below change the defaults, and are for apps with specific requirements. Every method is documented in [REFERENCE.md](REFERENCE.md).
 
+## What each request carries
+
+Every request to an API domain you have added to Approov carries an Approov token as its proof of attestation. The only exception is when the SDK could not attest the app at that moment (no network, the device or app was rejected, the Approov service was unreachable): the request is still sent, with an empty token header, and `Approov-Status` says why. For each such request the client adds:
+
+| Header | Value | What your backend does with it |
+| :--- | :--- | :--- |
+| `Approov-Token` | the Approov token, a short lived signed JWT that is the proof of attestation for this request; **empty** if no token could be obtained | verifies the token's signature and expiry and rejects a request whose token is missing or invalid; the token also carries the app installation's public key, which verifies the `install` message signature below |
+| `Approov-Status` | the outcome of the attestation for this request, in lowercase: `success`, `no_network`, `rejected`, ... | says why this particular request carries no attestation proof, so you can log the reason against the rejection |
+| `Signature`, `Signature-Input` | RFC 9421 message signatures, an `install` member (per installation key) and an `account` member (account key), over the method, URL, the headers above, the body digest when there is a body, and any headers you choose to add | verifies whichever signature it is configured for; the signature makes the request immutable, signed headers and body included, and links it to this token and so to the attested app installation; sign your session or `Authorization` header too and the request is linked to the user as well |
+| `Approov-TraceID` | an optional debug header added by the SDK | nothing, it is a debug header; pass it through unchanged |
+
+The client from `getOkHttpClient()` never holds back or fails a request because of the attestation outcome: whatever it is, the request is sent, and when no token could be obtained it goes out with an empty token header and the reason in `Approov-Status`. The one thing that does stop a request is the connection itself: the TLS connection to each domain you have added is validated against the [Managed Trust Roots](https://approov.io/docs/latest/approov-usage-documentation/#managed-trust-roots) that Approov maintains for your account, or against the specific certificate public keys you configure for that domain, with the validation set updated dynamically without an app release. A connection that does not validate is refused with OkHttp's standard `SSLPeerUnverifiedException`, exactly as OkHttp refuses any connection whose certificate it cannot trust. Requests to domains you haven't added to Approov are sent unchanged.
+
 ## What happens by default
 
 For a request to a protected API domain, the `ApproovService` interceptor fetches an Approov token and applies the decisions below. These are made by the installed `ApproovServiceMutator` (see [Service mutators](#service-mutators)); the table shows the default.
@@ -86,7 +99,7 @@ The string passed to `initialize` (the CLI and the SDK call it the SDK config st
 
 ## Bypass initialization
 
-Initializing with an empty string instead of the Approov account ID keeps the package initialized but returns plain `OkHttpClient` instances with no Approov processing (no token, signing, secure strings or Approov connection validation). This is a bootstrap or fallback state, for example while the account ID is fetched remotely, or as the guard in the README example against an account ID that does not reach the app intact. A later `initialize` with the account ID enables Approov at runtime; reinitializing from one account ID to a different one is rejected by the SDK.
+Initializing with an empty string instead of the Approov account ID keeps the package initialized but returns plain `OkHttpClient` instances with no Approov processing (no token, signing, secure strings or Approov connection validation). This is a bootstrap or fallback state, for example while the account ID is fetched remotely, or as the guard in the README example against an account ID that does not reach the app intact. A later `initialize` with the account ID enables Approov at runtime: call it, reapply any custom settings, then obtain a new client with `getOkHttpClient()`; clients obtained in bypass mode stay unprotected. Reinitializing from one account ID to a different one is rejected by the SDK. See [initialize in the reference](REFERENCE.md#initialize).
 
 ```java
 ApproovService.initialize(context, "");
@@ -194,5 +207,23 @@ ApproovService.setStaleProtectionRefreshPeriod(1000)   // <= 0 disables
 ```
 
 ## Diagnostics
+
+The package never logs a token. For each fetch it logs, at debug level, the [loggable form](https://approov.io/docs/latest/approov-usage-documentation/#loggable-tokens) of the result: the token's claims plus a short fragment of its signature, which cannot be turned back into a usable token. The claim to look at is `arc`, the [Attestation Response Code](https://approov.io/docs/latest/approov-usage-documentation/#attestation-response-code): it encodes why the attestation produced the result it did, for example:
+
+```
+D/ApproovTokenInterceptor: Token for https://api.example.com/v1/items: {"did":"...","exp":1757400000,"arc":"IXPSB7TRK26LXE3M","sip":"a1b2c3", ...}
+```
+
+To decode an `arc`, ask the CLI for the decoding command once; it prints a `curl` with your account's API key filled in and an `<arc>` placeholder:
+
+```sh
+approov token -showArcInfoCurl
+```
+
+```
+curl -H "Authorization: <api-key>" -H "Arc: <arc>" https://<management-url>/arc-info/
+```
+
+Run it with the `arc` value from the log in place of `<arc>` and the response lists the flags behind the result, for example `emulator` or `app-not-registered`. Your account's [live metrics](https://approov.io/docs/latest/approov-usage-documentation/#metrics-graphs) show the same reasons in aggregate within a minute. While you work, a [development signing certificate](https://approov.io/docs/latest/approov-usage-documentation/#development-app-signing-certificates) lets debug builds and emulators pass attestation.
 
 The `Approov-TraceID` header carries an optional SDK trace value for correlating a request with the Approov logs. Log output from the package is at `DEBUG` level under the tags `ApproovService`, `ApproovTokenInterceptor`, `ApproovFreshness`, `ApproovPinningInterceptor` and `ApproovMsgSign`; the loggable form of each fetched token is logged and can be [checked](https://approov.io/docs/latest/approov-usage-documentation/#loggable-tokens) with the Approov CLI. Prefer logging rejections from your backend's response, which saw the token and the `Approov-Status` header, over calling `getLastARC()` on the device: the device value may belong to a later attestation than the request that failed.
