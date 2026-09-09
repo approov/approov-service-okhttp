@@ -24,6 +24,7 @@ import java.util.List;
 import java.util.Map;
 import java.util.Set;
 
+import okhttp3.Headers;
 import okhttp3.Request;
 
 /**
@@ -68,14 +69,24 @@ class ApproovRequestFreshness {
     // signature over the wrong method and must be reprotected
     private volatile String appliedMethod;
 
+    // the headers of the request as seen by the network layer on the first attempt
+    // after the protection was applied (OkHttp adds its own transport headers between
+    // the application and the network interceptors, so the baseline is taken there);
+    // a later attempt whose headers differ was rebuilt by the app or by OkHttp (an
+    // Authenticator replacing Authorization on a 401) and any signature over the old
+    // headers is invalid, so it must be reprotected. Null until the first attempt.
+    private volatile Headers appliedHeaders;
+
     // the complete ordered values each substituted header had before substitution,
     // so that the placeholders can be restored when the protection is stripped
     private volatile Map<String, List<String>> originalHeaderValues;
 
-    // the value each substituted header was given, so that the placeholder is only
-    // restored if the header still holds what this layer installed and not a value
-    // the app changed afterwards (for example from an OkHttp authenticator)
-    private volatile Map<String, String> installedHeaderValues;
+    // a SHA-256 digest of the value each substituted header was given, as stored on
+    // the built request, so that the placeholder is only restored if the header still
+    // holds what this layer installed and not a value the app changed afterwards (for
+    // example from an OkHttp authenticator). A digest rather than the value: the layer
+    // keeps no copy of a secure string beyond the request that carries it.
+    private volatile Map<String, String> installedHeaderDigests;
 
     /**
      * Constructs a marker for protection applied to a request.
@@ -90,8 +101,9 @@ class ApproovRequestFreshness {
         this.mutatorAddedHeaders = Collections.emptyList();
         this.appliedURL = null;
         this.appliedMethod = null;
+        this.appliedHeaders = null;
         this.originalHeaderValues = Collections.emptyMap();
-        this.installedHeaderValues = Collections.emptyMap();
+        this.installedHeaderDigests = Collections.emptyMap();
     }
 
     String getFetchURL() {
@@ -138,23 +150,62 @@ class ApproovRequestFreshness {
         this.appliedMethod = appliedMethod;
     }
 
+    Headers getAppliedHeaders() {
+        return appliedHeaders;
+    }
+
+    void setAppliedHeaders(Headers appliedHeaders) {
+        this.appliedHeaders = appliedHeaders;
+    }
+
     Map<String, List<String>> getOriginalHeaderValues() {
         return originalHeaderValues;
     }
 
-    Map<String, String> getInstalledHeaderValues() {
-        return installedHeaderValues;
+    /**
+     * Indicates whether a header still holds the value this layer installed by
+     * substitution.
+     *
+     * @param header the header name
+     * @param value  the header's current single value
+     * @return true if the value is the one installed
+     */
+    boolean isInstalledValue(String header, String value) {
+        String digest = installedHeaderDigests.get(header);
+        return (digest != null) && digest.equals(digestOf(value));
     }
 
     /**
      * Records the secure string substitutions applied to the request.
      *
-     * @param originalHeaderValues the complete values each header had before
-     * @param installedHeaderValues the value each header was given
+     * @param originalHeaderValues  the complete values each header had before
+     * @param installedHeaderValues the value each header carries after substitution,
+     *                              as stored on the built request (OkHttp trims
+     *                              header values when they are set); only a digest
+     *                              is kept
      */
     void setSubstitutions(Map<String, List<String>> originalHeaderValues, Map<String, String> installedHeaderValues) {
         this.originalHeaderValues = originalHeaderValues;
-        this.installedHeaderValues = installedHeaderValues;
+        Map<String, String> digests = new java.util.LinkedHashMap<>(installedHeaderValues.size());
+        for (Map.Entry<String, String> entry : installedHeaderValues.entrySet())
+            digests.put(entry.getKey(), digestOf(entry.getValue()));
+        this.installedHeaderDigests = digests;
+    }
+
+    // SHA-256 of a header value as lowercase hex, or "" for null
+    private static String digestOf(String value) {
+        if (value == null)
+            return "";
+        try {
+            byte[] hash = java.security.MessageDigest.getInstance("SHA-256")
+                    .digest(value.getBytes(java.nio.charset.StandardCharsets.UTF_8));
+            StringBuilder sb = new StringBuilder(hash.length * 2);
+            for (byte b : hash)
+                sb.append(String.format("%02x", b));
+            return sb.toString();
+        } catch (java.security.NoSuchAlgorithmException e) {
+            throw new IllegalStateException(e);
+        }
     }
 
     /**

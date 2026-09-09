@@ -1569,7 +1569,6 @@ class ApproovTokenInterceptor implements Interceptor {
                 // network layer whether the protection was applied too long ago and must
                 // be refreshed before transmission, or whether the request was redirected
                 freshness = new ApproovRequestFreshness(url.toString(), changes);
-                freshness.setSubstitutions(originalHeaderValues, setSubstitutionHeaders);
                 builder.tag(ApproovRequestFreshness.class, freshness);
             }
             if (setTraceIDHeaderKey != null) {
@@ -1594,6 +1593,16 @@ class ApproovTokenInterceptor implements Interceptor {
                 changes.setSubstitutionQueryParamResults(originalURL, queryKeys);
             }
             request = builder.build();
+
+            // record the substituted values as they are actually stored on the request
+            // (OkHttp trims header values when they are set) so that stripping can
+            // recognise a header it installed
+            if (freshness != null) {
+                Map<String, String> installedHeaderValues = new LinkedHashMap<>(setSubstitutionHeaders.size());
+                for (String header : setSubstitutionHeaders.keySet())
+                    installedHeaderValues.put(header, request.header(header));
+                freshness.setSubstitutions(originalHeaderValues, installedHeaderValues);
+            }
         }
 
         // call the processed request callback, unless protection is being reapplied
@@ -1650,8 +1659,7 @@ class ApproovTokenInterceptor implements Interceptor {
         for (Map.Entry<String, List<String>> entry : freshness.getOriginalHeaderValues().entrySet()) {
             String header = entry.getKey();
             List<String> current = request.headers(header);
-            String installed = freshness.getInstalledHeaderValues().get(header);
-            if ((current.size() != 1) || !current.get(0).equals(installed))
+            if ((current.size() != 1) || !freshness.isInstalledValue(header, current.get(0)))
                 continue;
             builder.removeHeader(header);
             for (String value : entry.getValue())
@@ -1696,21 +1704,29 @@ class ApproovFreshnessInterceptor implements Interceptor {
         if (freshness == null)
             return chain.proceed(request);
 
-        // a network attempt whose URL or method differs from the one the protection was
-        // applied to is a redirect followup built by OkHttp (a 303 also turns the method
-        // into GET): the destination may be a different host, so the protection of the
-        // original destination must never travel with it, and a signature over the old
-        // method or URL is invalid, so the new attempt is classified and signed afresh
+        // a network attempt whose URL, method or headers differ from the request the
+        // protection was applied to was rebuilt by OkHttp or by the app: a redirect
+        // followup (a 303 also turns the method into GET), or an Authenticator retrying
+        // a 401 with a new Authorization header. The destination may be a different
+        // host, so the protection of the original destination must never travel with
+        // it, and a signature over the old method, URL or headers is invalid, so the
+        // new attempt is classified and signed afresh. The header baseline is taken on
+        // the first network attempt, since OkHttp adds its transport headers between
+        // the application and the network interceptors.
         String appliedURL = freshness.getAppliedURL();
         String appliedMethod = freshness.getAppliedMethod();
+        okhttp3.Headers appliedHeaders = freshness.getAppliedHeaders();
+        if (appliedHeaders == null)
+            freshness.setAppliedHeaders(request.headers());
         boolean redirected = ((appliedURL != null) && !request.url().toString().equals(appliedURL))
-                || ((appliedMethod != null) && !request.method().equals(appliedMethod));
+                || ((appliedMethod != null) && !request.method().equals(appliedMethod))
+                || ((appliedHeaders != null) && !request.headers().equals(appliedHeaders));
 
         ApproovServiceMutator mutator;
         boolean invokeProcessed;
         if (redirected) {
-            Log.d(TAG, "Request redirected from " + appliedURL + " to " + request.url() +
-                    ", reclassifying Approov protection");
+            Log.d(TAG, "Request rebuilt since protection was applied to " + appliedURL +
+                    " (now " + request.method() + " " + request.url() + "), reapplying Approov protection");
             // cache the mutator for the duration of the interceptor to make sure it is
             // not changed mid-flight; a mutator that does not support refresh has its
             // headers stripped (they must not leak to the new destination) but its
@@ -1750,6 +1766,11 @@ class ApproovFreshnessInterceptor implements Interceptor {
         // is refreshed again rather than sent with stale headers under a fresh marker.
         Request stripped = ApproovTokenInterceptor.stripProtection(request, freshness, !redirected);
         Request refreshed = ApproovTokenInterceptor.applyProtection(stripped, mutator, invokeProcessed);
+        // the refreshed request is already at the network layer, so its header baseline
+        // is what it carries now
+        ApproovRequestFreshness refreshedMarker = refreshed.tag(ApproovRequestFreshness.class);
+        if (refreshedMarker != null)
+            refreshedMarker.setAppliedHeaders(refreshed.headers());
         return chain.proceed(refreshed);
     }
 }

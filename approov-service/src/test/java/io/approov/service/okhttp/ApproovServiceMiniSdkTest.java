@@ -1792,6 +1792,79 @@ public class ApproovServiceMiniSdkTest {
     }
 
     /**
+     * Third review round, S1: a secure string with surrounding whitespace is stored
+     * trimmed by OkHttp; stripping must still recognise the header as one this layer
+     * installed and restore the placeholder before a redirect to an unprotected host.
+     */
+    @Test
+    public void testWhitespaceSecretIsRestoredBeforeUnprotectedRedirect() throws Exception {
+        String targetHost = getTargetHost();
+        reinitializeService(scenarioJson(uniqueCaseName("padded-secret"),
+            "\"protectedDomains\": [\"" + targetHost + "\"]," +
+            "\"initialSecureStrings\": {\"header-key\": \"  padded-secret  \"}"
+        ));
+        ApproovService.addSubstitutionHeader("Api-Key", null);
+        AtomicInteger attempts = new AtomicInteger();
+        ApproovService.setOkHttpClientBuilder(new OkHttpClient.Builder().addNetworkInterceptor(chain -> {
+            Response response = chain.proceed(chain.request());
+            if (attempts.getAndIncrement() == 0)
+                return response.newBuilder().code(302).message("Found").header("Location", getUnprotectedURL()).build();
+            return response;
+        }));
+        Request request = new Request.Builder().url(getTargetURL()).header("Api-Key", "header-key").build();
+        try (Response response = ApproovService.getOkHttpClient().newCall(request).execute()) {
+            assertEquals(2, attempts.get());
+            JSONObject reply = new JSONObject(response.body().string());
+            assertEquals("header-key", getHeader(reply, "Api-Key"));
+            assertNull(getHeader(reply, "Approov-Token"));
+            assertNull(getHeader(reply, "Signature"));
+        }
+    }
+
+    /**
+     * Third review round, S2: an OkHttp Authenticator retrying a 401 immediately with a
+     * new Authorization header changes a covered component; the retry is reprotected
+     * and signed over the new value rather than sent with the previous signature.
+     */
+    @Test
+    public void testAuthenticatorRetryIsResignedOverNewAuthorization() throws Exception {
+        reinitializeServiceWithTargetHost("");
+        List<String> signatures = new ArrayList<>();
+        List<String> authorizations = new ArrayList<>();
+        AtomicInteger attempts = new AtomicInteger();
+        ApproovService.setOkHttpClientBuilder(new OkHttpClient.Builder()
+            .addNetworkInterceptor(chain -> {
+                signatures.add(chain.request().header("Signature"));
+                authorizations.add(chain.request().header("Authorization"));
+                Response response = chain.proceed(chain.request());
+                if (attempts.getAndIncrement() == 0)
+                    return response.newBuilder().code(401).message("Unauthorized").build();
+                return response;
+            })
+            .authenticator((route, response) -> {
+                if ("Bearer second".equals(response.request().header("Authorization")))
+                    return null;
+                return response.request().newBuilder().header("Authorization", "Bearer second").build();
+            }));
+        Request request = new Request.Builder().url(getTargetURL()).header("Authorization", "Bearer first").build();
+        try (Response response = ApproovService.getOkHttpClient().newCall(request).execute()) {
+            assertEquals(200, response.code());
+            assertEquals(2, attempts.get());
+            assertEquals(java.util.Arrays.asList("Bearer first", "Bearer second"), authorizations);
+            assertNotNull(signatures.get(0));
+            JSONObject reply = new JSONObject(response.body().string());
+            // the recording interceptor runs before the freshness interceptor, so the
+            // reply carries what left after reprotection: a different signature
+            assertNotEquals("the retry must be signed over the new Authorization",
+                signatures.get(0), getHeader(reply, "Signature"));
+            assertEquals("Bearer second", getHeader(reply, "Authorization"));
+            String signatureInput = getHeader(reply, "Signature-Input");
+            assertTrue(signatureInput, signatureInput.contains("\"authorization\""));
+            assertEquals("success", getHeader(reply, "Approov-Status"));
+        }
+    }
+
+    /**
      * Re-review finding 4: a refresh must not undo a header change the app made after
      * the substitution. An OkHttp authenticator replaces the placeholder with a second
      * key; the stale refresh substitutes that key, not the first one.
