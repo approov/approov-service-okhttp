@@ -115,7 +115,7 @@ For each request to an API domain you have added to Approov, the client adds:
 
 | Header | Value | What your backend does with it |
 | :--- | :--- | :--- |
-| `Approov-Token` | the Approov token, a short lived signed JWT; **empty** if no token could be obtained | verifies the signature and expiry, rejects requests without a valid token |
+| `Approov-Token` | the Approov token, a short lived signed JWT that is the proof of attestation for this request; **empty** if no token could be obtained | verifies the signature and expiry, rejects requests without a valid token |
 | `Approov-Status` | the outcome of the attestation for this request, in lowercase: `success`, `no_network`, `rejected`, ... | says why this particular request carries no attestation proof, so you can log the reason against the request and reject it, for example |
 | `Signature`, `Signature-Input` | RFC 9421 message signatures, an `install` member (per installation key) and an `account` member (account key), over the method, URL and the headers above | verifies whichever signature it is configured for; a request cannot be replayed with a different token or URL |
 | `Approov-TraceID` | an optional debug header added by the SDK | nothing, it is a debug header; pass it through unchanged |
