@@ -80,6 +80,10 @@ ApproovService.setTraceIDHeader(null)                       // default "Approov-
 ApproovService.setStatusHeader("X-Approov-Fetch-Status")          // default "Approov-Status"; null disables
 ```
 
+## About the Approov account ID
+
+The string passed to `initialize` (the CLI and the SDK call it the SDK config string, `approov sdk -getConfigString`) looks like `#your-account#p6nZ...=`. It names your account and carries a fingerprint of the account's public key, so the SDK knows which Approov service to attest against and can verify the configuration it later downloads. It is not a secret and does not rotate; the same value serves every app in the account, and registering an app is a separate step. It is not an API key: nothing is granted by knowing it.
+
 ## Bypass initialization
 
 Initializing with an empty string instead of the Approov account ID keeps the package initialized but returns plain `OkHttpClient` instances with no Approov processing (no token, signing, secure strings or pinning). This is a bootstrap or fallback state, for example while the account ID is fetched remotely, or as the guard in the README example against an account ID that was not copied exactly. A later `initialize` with the account ID enables Approov at runtime; reinitializing from one account ID to a different one is rejected by the SDK.
