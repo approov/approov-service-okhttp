@@ -111,11 +111,11 @@ ApproovService.setOkHttpClientBuilder(
 val client = ApproovService.getOkHttpClient()
 ```
 
-For each request to an API domain you have added to Approov, the client adds:
+Every request to an API domain you have added to Approov carries an Approov token as its proof of attestation. The only exception is when the SDK could not attest the app at that moment (no network, the device or app was rejected, the Approov service was unreachable): the request is still sent, with an empty token header, and `Approov-Status` says why. For each such request the client adds:
 
 | Header | Value | What your backend does with it |
 | :--- | :--- | :--- |
-| `Approov-Token` | the Approov token, a short lived signed JWT that is the proof of attestation for this request; **empty** if no token could be obtained | verifies the signature and expiry, rejects requests without a valid token |
+| `Approov-Token` | the Approov token, a short lived signed JWT that is the proof of attestation for this request; **empty** if no token could be obtained | verifies the token's signature and expiry and rejects a request whose token is missing or invalid; the token also carries the app installation's public key, which verifies the `install` message signature below |
 | `Approov-Status` | the outcome of the attestation for this request, in lowercase: `success`, `no_network`, `rejected`, ... | says why this particular request carries no attestation proof, so you can log the reason against the request and reject it, for example |
 | `Signature`, `Signature-Input` | RFC 9421 message signatures, an `install` member (per installation key) and an `account` member (account key), over the method, URL, the headers above, the body digest when there is a body, and any headers you choose to add | verifies whichever signature it is configured for; the request cannot be modified and is bound to this one token, so only an exact, unmodified replay within the signature's lifetime is possible |
 | `Approov-TraceID` | an optional debug header added by the SDK | nothing, it is a debug header; pass it through unchanged |
