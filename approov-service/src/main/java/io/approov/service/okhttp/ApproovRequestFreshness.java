@@ -63,6 +63,11 @@ class ApproovRequestFreshness {
     // differs is a redirect followup that must be reclassified
     private volatile String appliedURL;
 
+    // the HTTP method of the request as it left the Approov interceptor; a network
+    // attempt whose method differs (a 303 turning a POST into a GET) carries a
+    // signature over the wrong method and must be reprotected
+    private volatile String appliedMethod;
+
     // the complete ordered values each substituted header had before substitution,
     // so that the placeholders can be restored when the protection is stripped
     private volatile Map<String, List<String>> originalHeaderValues;
@@ -84,6 +89,7 @@ class ApproovRequestFreshness {
         this.protectedAtMillis = -1;
         this.mutatorAddedHeaders = Collections.emptyList();
         this.appliedURL = null;
+        this.appliedMethod = null;
         this.originalHeaderValues = Collections.emptyMap();
         this.installedHeaderValues = Collections.emptyMap();
     }
@@ -122,6 +128,14 @@ class ApproovRequestFreshness {
 
     void setAppliedURL(String appliedURL) {
         this.appliedURL = appliedURL;
+    }
+
+    String getAppliedMethod() {
+        return appliedMethod;
+    }
+
+    void setAppliedMethod(String appliedMethod) {
+        this.appliedMethod = appliedMethod;
     }
 
     Map<String, List<String>> getOriginalHeaderValues() {

@@ -1761,6 +1761,37 @@ public class ApproovServiceMiniSdkTest {
     }
 
     /**
+     * Re-review finding 2: a 303 to the same URL turns a POST into a GET. The followup
+     * is reprotected so that its signature covers the new method rather than POST.
+     */
+    @Test
+    public void testSameURL303ReprotectsForTheNewMethod() throws Exception {
+        reinitializeServiceWithTargetHost("");
+        AtomicInteger attempts = new AtomicInteger();
+        ApproovService.setOkHttpClientBuilder(new OkHttpClient.Builder().addNetworkInterceptor(chain -> {
+            Response response = chain.proceed(chain.request());
+            if (attempts.getAndIncrement() == 0)
+                return response.newBuilder().code(303).message("See Other").header("Location", getTargetURL()).build();
+            return response;
+        }));
+        RequestBody body = RequestBody.create("{\"a\":1}", MediaType.parse("application/json"));
+        Request request = new Request.Builder().url(getTargetURL()).post(body).build();
+        try (Response response = ApproovService.getOkHttpClient().newCall(request).execute()) {
+            assertEquals(2, attempts.get());
+            JSONObject reply = new JSONObject(response.body().string());
+            assertEquals("GET", reply.getString("method"));
+            assertEquals("success", getHeader(reply, "Approov-Status"));
+            // the POST attempt carried a Content-Digest; a signature regenerated for the GET
+            // does not cover one and the header is gone with the body
+            assertNull(getHeader(reply, "Content-Digest"));
+            String signatureInput = getHeader(reply, "Signature-Input");
+            assertNotNull(signatureInput);
+            assertFalse(signatureInput, signatureInput.contains("content-digest"));
+            assertEquals(signatureInput.indexOf("install="), signatureInput.lastIndexOf("install="));
+        }
+    }
+
+    /**
      * Re-review finding 4: a refresh must not undo a header change the app made after
      * the substitution. An OkHttp authenticator replaces the placeholder with a second
      * key; the stale refresh substitutes that key, not the first one.

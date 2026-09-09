@@ -1613,6 +1613,7 @@ class ApproovTokenInterceptor implements Interceptor {
             freshness.markProtected(SystemClock.elapsedRealtime(),
                     ApproovRequestFreshness.addedHeaderNames(request, processedRequest));
             freshness.setAppliedURL(processedRequest.url().toString());
+            freshness.setAppliedMethod(processedRequest.method());
         }
 
         return processedRequest;
@@ -1695,12 +1696,15 @@ class ApproovFreshnessInterceptor implements Interceptor {
         if (freshness == null)
             return chain.proceed(request);
 
-        // a network attempt whose URL differs from the one the protection was applied
-        // to is a redirect followup built by OkHttp: the destination may be a
-        // different host, so the protection of the original destination must never
-        // travel with it and the new destination is classified afresh
+        // a network attempt whose URL or method differs from the one the protection was
+        // applied to is a redirect followup built by OkHttp (a 303 also turns the method
+        // into GET): the destination may be a different host, so the protection of the
+        // original destination must never travel with it, and a signature over the old
+        // method or URL is invalid, so the new attempt is classified and signed afresh
         String appliedURL = freshness.getAppliedURL();
-        boolean redirected = (appliedURL != null) && !request.url().toString().equals(appliedURL);
+        String appliedMethod = freshness.getAppliedMethod();
+        boolean redirected = ((appliedURL != null) && !request.url().toString().equals(appliedURL))
+                || ((appliedMethod != null) && !request.method().equals(appliedMethod));
 
         ApproovServiceMutator mutator;
         boolean invokeProcessed;
