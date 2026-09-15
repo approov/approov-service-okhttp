@@ -15,7 +15,7 @@ You'll need a trial or paid Approov account. The [Approov documentation](https:/
 Add the package to your app's Gradle dependencies, with `mavenCentral()` enabled in your repositories:
 
 ```groovy
-implementation("io.approov:service.okhttp:3.7.0")
+implementation("io.approov:service.okhttp:3.8.0")
 ```
 
 The package supports Android 6.0 (API level 23) and later. Add these permissions to your app manifest:
@@ -119,7 +119,7 @@ Run your app and make a request. The package never logs a token; it logs the [lo
 
 ## UPGRADING FROM 3.5.x
 
-3.7.0 changes the request contract: requests are never stopped in the app, a failed token fetch sends an empty `Approov-Token` with the reason in `Approov-Status`, and message signing is on by default with both signatures. Your backend must tolerate the new headers and is the place that rejects requests without a valid token. Read the [changelog](CHANGELOG.md) before upgrading and test app and backend together.
+3.8.0 changes the request contract: requests are never stopped in the app, a failed token fetch sends an empty `Approov-Token` with the reason in `Approov-Status`, and message signing is on by default with both signatures. Your backend must tolerate the new headers and is the place that rejects requests without a valid token. Read the [changelog](CHANGELOG.md) before upgrading and test app and backend together.
 
 ## NEXT STEPS
 

@@ -34,7 +34,7 @@ import java.util.regex.Matcher;
  * implementing classes can choose to override only the methods they are
  * interested in.
  *
- * From 3.7.0 the default interceptor decisions always proceed with the request.
+ * From 3.8.0 the default interceptor decisions always proceed with the request.
  * A token fetch outcome other than SUCCESS (no network, untrusted network, no
  * Approov service, rejection, ...) is an outcome, not a failure: the request is
  * sent with an empty Approov token header, a failed secure string substitution
@@ -56,7 +56,7 @@ public interface ApproovServiceMutator {
     /**
      * Mutator that provides the standard decisions with no message signing.
      * Note that this is not the mutator installed by ApproovService.initialize():
-     * from 3.7.0 the out-of-the-box mutator is an ApproovDefaultMessageSigning
+     * from 3.8.0 the out-of-the-box mutator is an ApproovDefaultMessageSigning
      * instance producing both install and account signatures (see
      * ApproovService.createDefaultServiceMutator). Install this instance with
      * ApproovService.setServiceMutator(ApproovServiceMutator.DEFAULT) to switch
@@ -80,7 +80,7 @@ public interface ApproovServiceMutator {
      * Indicates whether a token fetch status is a network failure, meaning that
      * the attestation could not be performed because of the network rather than
      * because of the app or device. Covers NO_NETWORK, POOR_NETWORK and the
-     * UNTRUSTED_NETWORK status introduced by the 3.7.0 SDK (which replaces
+     * UNTRUSTED_NETWORK status introduced by the 3.8.0 SDK (which replaces
      * MITM_DETECTED: the Approov channel no longer depends on pinning so an
      * intercepting proxy on the attestation path is no longer an outcome, and a
      * fundamental TLS trust failure is reported as UNTRUSTED_NETWORK instead).
@@ -94,9 +94,9 @@ public interface ApproovServiceMutator {
             case POOR_NETWORK:
                 return true;
             default:
-                // TODO(3.7.0 SDK): replace with "case UNTRUSTED_NETWORK:" once the
-                // approov-android-sdk 3.7.0 dependency is in place. Matching by name
-                // keeps this layer compiling against both the 3.5.x and 3.7.x SDK
+                // TODO(3.8.0 SDK): replace with "case UNTRUSTED_NETWORK:" once the
+                // approov-android-sdk 3.8.0 dependency is in place. Matching by name
+                // keeps this layer compiling against both the 3.5.x and 3.8.x SDK
                 // enums during the transition.
                 return "UNTRUSTED_NETWORK".equals(status.name());
         }

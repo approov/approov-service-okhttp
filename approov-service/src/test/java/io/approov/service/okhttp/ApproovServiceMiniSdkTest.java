@@ -338,13 +338,13 @@ public class ApproovServiceMiniSdkTest {
             // SDK provides one) as evidence of Approov processing — §2 Missing Artifacts Fallback.
             assertEquals("", getHeader(reply, "Approov-Token"));
             assertNotNull(getHeader(reply, "Approov-TraceID"));
-            // 3.7.0 §4: the status is reported on the status header
+            // 3.8.0 §4: the status is reported on the status header
             assertEquals("no_approov_service", getHeader(reply, "Approov-Status"));
         }
     }
 
     // ==================================================================================
-    // 3.7.0 Behaviour-Spec §1 always proceed, §4 status header (T37-01, T37-05, T37-06, T37-07)
+    // 3.8.0 Behaviour-Spec §1 always proceed, §4 status header (T37-01, T37-05, T37-06, T37-07)
     // ==================================================================================
 
     /**
@@ -511,7 +511,7 @@ public class ApproovServiceMiniSdkTest {
     }
 
     /**
-     * 3.7.0 §3/§4: a request sent with an empty Approov-Token (token fetch failed)
+     * 3.8.0 §3/§4: a request sent with an empty Approov-Token (token fetch failed)
      * is still signed by the default mutator, with both the empty token header and
      * the status header covered. An empty header value is a legal covered component
      * (RFC 9421 §2.1), so the backend can verify that the reported status came from
@@ -706,7 +706,7 @@ public class ApproovServiceMiniSdkTest {
     }
 
     /**
-     * T37-03 / SPECIFICATION 2.2: UNTRUSTED_NETWORK (the 3.7.0 replacement of
+     * T37-03 / SPECIFICATION 2.2: UNTRUSTED_NETWORK (the 3.8.0 replacement of
      * MITM_DETECTED) is a network failure for the direct methods: fetchToken,
      * fetchSecureString, fetchCustomJWT and precheck throw ApproovNetworkException.
      */
@@ -854,7 +854,7 @@ public class ApproovServiceMiniSdkTest {
     }
 
     /**
-     * §3 Service Mutator Override / 3.7.0 §1 opt-in abort (M37-02)
+     * §3 Service Mutator Override / 3.8.0 §1 opt-in abort (M37-02)
      *
      * A custom mutator may opt in to aborting a request for an outcome the app does
      * not accept by throwing. The exception is a standard network stack exception
@@ -1048,7 +1048,7 @@ public class ApproovServiceMiniSdkTest {
     }
 
     /**
-     * 3.7.0 §3: when one of the two default signatures cannot be produced the
+     * 3.8.0 §3: when one of the two default signatures cannot be produced the
      * request proceeds with the other, rather than unsigned or aborted.
      */
     @Test
@@ -1516,7 +1516,7 @@ public class ApproovServiceMiniSdkTest {
     }
 
     // ==================================================================================
-    // Review findings 2026-09-08 (external review of feature/3.7.0): regressions kept
+    // Review findings 2026-09-08 (external review of feature/3.8.0): regressions kept
     // as permanent tests. SPECIFICATION 2.4, 2.5, 4.5, 6.3, 7.1.
     // ==================================================================================
 
@@ -2067,20 +2067,20 @@ public class ApproovServiceMiniSdkTest {
         for (String removed : new String[] {"setProceedOnNetworkFail", "getProceedOnNetworkFail",
                 "setUseApproovStatusIfNoToken", "getUseApproovStatusIfNoToken",
                 "setApproovInterceptorExtensions", "getApproovInterceptorExtensions"})
-            assertFalse(removed + " must be removed on 3.7.x", names.contains(removed));
+            assertFalse(removed + " must be removed on 3.8.x", names.contains(removed));
         for (String retained : new String[] {"getMessageSignature", "prefetch", "setApproovHeader",
                 "setApproovTraceIDHeader", "setTokenHeader", "setTraceIDHeader", "setStatusHeader",
                 "createDefaultServiceMutator", "getLastARC"})
             assertTrue(retained + " must be present", names.contains(retained));
         try {
             Class.forName("io.approov.service.okhttp.ApproovInterceptorExtensions");
-            fail("ApproovInterceptorExtensions must be removed on 3.7.x");
+            fail("ApproovInterceptorExtensions must be removed on 3.8.x");
         } catch (ClassNotFoundException expected) {
             // removed
         }
         try {
             ApproovDefaultMessageSigning.class.getMethod("processedRequest", Request.class, ApproovRequestMutations.class);
-            fail("deprecated processedRequest must be removed on 3.7.x");
+            fail("deprecated processedRequest must be removed on 3.8.x");
         } catch (NoSuchMethodException expected) {
             // removed
         }

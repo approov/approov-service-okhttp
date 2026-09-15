@@ -56,7 +56,7 @@ import okio.ByteString;
  * message signatures to HTTP requests based on specified parameters and
  * algorithms.
  *
- * From 3.7.0 an instance of this class configured with
+ * From 3.8.0 an instance of this class configured with
  * {@link #generateDefaultSignatureParametersFactory()} is the mutator that
  * ApproovService installs out of the box, so every request carrying an Approov
  * token header is signed with both the install (ECDSA P-256, per app
