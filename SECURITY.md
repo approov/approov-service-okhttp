@@ -7,7 +7,7 @@ We encourage all users of this package to update to the latest version for the b
 
 | Version | Supported          |
 | ------- | ------------------ |
-| 3.7.x   | :white_check_mark: |
+| 3.8.x   | :white_check_mark: |
 | 3.5.x   | :white_check_mark: |
 | < 3.5   | :x:                |
 
