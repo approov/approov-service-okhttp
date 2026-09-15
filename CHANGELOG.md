@@ -6,7 +6,7 @@ The format is based on Keep a Changelog and this project adheres to Semantic Ver
 
 ## [3.7.0] - Unreleased
 
-This release targets the Approov SDK 3.7.0 and changes the request contract every integration has been coded against. It is the 3.7.x line; the 3.5.x line keeps its current behaviour. See the 3.7.0 behaviour specification for the cross-layer rules.
+This release targets the Approov SDK 3.7.0 and changes the request contract every integration has been coded against. It is the 3.7.x line; the 3.5.x line keeps its current behaviour.
 
 ### Changed
 - **Requests always proceed.** No runtime condition aborts a request on the service layer's behalf any more. A token fetch that fails for any reason (`NO_NETWORK`, `POOR_NETWORK`, `UNTRUSTED_NETWORK`, `NO_APPROOV_SERVICE`, `REJECTED`, `INTERNAL_ERROR`, ...) sends the request with an **empty** `Approov-Token` header, and a secure string substitution that fails leaves the placeholder value in the header or query parameter and sends the request. `UNKNOWN_URL` and `UNPROTECTED_URL` still send the request with no Approov headers at all. The backend is the enforcement point. The default `ApproovServiceMutator` interceptor decisions (`handleInterceptorFetchTokenResult`, `handleInterceptorHeaderSubstitutionResult`, `handleInterceptorQueryParamSubstitutionResult`) no longer throw. An app may opt in to aborting a request for an outcome it does not accept by overriding a hook and throwing; the interceptor hooks now declare `IOException` (including `handlePinningShouldProcessRequest` and the `ApproovDefaultMessageSigning` override of `handleInterceptorProcessedRequest`) so that such an abort is a standard network stack exception (`IOException` or a platform subclass), never an Approov specific type, and surfaces to the app as an ordinary network failure. An existing override that declares `throws ApproovException` and does not call the interface default still compiles; one that delegates to the default (`ApproovServiceMutator.super.handleInterceptorFetchTokenResult(...)` or `super.handleInterceptorProcessedRequest(...)`) must widen its declaration to `IOException` or catch it.
@@ -40,8 +40,6 @@ This release targets the Approov SDK 3.7.0 and changes the request contract ever
 - `getLastARC()` no longer performs a token fetch of its own (it fetched a token for the first pinned domain, which could return the ARC of a later, successful attestation rather than the one behind the request that failed, and cost a network round trip). It now returns the ARC recorded from the most recent fetch performed by this layer, from the interceptor or a direct method, with no network activity. Removes the getLastARC patch implementation tracked in approov/core-project-approov#566.
 - A header that is present with an empty value is now a valid covered component for message signing (RFC 9421 §2.1), so a request sent with an empty `Approov-Token` is still signed. Previously the signature base build failed and the request went out unsigned. This is in the shared `io.approov.util.sig.ComponentProvider` and applies to every layer carrying a copy of it.
 
-### Notes
-- The `approov-android-sdk` dependency still points at 3.5.3 because the 3.7.0 SDK is not yet published. `UNTRUSTED_NETWORK` is matched by name until then (`ApproovServiceMutator.isNetworkFailure`). The tests run against the mini SDK on the `feature/3.7.0` branch of `core-service-layers-testing`, which carries `UNTRUSTED_NETWORK`.
 
 ## [3.5.8] - 2026-07-16
 
