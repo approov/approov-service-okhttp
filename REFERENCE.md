@@ -11,9 +11,9 @@ import io.approov.service.okhttp.ApproovService;
 import io.approov.service.okhttp.ApproovService
 ```
 
-The request path never throws for a runtime Approov condition: a request made through an `OkHttpClient` from `getOkHttpClient` always proceeds, with the fetch status on the `Approov-Status` header and an empty `Approov-Token` header if it could not be protected (see [ADVANCED.md](ADVANCED.md)). The exceptions that can reach the caller from the request path are the app's own configuration errors (`IllegalStateException` for a required body digest that cannot be generated or an unsupported signing algorithm), pinning failures on the app's API domains (`javax.net.ssl.SSLPeerUnverifiedException`, as for any OkHttp pinning failure), and aborts the app itself opted in to through a service mutator. The exceptions below are thrown by the direct methods (`precheck`, `fetchToken`, `fetchSecureString`, `fetchCustomJWT`, ...), which return a value to the caller. A custom `ApproovServiceMutator` that opts in to aborting requests throws a standard network stack exception (`IOException` or a subclass), never an Approov type.
+Whether a request made through an `OkHttpClient` from `getOkHttpClient` proceeds when it could not be protected is decided by the installed `ApproovServiceMutator` (see [setServiceMutator](#setservicemutator) and [ADVANCED.md](ADVANCED.md#what-happens-by-default)). In 3.8.0 the default, `ApproovServiceMutator.DEFAULT`, is `CLOSE_FAILURE`, the 3.5.x decisions: a request proceeds on `SUCCESS` and `NO_APPROOV_SERVICE` and otherwise fails with an `ApproovException` subclass as listed below. With `ApproovServiceMutator.ALWAYS_PROCEED` it always proceeds, with the fetch status on the `Approov-Status` header and an empty `Approov-Token` header if it could not be protected; from 4.0.0 that is the default. Whatever the mutator, the other exceptions that can reach the caller from the request path are the app's own configuration errors (`IllegalStateException` for a required body digest that cannot be generated or an unsupported signing algorithm), pinning failures on the app's API domains (`javax.net.ssl.SSLPeerUnverifiedException`, as for any OkHttp pinning failure), and aborts the app itself opted in to through a service mutator, which throw a standard network stack exception (`IOException` or a subclass), never an Approov type. The direct methods (`precheck`, `fetchToken`, `fetchSecureString`, `fetchCustomJWT`, ...) return a value to the caller and report a failure with the exceptions below.
 
-Various methods may throw an `ApproovException` (an `IOException`) if there is a problem. The method `getMessage()` provides a descriptive message. An `ApproovFetchStatusException` (a subclass of `ApproovException`) carries the SDK fetch status in `getStatus()`.
+Various methods may throw an `ApproovException` (an `IOException`) if there is a problem. The method `getMessage()` provides a descriptive message. An `ApproovFetchStatusException` (a subclass of `ApproovException`) carries the SDK fetch status in `getTokenFetchStatus()`.
 
 If a method throws an `ApproovNetworkException` (a subclass of `ApproovFetchStatusException`) then this indicates the problem was caused by a networking issue (`NO_NETWORK`, `POOR_NETWORK` or `UNTRUSTED_NETWORK`), and a user initiated retry should be allowed.
 
@@ -156,37 +156,80 @@ void setServiceMutator(ApproovServiceMutator mutator)
 fun setServiceMutator(mutator: ApproovServiceMutator?)
 ```
 
-The mutator installed by `initialize` is the one returned by `createDefaultServiceMutator`: the standard decisions plus message signing with both the install and the account signatures. Passing `null` reinstates that default. Passing `ApproovServiceMutator.DEFAULT` keeps the standard decisions with message signing switched off. To customize the signatures provide an `ApproovDefaultMessageSigning` configured with a `SignatureParametersFactory`:
+The mutator installed by `initialize` is `ApproovServiceMutator.DEFAULT`, and passing `null` reinstates it. Mutators carry decisions only: installing one never switches message signing on or off (see [enableMessageSigning](#enablemessagesigning)). Three standard decision sets are provided:
+
+| Mutator | Decisions |
+| :--- | :--- |
+| `ApproovServiceMutator.CLOSE_FAILURE` | the 3.5.x decisions, which are also the interface defaults: a token fetch proceeds on `SUCCESS` (token header) and `NO_APPROOV_SERVICE` (empty token header); `UNKNOWN_URL` and `UNPROTECTED_URL` send the request with no Approov headers; `NO_NETWORK`, `POOR_NETWORK` and `UNTRUSTED_NETWORK` throw `ApproovNetworkException` (unless the deprecated [setProceedOnNetworkFail](#setproceedonnetworkfail)`(true)` is set); every other status throws `ApproovFetchStatusException`, `REJECTED` included. A secure string substitution is made on `SUCCESS` and skipped on `UNKNOWN_KEY`; `REJECTED` throws `ApproovRejectionException`, the network statuses `ApproovNetworkException`, every other status `ApproovFetchStatusException` |
+| `ApproovServiceMutator.ALWAYS_PROCEED` | never aborts: every token fetch status except `UNKNOWN_URL` and `UNPROTECTED_URL` sends the token header, empty if there is no token, and the status header; a secure string is substituted on `SUCCESS` and the placeholder is left otherwise |
+| `ApproovServiceMutator.DEFAULT` | `CLOSE_FAILURE` in 3.8.0, `ALWAYS_PROCEED` from 4.0.0. Name one of the two explicitly to keep your decisions fixed across 4.0.0 |
 
 **Java:**
 ```java
-    ApproovService.setServiceMutator(
-        new ApproovDefaultMessageSigning().setDefaultFactory(
-            ApproovDefaultMessageSigning.generateDefaultSignatureParametersFactory()
-                .setUseInstallMessageSigning()));
+ApproovService.setServiceMutator(ApproovServiceMutator.ALWAYS_PROCEED);
 ```
 
 **Kotlin:**
 ```kotlin
-    ApproovService.setServiceMutator(
-        ApproovDefaultMessageSigning().setDefaultFactory(
-            ApproovDefaultMessageSigning.generateDefaultSignatureParametersFactory()
-                .setUseInstallMessageSigning()))
+ApproovService.setServiceMutator(ApproovServiceMutator.ALWAYS_PROCEED)
 ```
 
-The default decisions of `ApproovServiceMutator` never abort a request: `handleInterceptorFetchTokenResult` returns `true` for every status except `UNKNOWN_URL` and `UNPROTECTED_URL` (for which it returns `false` so that no Approov headers are sent), and the substitution decisions return `true` only for `SUCCESS`. A custom mutator may opt in to aborting a request from any interceptor hook by throwing a standard network stack exception (`java.io.IOException` or a platform subclass), never an Approov specific type, so that the abort surfaces to the app as an ordinary network failure; that is an explicit integrator decision.
+A custom mutator gets the `CLOSE_FAILURE` decisions for every hook it does not override; one that should never abort delegates the three interceptor decisions to `ALWAYS_PROCEED` (see [ADVANCED.md](ADVANCED.md#opting-in-to-aborting-requests)). A custom mutator may opt in to aborting a request from any interceptor hook by throwing a standard network stack exception (`java.io.IOException` or a platform subclass), never an Approov specific type, so that the abort surfaces to the app as an ordinary network failure; that is an explicit integrator decision. The aborts `CLOSE_FAILURE` makes keep the 3.5.x Approov exception types (all subclasses of `IOException`), so an existing app catches the same exceptions as before.
 
-## createDefaultServiceMutator
-Creates the mutator that `initialize` installs out of the box: an `ApproovDefaultMessageSigning` configured with `generateDefaultSignatureParametersFactory()`, producing both the install (`ecdsa-p256-sha256`) and the account (`hmac-sha256`) signatures as members `install` and `account` of the `Signature` and `Signature-Input` headers.
+## enableMessageSigning
+Switches message signing on. Message signing is **off by default in 3.8.0** and on and compulsory from 4.0.0. Once on, every request carrying the Approov token header is signed (RFC 9421) after the service mutator's decisions, the secure string substitutions and the mutator's `handleInterceptorProcessedRequest` callback, so the signature covers what is sent, and it is signed again whenever its protection is reapplied (a redirect within a protected domain, an authenticator retry, a stale protection refresh). It works the same under every mutator, and `setServiceMutator` never switches it on or off. `initialize` switches it off again and drops any host factories.
+
+Without an argument it uses `ApproovDefaultMessageSigning.generateDefaultSignatureParametersFactory()`: both the install signature (member `install`, `ecdsa-p256-sha256`, per installation key held in the device secure hardware) and the account signature (member `account`, `hmac-sha256`, account key delivered on attestation), over the same covered components. Pass a [SignatureParametersFactory](#approovdefaultmessagesigningsignatureparametersfactory) to choose the signatures and covered components for every host without a host factory; `null` selects the default factory.
 
 **Java:**
 ```java
-ApproovServiceMutator createDefaultServiceMutator()
+void enableMessageSigning()
+void enableMessageSigning(ApproovDefaultMessageSigning.SignatureParametersFactory defaultFactory)
 ```
 
 **Kotlin:**
 ```kotlin
-fun createDefaultServiceMutator(): ApproovServiceMutator
+fun enableMessageSigning()
+fun enableMessageSigning(defaultFactory: ApproovDefaultMessageSigning.SignatureParametersFactory?)
+```
+
+## disableMessageSigning
+Switches message signing off: no `Signature` or `Signature-Input` header is added to any request. The configured factories are kept for a later `enableMessageSigning`.
+
+**Java:**
+```java
+void disableMessageSigning()
+```
+
+**Kotlin:**
+```kotlin
+fun disableMessageSigning()
+```
+
+## isMessageSigningEnabled
+Indicates whether message signing is enabled.
+
+**Java:**
+```java
+boolean isMessageSigningEnabled()
+```
+
+**Kotlin:**
+```kotlin
+fun isMessageSigningEnabled(): Boolean
+```
+
+## putMessageSigningHostFactory
+Signs requests to one host with the given factory instead of the default factory passed to `enableMessageSigning`. The host name is matched without regard to case and without any port. Passing `null` as the factory removes the host's factory so that the default applies again. It applies while message signing is enabled and is kept until `initialize`. A factory is shared by every request it applies to, so use a separate instance per distinct configuration.
+
+**Java:**
+```java
+void putMessageSigningHostFactory(String hostName, ApproovDefaultMessageSigning.SignatureParametersFactory factory)
+```
+
+**Kotlin:**
+```kotlin
+fun putMessageSigningHostFactory(hostName: String, factory: ApproovDefaultMessageSigning.SignatureParametersFactory?)
 ```
 
 ## getServiceMutator
@@ -200,6 +243,21 @@ ApproovServiceMutator getServiceMutator()
 **Kotlin:**
 ```kotlin
 fun getServiceMutator(): ApproovServiceMutator
+```
+
+## setProceedOnNetworkFail
+**Deprecated.** Under `ApproovServiceMutator.CLOSE_FAILURE`, the 3.8.0 default, `true` makes a request whose token fetch failed with `NO_NETWORK`, `POOR_NETWORK` or `UNTRUSTED_NETWORK` proceed with an empty token header and the status header instead of failing with `ApproovNetworkException`. Every other failing status still throws, secure string substitutions are not affected, and other mutators ignore it. `initialize` resets it to `false`. Install `ApproovServiceMutator.ALWAYS_PROCEED` instead, which proceeds on every status; this method is removed in 4.0.0, when proceeding becomes the default. `getProceedOnNetworkFail()` returns the current value.
+
+**Java:**
+```java
+void setProceedOnNetworkFail(boolean proceed)
+boolean getProceedOnNetworkFail()
+```
+
+**Kotlin:**
+```kotlin
+fun setProceedOnNetworkFail(proceed: Boolean)
+fun getProceedOnNetworkFail(): Boolean
 ```
 
 ## setDevKey
@@ -325,7 +383,7 @@ fun setBindingHeader(header: String)
 ```
 
 ## setStaleProtectionRefreshPeriod
-Sets the period in milliseconds after which a request that was held between having its Approov protection applied and being actually transmitted has that protection (Approov token and any message signature) refreshed at the network layer immediately before transmission. Requests may be held in this way if the device enters a deep sleep or doze state while the request is in flight, or if the app employs its own request queueing or backoff mechanism; the Approov token and any message signature (which carries created/expires timestamps) may then have expired by the time the request is sent. A refresh reissues the Approov token fetch (usually satisfied instantly from the SDK's cache) and reapplies any message signing via the service mutator's `handleInterceptorProcessedRequest` callback. Because this reinvokes the callback, a refresh is only performed if the mutator's `supportsProtectionRefresh()` returns true: the default mutator and `ApproovDefaultMessageSigning` support it, while custom `ApproovServiceMutator` implementations must opt in by overriding `supportsProtectionRefresh()` once their callback is safe to invoke more than once per request. The period should be comfortably less than the message signature expiry (15 seconds by default) but high enough that ordinary requests are not reprocessed. The default is 3000ms and passing a value less than or equal to zero disables the refresh.
+Sets the period in milliseconds after which a request that was held between having its Approov protection applied and being actually transmitted has that protection (Approov token and any message signature) refreshed at the network layer immediately before transmission. Requests may be held in this way if the device enters a deep sleep or doze state while the request is in flight, or if the app employs its own request queueing or backoff mechanism; the Approov token and any message signature (which carries created/expires timestamps) may then have expired by the time the request is sent. A refresh reissues the Approov token fetch (usually satisfied instantly from the SDK's cache), invokes the service mutator's `handleInterceptorProcessedRequest` callback again and, if message signing is enabled, signs the request again. Because this reinvokes the callback, a refresh is only performed if the mutator's `supportsProtectionRefresh()` returns true: `ApproovServiceMutator.DEFAULT`, `CLOSE_FAILURE` and `ALWAYS_PROCEED` support it, while custom `ApproovServiceMutator` implementations must opt in by overriding `supportsProtectionRefresh()` once their callback is safe to invoke more than once per request. The period should be comfortably less than the message signature expiry (15 seconds by default) but high enough that ordinary requests are not reprocessed. The default is 3000ms and passing a value less than or equal to zero disables the refresh.
 
 **Java:**
 ```Java
@@ -656,16 +714,16 @@ The following classes complete the public surface of the package. A standard int
 
 ## ApproovServiceMutator
 
-Interface with default methods, installed with `setServiceMutator`. Every interceptor hook declares `IOException` so that an implementation opting in to aborting a request can throw a standard network stack exception; the defaults never throw.
+Interface with default methods, installed with `setServiceMutator`. The interceptor defaults are the `CLOSE_FAILURE` decisions (the 3.5.x ones). Every interceptor hook declares `IOException` so that an implementation opting in to aborting a request can throw a standard network stack exception.
 
 | Method | Default decision |
 | :--- | :--- |
 | `boolean handleInterceptorShouldProcessRequest(Request) throws IOException` | `false` if the URL matches an exclusion regex, else `true` |
-| `boolean handleInterceptorFetchTokenResult(TokenFetchResult, String url) throws IOException` | `false` for `UNKNOWN_URL` and `UNPROTECTED_URL` (no Approov headers), `true` for every other status (token header, empty if no token, and status header) |
-| `boolean handleInterceptorHeaderSubstitutionResult(TokenFetchResult, String header) throws IOException` | `true` only for `SUCCESS` |
-| `boolean handleInterceptorQueryParamSubstitutionResult(TokenFetchResult, String queryKey) throws IOException` | `true` only for `SUCCESS` |
-| `Request handleInterceptorProcessedRequest(Request, ApproovRequestMutations) throws IOException` | returns the request unchanged; `ApproovDefaultMessageSigning` signs here |
-| `boolean supportsProtectionRefresh()` | `false`; `true` for `ApproovServiceMutator.DEFAULT` and `ApproovDefaultMessageSigning` |
+| `boolean handleInterceptorFetchTokenResult(TokenFetchResult, String url) throws IOException` | `true` for `SUCCESS` and `NO_APPROOV_SERVICE` (token header, empty if no token, and status header); `false` for `UNKNOWN_URL` and `UNPROTECTED_URL` (no Approov headers); throws `ApproovNetworkException` for `NO_NETWORK`, `POOR_NETWORK`, `UNTRUSTED_NETWORK` (or `true` with `setProceedOnNetworkFail(true)`) and `ApproovFetchStatusException` for every other status |
+| `boolean handleInterceptorHeaderSubstitutionResult(TokenFetchResult, String header) throws IOException` | `true` for `SUCCESS`, `false` for `UNKNOWN_KEY`; throws `ApproovRejectionException` for `REJECTED`, `ApproovNetworkException` for the network statuses, `ApproovFetchStatusException` otherwise |
+| `boolean handleInterceptorQueryParamSubstitutionResult(TokenFetchResult, String queryKey) throws IOException` | as for headers |
+| `Request handleInterceptorProcessedRequest(Request, ApproovRequestMutations) throws IOException` | returns the request unchanged; message signing, when enabled, runs after it |
+| `boolean supportsProtectionRefresh()` | `false`; `true` for `DEFAULT`, `CLOSE_FAILURE` and `ALWAYS_PROCEED` |
 | `boolean handlePinningShouldProcessRequest(Request) throws IOException` | `true` |
 | `void handlePrecheckResult(TokenFetchResult) throws ApproovException` | throws for every status except `SUCCESS` and `UNKNOWN_KEY` |
 | `void handleFetchTokenResult(TokenFetchResult) throws ApproovException` | throws for every status except `SUCCESS` |
@@ -673,7 +731,13 @@ Interface with default methods, installed with `setServiceMutator`. Every interc
 | `void handleFetchCustomJWTResult(TokenFetchResult) throws ApproovException` | throws for every status except `SUCCESS` |
 | `static boolean isNetworkFailure(TokenFetchStatus)` | `true` for `NO_NETWORK`, `POOR_NETWORK`, `UNTRUSTED_NETWORK` |
 
-`ApproovServiceMutator.DEFAULT` is an instance with these defaults and no message signing.
+| Constant | Meaning |
+| :--- | :--- |
+| `CLOSE_FAILURE` | an instance with these defaults |
+| `ALWAYS_PROCEED` | never aborts: `handleInterceptorFetchTokenResult` returns `false` for `UNKNOWN_URL` and `UNPROTECTED_URL` and `true` for every other status, the substitution decisions return `true` only for `SUCCESS` |
+| `DEFAULT` | `CLOSE_FAILURE` in 3.8.0, `ALWAYS_PROCEED` from 4.0.0 |
+
+No mutator signs requests; see [enableMessageSigning](#enablemessagesigning).
 
 ## ApproovRequestMutations
 
@@ -699,7 +763,7 @@ The setters are used by the interceptor and by tests that construct a mutations 
 
 ## SignatureParameters
 
-`io.approov.util.sig.SignatureParameters` holds the covered components and the signature parameters of one signature (RFC 9421 section 2.3). It is what `SignatureParametersFactory.setBaseParameters` takes, what `generateDefaultSignatureParametersFactory(SignatureParameters)` accepts, and what a factory subclass returns from `buildSignatureParameters`.
+`io.approov.util.okhttp.sig.SignatureParameters` (moved from `io.approov.util.sig` in 3.8.0) holds the covered components and the signature parameters of one signature (RFC 9421 section 2.3). It is what `SignatureParametersFactory.setBaseParameters` takes, what `generateDefaultSignatureParametersFactory(SignatureParameters)` accepts, and what a factory subclass returns from `buildSignatureParameters`.
 
 | Method | Meaning |
 | :--- | :--- |
@@ -722,23 +786,21 @@ The setters are used by the interceptor and by tests that construct a mutations 
 
 ## ApproovDefaultMessageSigning
 
-The out-of-the-box mutator (see `createDefaultServiceMutator`). Public surface beyond the mutator hooks:
+Holds the message signing constants and the signature parameters factory API. It is not a service mutator and has no public constructor: message signing is configured through [enableMessageSigning](#enablemessagesigning) and [putMessageSigningHostFactory](#putmessagesigninghostfactory).
 
 | Member | Meaning |
 | :--- | :--- |
-| `ApproovDefaultMessageSigning()` | constructs a signer with no factory; install one with `setDefaultFactory` |
-| `ApproovDefaultMessageSigning setDefaultFactory(SignatureParametersFactory)` | factory used for every host without a host factory |
-| `ApproovDefaultMessageSigning putHostFactory(String host, SignatureParametersFactory)` | factory for one host (authority) |
 | `static SignatureParametersFactory generateDefaultSignatureParametersFactory()` | the default factory: both signatures, method and target URI, token, trace and status headers, `Authorization`, `Content-Length`, `Content-Type` when present, optional SHA-256 body digest, `created`, 15 second `expires` |
 | `static SignatureParametersFactory generateDefaultSignatureParametersFactory(SignatureParameters base)` | as above over a custom base component set |
 | `DIGEST_SHA256`, `DIGEST_SHA512` | body digest algorithms |
 | `ALG_ES256`, `ALG_HS256` | signature algorithms (`ecdsa-p256-sha256`, `hmac-sha256`) |
 | `SIG_ID_INSTALL`, `SIG_ID_ACCOUNT` | dictionary member names `install` and `account` |
 | `RequiredBodyDigestException` | `IllegalStateException` thrown when a required body digest cannot be generated |
+| `OkHttpComponentProvider` | the request view passed to `SignatureParametersFactory.buildSignatureParameters` (`getRequest()`, `hasField(name)`, `getField(name)`, ...) |
 
 ## ApproovDefaultMessageSigning.SignatureParametersFactory
 
-Builds the signature parameters for each request. All setters return the factory for chaining. A factory is shared by every request it is installed for, so configure it fully before installing it and use a separate instance per distinct configuration.
+Builds the signature parameters for each request. All setters return the factory for chaining. A factory is shared by every request it applies to, so configure it fully before passing it to `enableMessageSigning` or `putMessageSigningHostFactory` and use a separate instance per distinct configuration.
 
 | Method | Meaning |
 | :--- | :--- |

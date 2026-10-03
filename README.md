@@ -6,7 +6,7 @@
 ![Message Signing](https://img.shields.io/badge/Message%20Signing-RFC%209421-1f6feb)
 ![Build](https://github.com/approov/approov-service-okhttp/actions/workflows/build_and_test.yml/badge.svg)
 
-Add this package, initialize it with your Approov account ID, and every API call your Android app makes through its `OkHttpClient` carries an [Approov](https://www.approov.io) token and message signatures that your backend can verify, over a TLS connection validated against the trust roots Approov manages for your account. Your backend then knows each request came from a genuine, unmodified instance of your app.
+Add this package, initialize it with your Approov account ID, and every API call your Android app makes through its `OkHttpClient` carries an [Approov](https://www.approov.io) token, and once you switch them on message signatures, that your backend can verify, over a TLS connection validated against the trust roots Approov manages for your account. Your backend then knows each request came from a genuine, unmodified instance of your app.
 
 You'll need a trial or paid Approov account. The [Approov documentation](https://approov.io/docs/latest/) walks you through setting up your account, registering your app and checking the integration. The essentials for using this package are below; optional features are in [ADVANCED.md](ADVANCED.md) and every method is in [REFERENCE.md](REFERENCE.md).
 
@@ -111,7 +111,21 @@ ApproovService.setOkHttpClientBuilder(
 val client = ApproovService.getOkHttpClient()
 ```
 
-Each request to a domain you have added to Approov is sent with its Approov token, the proof of attestation, both message signatures and the `Approov-Status` header, over a connection validated against the Managed Trust Roots Approov maintains for your account. If the app could not be attested at that moment the request still goes out, with an empty token header and the reason in `Approov-Status`; the only thing that stops a request is a connection that fails validation, refused with OkHttp's standard `SSLPeerUnverifiedException`. Requests to other domains are sent unchanged. The headers, and what your backend does with each, are listed in [ADVANCED.md](ADVANCED.md#what-each-request-carries).
+Each request to a domain you have added to Approov is sent with its Approov token, the proof of attestation, and the `Approov-Status` header, over a connection validated against the Managed Trust Roots Approov maintains for your account; a connection that fails validation is refused with OkHttp's standard `SSLPeerUnverifiedException`. Requests to other domains are sent unchanged.
+
+If the app could not be attested at that moment, 3.8.0 keeps the 3.5.x behaviour by default (`ApproovServiceMutator.DEFAULT` is `CLOSE_FAILURE`): the request goes out with an empty token header if the Approov service was unavailable, and otherwise fails in the app with an `ApproovException`, an `ApproovNetworkException` for a network problem the user can retry. To always send the request, with an empty token header and the reason in `Approov-Status`, and leave the decision to your backend, install `ApproovServiceMutator.ALWAYS_PROCEED`; it becomes the default in 4.0.0. See [what happens by default](ADVANCED.md#what-happens-by-default).
+
+```kotlin
+ApproovService.setServiceMutator(ApproovServiceMutator.ALWAYS_PROCEED)  // optional, the 4.0.0 default
+```
+
+Message signing is off by default in 3.8.0. One call, after `initialize`, signs every protected request with both the install and the account signatures, whichever mutator is installed; it is on and compulsory from 4.0.0:
+
+```kotlin
+ApproovService.enableMessageSigning()
+```
+
+The headers, and what your backend does with each, are listed in [ADVANCED.md](ADVANCED.md#what-each-request-carries); choosing signatures, per host factories and verifying them are in [message signing](ADVANCED.md#message-signing).
 
 ## VERIFYING
 
@@ -119,10 +133,18 @@ Run your app and make a request. The package never logs a token; it logs the [lo
 
 ## UPGRADING FROM 3.5.x
 
-3.8.0 changes the request contract: requests are never stopped in the app, a failed token fetch sends an empty `Approov-Token` with the reason in `Approov-Status`, and message signing is on by default with both signatures. Your backend must tolerate the new headers and is the place that rejects requests without a valid token. Read the [changelog](CHANGELOG.md) before upgrading and test app and backend together.
+By default 3.8.0 makes the same request decisions as 3.5.x and throws the same exceptions. What changes:
+
+* Every protected request also carries the `Approov-Status` header, and a request that proceeds without a token (`NO_APPROOV_SERVICE`) sends an empty `Approov-Token` header. Your backend must tolerate both.
+* Message signing is switched on with `ApproovService.enableMessageSigning()`, not by installing a mutator. If you installed `ApproovDefaultMessageSigning` with `setServiceMutator`, replace that call with `enableMessageSigning(factory)` (it no longer compiles).
+* The message signing helper classes moved: change imports of `io.approov.util.sig.*` to `io.approov.util.okhttp.sig.*` and of `io.approov.util.http.sfv.*` to `io.approov.util.okhttp.http.sfv.*`.
+* The package no longer depends on BouncyCastle; it bundles its own relocated copy of Google Tink, so it cannot clash with your app's Tink, Gson or BouncyCastle, or with another Approov package.
+* `setUseApproovStatusIfNoToken` is removed; `setProceedOnNetworkFail` works again but is deprecated in favour of `ApproovServiceMutator.ALWAYS_PROCEED`.
+
+4.0.0 will make `ALWAYS_PROCEED` the default and message signing compulsory, so your backend becomes the only place that rejects requests without a valid token. Read the [changelog](CHANGELOG.md) before upgrading and test app and backend together.
 
 ## NEXT STEPS
 
 [Add your API domains](https://approov.io/docs/latest/approov-usage-documentation/#managed-trust-roots) to Approov and [register your app's signing certificate](https://approov.io/docs/latest/approov-usage-documentation/#android-app-signing-certificates), then set up token and signature verification on your backend following the [Approov documentation](https://approov.io/docs/latest/).
 
-The defaults are ready to use; you don't need to configure a mutator or message signing to get started. Custom header names, secure strings, token binding, excluding URLs and the service mutator are in [ADVANCED.md](ADVANCED.md); individual methods are in [REFERENCE.md](REFERENCE.md).
+The defaults are ready to use; you don't need to configure a mutator to get started, and message signing is the one call above. Custom header names, secure strings, token binding, excluding URLs and the service mutator are in [ADVANCED.md](ADVANCED.md); individual methods are in [REFERENCE.md](REFERENCE.md).
