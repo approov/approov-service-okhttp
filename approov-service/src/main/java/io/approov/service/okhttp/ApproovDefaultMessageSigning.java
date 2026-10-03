@@ -38,12 +38,12 @@ import java.util.LinkedHashMap;
 import java.util.List;
 import java.util.Map;
 
-import io.approov.util.http.sfv.ByteSequenceItem;
-import io.approov.util.http.sfv.Dictionary;
-import io.approov.util.http.sfv.ListElement;
-import io.approov.util.sig.ComponentProvider;
-import io.approov.util.sig.SignatureBaseBuilder;
-import io.approov.util.sig.SignatureParameters;
+import io.approov.util.okhttp.http.sfv.ByteSequenceItem;
+import io.approov.util.okhttp.http.sfv.Dictionary;
+import io.approov.util.okhttp.http.sfv.ListElement;
+import io.approov.util.okhttp.sig.ComponentProvider;
+import io.approov.util.okhttp.sig.SignatureBaseBuilder;
+import io.approov.util.okhttp.sig.SignatureParameters;
 import okhttp3.HttpUrl;
 import okhttp3.Request;
 import okhttp3.RequestBody;

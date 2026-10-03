@@ -1678,8 +1678,8 @@ public class ApproovServiceMiniSdkTest {
         reinitializeServiceWithTargetHost("");
         ApproovDefaultMessageSigning.SignatureParametersFactory factory = new ApproovDefaultMessageSigning.SignatureParametersFactory() {
             @Override
-            protected io.approov.util.sig.SignatureParameters buildSignatureParameters(ApproovDefaultMessageSigning.OkHttpComponentProvider provider, ApproovRequestMutations changes) {
-                io.approov.util.sig.SignatureParameters params = super.buildSignatureParameters(provider, changes);
+            protected io.approov.util.okhttp.sig.SignatureParameters buildSignatureParameters(ApproovDefaultMessageSigning.OkHttpComponentProvider provider, ApproovRequestMutations changes) {
+                io.approov.util.okhttp.sig.SignatureParameters params = super.buildSignatureParameters(provider, changes);
                 params.setAlg(ApproovDefaultMessageSigning.ALG_HS256);
                 params.setDebugMode(true);
                 return params;
