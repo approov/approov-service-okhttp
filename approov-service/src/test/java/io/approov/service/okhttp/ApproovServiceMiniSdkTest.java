@@ -364,8 +364,8 @@ public class ApproovServiceMiniSdkTest {
                 "    \"status\": \"" + status + "\"" +
                 "  }" +
                 "}");
-            // no message signing so that the headers under test are isolated
-            ApproovService.setServiceMutator(ApproovServiceMutator.DEFAULT);
+            // T37-01: under ALWAYS_PROCEED (opt-in in 3.8.0) every status proceeds
+            ApproovService.setServiceMutator(ApproovServiceMutator.ALWAYS_PROCEED);
 
             OkHttpClient client = ApproovService.getOkHttpClient();
             Request request = new Request.Builder().url(getTargetURL()).get().build();
@@ -375,6 +375,12 @@ public class ApproovServiceMiniSdkTest {
                 assertEquals(status, "", getHeader(reply, "Approov-Token"));
                 assertEquals(status, status.toLowerCase(), getHeader(reply, "Approov-Status"));
             }
+        }
+        // ...while UNKNOWN_URL and UNPROTECTED_URL still send no Approov headers at all
+        for (String status : new String[] {"UNKNOWN_URL", "UNPROTECTED_URL"}) {
+            JSONObject reply = sendWithTokenStatus(status);
+            assertNull(status, getHeader(reply, "Approov-Token"));
+            assertNull(status, getHeader(reply, "Approov-Status"));
         }
     }
 
@@ -413,7 +419,7 @@ public class ApproovServiceMiniSdkTest {
     @Test
     public void testStatusHeaderCanBeRenamedAndDisabled() throws Exception {
         reinitializeServiceWithTargetHost("");
-        ApproovService.setServiceMutator(ApproovServiceMutator.DEFAULT);
+        ApproovService.setServiceMutator(ApproovServiceMutator.ALWAYS_PROCEED);
         assertEquals("Approov-Status", ApproovService.getStatusHeader());
 
         // renamed
@@ -456,7 +462,7 @@ public class ApproovServiceMiniSdkTest {
             "\"protectedDomains\": [\"" + targetHost + "\"]," +
             "\"initialSecureStrings\": {\"header-key\": \"header-secret\"}"
         ));
-        ApproovService.setServiceMutator(ApproovServiceMutator.DEFAULT);
+        ApproovService.setServiceMutator(ApproovServiceMutator.ALWAYS_PROCEED);
         ApproovService.addSubstitutionHeader("Api-Key", null);
         setDirective("{\"operation\": \"fetchSecureString\", \"response\": {\"status\": \"REJECTED\"}}");
 
@@ -485,7 +491,7 @@ public class ApproovServiceMiniSdkTest {
             "\"protectedDomains\": [\"" + targetHost + "\"]," +
             "\"initialSecureStrings\": {\"query-key\": \"query-secret\"}"
         ));
-        ApproovService.setServiceMutator(ApproovServiceMutator.DEFAULT);
+        ApproovService.setServiceMutator(ApproovServiceMutator.ALWAYS_PROCEED);
         ApproovService.addSubstitutionQueryParam("api_key");
         OkHttpClient client = ApproovService.getOkHttpClient();
 
@@ -546,6 +552,7 @@ public class ApproovServiceMiniSdkTest {
     @Test
     public void testGetLastARCReportsMostRecentFetchWithoutFetching() throws Exception {
         reinitializeServiceWithTargetHost("");
+        ApproovService.setServiceMutator(ApproovServiceMutator.ALWAYS_PROCEED);
         assertEquals("", ApproovService.getLastARC());
         setDirective("{\"operation\": \"fetchApproovToken\", \"response\": {\"status\": \"REJECTED\", \"arc\": \"REJECTARC1\"}}");
         OkHttpClient client = ApproovService.getOkHttpClient();
@@ -746,6 +753,7 @@ public class ApproovServiceMiniSdkTest {
     @Test
     public void testUntrustedNetworkProceedsOnTheWire() throws Exception {
         reinitializeServiceWithTargetHost("");
+        ApproovService.setServiceMutator(ApproovServiceMutator.ALWAYS_PROCEED);
         ApproovService.enableMessageSigning();
         setDirective("{\"operation\": \"fetchApproovToken\", \"response\": {\"status\": \"UNTRUSTED_NETWORK\"}}");
         OkHttpClient client = ApproovService.getOkHttpClient();
@@ -901,6 +909,181 @@ public class ApproovServiceMiniSdkTest {
     }
 
     // ==================================================================================
+    // 3.8.0 SPECIFICATION 1.0, 5.5, 6.2: DEFAULT is CLOSE_FAILURE, ALWAYS_PROCEED opt-in
+    // (T37-01a, T37-02)
+    // ==================================================================================
+
+    /**
+     * T37-01a: the out-of-the-box mutator, and the one setServiceMutator(null)
+     * reinstates, is CLOSE_FAILURE in 3.8.0: a REJECTED token fetch aborts with the
+     * fetch status exception and sends nothing, a network status aborts with the
+     * network exception, and NO_APPROOV_SERVICE proceeds with an empty token header
+     * and the status header. A custom mutator that overrides no decision gets the
+     * same decisions, since they are the interface defaults.
+     */
+    @Test
+    public void testDefaultMutatorIsCloseFailure() throws Exception {
+        reinitializeServiceWithTargetHost("");
+        assertSame(ApproovServiceMutator.CLOSE_FAILURE, ApproovServiceMutator.DEFAULT);
+        assertNotSame(ApproovServiceMutator.CLOSE_FAILURE, ApproovServiceMutator.ALWAYS_PROCEED);
+        assertSame(ApproovServiceMutator.DEFAULT, ApproovService.getServiceMutator());
+        AtomicInteger attempts = countNetworkAttempts();
+
+        assertTokenFetchAborts("REJECTED", ApproovFetchStatusException.class, attempts);
+        assertTokenFetchAborts("NO_NETWORK", ApproovNetworkException.class, attempts);
+        JSONObject reply = sendWithTokenStatus("NO_APPROOV_SERVICE");
+        assertEquals("", getHeader(reply, "Approov-Token"));
+        assertEquals("no_approov_service", getHeader(reply, "Approov-Status"));
+
+        ApproovService.setServiceMutator(ApproovServiceMutator.ALWAYS_PROCEED);
+        ApproovService.setServiceMutator(null);
+        assertSame(ApproovServiceMutator.DEFAULT, ApproovService.getServiceMutator());
+        assertTokenFetchAborts("REJECTED", ApproovFetchStatusException.class, attempts);
+
+        ApproovService.setServiceMutator(new ApproovServiceMutator() {
+            @Override
+            public Request handleInterceptorProcessedRequest(Request request, ApproovRequestMutations changes) {
+                return request;
+            }
+        });
+        assertTokenFetchAborts("REJECTED", ApproovFetchStatusException.class, attempts);
+        assertTokenFetchAborts("UNTRUSTED_NETWORK", ApproovNetworkException.class, attempts);
+    }
+
+    /**
+     * SPECIFICATION 6.2: every CLOSE_FAILURE token fetch decision, the 3.5.x ones.
+     * SUCCESS adds the token, NO_APPROOV_SERVICE an empty token, UNKNOWN_URL and
+     * UNPROTECTED_URL send no Approov headers, the network statuses throw the
+     * network exception and every other status the fetch status exception, with no
+     * request reaching the wire. The deprecated setProceedOnNetworkFail(true) lets
+     * the network statuses proceed, and only those; initialize() resets it.
+     */
+    @Test
+    @SuppressWarnings("deprecation")
+    public void testCloseFailureTokenFetchDecisions() throws Exception {
+        reinitializeServiceWithTargetHost("");
+        ApproovService.setServiceMutator(ApproovServiceMutator.CLOSE_FAILURE);
+        AtomicInteger attempts = countNetworkAttempts();
+
+        JSONObject reply = sendWithTokenStatus(null);
+        assertFalse(getHeader(reply, "Approov-Token").isEmpty());
+        assertEquals("success", getHeader(reply, "Approov-Status"));
+        for (String status : new String[] {"UNKNOWN_URL", "UNPROTECTED_URL"}) {
+            reply = sendWithTokenStatus(status);
+            assertNull(status, getHeader(reply, "Approov-Token"));
+            assertNull(status, getHeader(reply, "Approov-Status"));
+        }
+        String[] network = {"NO_NETWORK", "POOR_NETWORK", "UNTRUSTED_NETWORK"};
+        for (String status : network)
+            assertTokenFetchAborts(status, ApproovNetworkException.class, attempts);
+        String[] others = {"REJECTED", "INTERNAL_ERROR", "BAD_URL", "NO_NETWORK_PERMISSION",
+            "MISSING_LIB_DEPENDENCY", "DISABLED"};
+        for (String status : others)
+            assertTokenFetchAborts(status, ApproovFetchStatusException.class, attempts);
+
+        ApproovService.setProceedOnNetworkFail(true);
+        for (String status : network) {
+            reply = sendWithTokenStatus(status);
+            assertEquals(status, "", getHeader(reply, "Approov-Token"));
+            assertEquals(status, status.toLowerCase(), getHeader(reply, "Approov-Status"));
+        }
+        assertTokenFetchAborts("REJECTED", ApproovFetchStatusException.class, attempts);
+
+        ApproovService.initialize(context, validInitialConfig, "reinit");
+        assertFalse("initialize must reset setProceedOnNetworkFail", ApproovService.getProceedOnNetworkFail());
+        attempts = countNetworkAttempts();
+        assertTokenFetchAborts("NO_NETWORK", ApproovNetworkException.class, attempts);
+    }
+
+    /**
+     * SPECIFICATION 6.2: every CLOSE_FAILURE substitution decision, for headers and
+     * query parameters: SUCCESS substitutes, UNKNOWN_KEY leaves the placeholder and
+     * the request proceeds, REJECTED throws the rejection exception, the network
+     * statuses the network exception and every other status the fetch status
+     * exception, with no request reaching the wire.
+     */
+    @Test
+    public void testCloseFailureSubstitutionDecisions() throws Exception {
+        String targetHost = getTargetHost();
+        reinitializeService(scenarioJson(uniqueCaseName("close-failure-subst"),
+            "\"protectedDomains\": [\"" + targetHost + "\"]," +
+            "\"initialSecureStrings\": {\"the-key\": \"the-secret\"}"
+        ));
+        ApproovService.setServiceMutator(ApproovServiceMutator.CLOSE_FAILURE);
+        ApproovService.addSubstitutionHeader("Api-Key", null);
+        ApproovService.addSubstitutionQueryParam("api_key");
+        AtomicInteger attempts = countNetworkAttempts();
+        OkHttpClient client = ApproovService.getOkHttpClient();
+        Request header = new Request.Builder().url(getTargetURL()).header("Api-Key", "the-key").build();
+        Request query = new Request.Builder().url(getTargetURL() + "?api_key=the-key").build();
+
+        JSONObject reply = send(client, header);
+        assertEquals("the-secret", getHeader(reply, "Api-Key"));
+        reply = send(client, query);
+        assertTrue(reply.getString("url"), reply.getString("url").contains("api_key=the-secret"));
+
+        // a value that is not a secure string key is left in place
+        reply = send(client, new Request.Builder().url(getTargetURL()).header("Api-Key", "not-a-key").build());
+        assertEquals("not-a-key", getHeader(reply, "Api-Key"));
+        assertFalse(getHeader(reply, "Approov-Token").isEmpty());
+        reply = send(client, new Request.Builder().url(getTargetURL() + "?api_key=not-a-key").build());
+        assertTrue(reply.getString("url"), reply.getString("url").contains("api_key=not-a-key"));
+
+        Object[][] failing = {
+            {"REJECTED", ApproovRejectionException.class},
+            {"NO_NETWORK", ApproovNetworkException.class},
+            {"POOR_NETWORK", ApproovNetworkException.class},
+            {"UNTRUSTED_NETWORK", ApproovNetworkException.class},
+            {"NO_APPROOV_SERVICE", ApproovFetchStatusException.class},
+            {"INTERNAL_ERROR", ApproovFetchStatusException.class},
+        };
+        for (Request request : new Request[] {header, query}) {
+            for (Object[] f : failing) {
+                String status = (String) f[0];
+                int before = attempts.get();
+                setDirective("{\"operation\": \"fetchSecureString\", \"response\": {\"status\": \"" + status + "\"}}");
+                try (Response response = client.newCall(request).execute()) {
+                    fail(status + " substitution must abort under CLOSE_FAILURE");
+                } catch (IOException e) {
+                    assertEquals(status + ": " + e, f[1], e.getClass());
+                    assertEquals(status, Approov.TokenFetchStatus.valueOf(status),
+                        ((ApproovFetchStatusException) e).getTokenFetchStatus());
+                }
+                assertEquals(status + " must send nothing", before, attempts.get());
+            }
+        }
+    }
+
+    /**
+     * T37-01, T37-02, T37-07: ALWAYS_PROCEED aborts for no status. A failed secure
+     * string substitution of any status leaves the placeholder, the request goes
+     * out with the token, and the status header reports the token fetch.
+     */
+    @Test
+    public void testAlwaysProceedNeverAbortsASubstitution() throws Exception {
+        String targetHost = getTargetHost();
+        reinitializeService(scenarioJson(uniqueCaseName("always-proceed-subst"),
+            "\"protectedDomains\": [\"" + targetHost + "\"]," +
+            "\"initialSecureStrings\": {\"the-key\": \"the-secret\"}"
+        ));
+        ApproovService.setServiceMutator(ApproovServiceMutator.ALWAYS_PROCEED);
+        ApproovService.addSubstitutionHeader("Api-Key", null);
+        ApproovService.addSubstitutionQueryParam("api_key");
+        OkHttpClient client = ApproovService.getOkHttpClient();
+        for (String status : new String[] {"REJECTED", "NO_NETWORK", "POOR_NETWORK", "UNTRUSTED_NETWORK",
+                "NO_APPROOV_SERVICE", "INTERNAL_ERROR", "UNKNOWN_KEY"}) {
+            setDirective("{\"operation\": \"fetchSecureString\", \"response\": {\"status\": \"" + status + "\"}}");
+            JSONObject reply = send(client, new Request.Builder().url(getTargetURL()).header("Api-Key", "the-key").build());
+            assertEquals(status, "the-key", getHeader(reply, "Api-Key"));
+            assertFalse(status, getHeader(reply, "Approov-Token").isEmpty());
+            assertEquals(status, "success", getHeader(reply, "Approov-Status"));
+            setDirective("{\"operation\": \"fetchSecureString\", \"response\": {\"status\": \"" + status + "\"}}");
+            reply = send(client, new Request.Builder().url(getTargetURL() + "?api_key=the-key").build());
+            assertTrue(status, reply.getString("url").contains("api_key=the-key"));
+        }
+    }
+
+    // ==================================================================================
     // SECTION 4: Pinning Configuration & Scenarios
     // TESTING_REQUIREMENTS.md §4
     // ==================================================================================
@@ -1018,7 +1201,7 @@ public class ApproovServiceMiniSdkTest {
 
     /**
      * SPECIFICATION 3.1, 5.5 / T37-04: signing is independent of the mutator. It
-     * works the same under the default and a custom mutator, it runs after the
+     * works the same under DEFAULT, ALWAYS_PROCEED and a custom mutator, it runs after the
      * custom mutator's processed request callback so it covers that callback's
      * changes, setServiceMutator never switches it on or off, and
      * disableMessageSigning removes the signature headers.
@@ -1041,6 +1224,16 @@ public class ApproovServiceMiniSdkTest {
         ApproovService.setServiceMutator(ApproovServiceMutator.DEFAULT);
         assertTrue(ApproovService.isMessageSigningEnabled());
         assertBothSignatures(send(client, request));
+
+        ApproovService.setServiceMutator(ApproovServiceMutator.ALWAYS_PROCEED);
+        assertTrue(ApproovService.isMessageSigningEnabled());
+        assertBothSignatures(send(client, request));
+        // a request that proceeds without a token is signed too (SPECIFICATION 3.4)
+        setDirective("{\"operation\": \"fetchApproovToken\", \"response\": {\"status\": \"NO_NETWORK\"}}");
+        JSONObject failed = send(client, request);
+        assertEquals("", getHeader(failed, "Approov-Token"));
+        assertEquals("no_network", getHeader(failed, "Approov-Status"));
+        assertBothSignatures(failed);
 
         ApproovService.setServiceMutator(custom);
         assertTrue(ApproovService.isMessageSigningEnabled());
@@ -1611,6 +1804,7 @@ public class ApproovServiceMiniSdkTest {
     @Test
     public void testStaleFailureRewritesStatusOnWire() throws Exception {
         reinitializeServiceWithTargetHost("");
+        ApproovService.setServiceMutator(ApproovServiceMutator.ALWAYS_PROCEED);
         ApproovService.enableMessageSigning();
         ApproovService.setOkHttpClientBuilder(new OkHttpClient.Builder().addNetworkInterceptor(chain -> {
             ShadowSystemClock.advanceBy(Duration.ofSeconds(10));
@@ -1712,6 +1906,7 @@ public class ApproovServiceMiniSdkTest {
     @Test
     public void testRetryOfOriginalRequestIsRefreshedAgain() throws Exception {
         reinitializeServiceWithTargetHost("");
+        ApproovService.setServiceMutator(ApproovServiceMutator.ALWAYS_PROCEED);
         AtomicInteger attempts = new AtomicInteger();
         ApproovService.setOkHttpClientBuilder(new OkHttpClient.Builder().addNetworkInterceptor(chain -> {
             if (attempts.getAndIncrement() == 0) {
@@ -2140,6 +2335,7 @@ public class ApproovServiceMiniSdkTest {
     @Test
     public void testNoFailureCacheBetweenRequests() throws Exception {
         reinitializeServiceWithTargetHost("");
+        ApproovService.setServiceMutator(ApproovServiceMutator.ALWAYS_PROCEED);
         OkHttpClient client = ApproovService.getOkHttpClient();
         setDirective("{\"operation\": \"fetchApproovToken\", \"response\": {\"status\": \"NO_NETWORK\"}}");
         try (Response response = client.newCall(new Request.Builder().url(getTargetURL()).build()).execute()) {
@@ -2164,10 +2360,13 @@ public class ApproovServiceMiniSdkTest {
         java.util.Set<String> names = new java.util.HashSet<>();
         for (java.lang.reflect.Method m : ApproovService.class.getMethods())
             names.add(m.getName());
-        for (String removed : new String[] {"setProceedOnNetworkFail", "getProceedOnNetworkFail",
+        for (String removed : new String[] {
                 "setUseApproovStatusIfNoToken", "getUseApproovStatusIfNoToken",
                 "setApproovInterceptorExtensions", "getApproovInterceptorExtensions"})
             assertFalse(removed + " must be removed on 3.8.x", names.contains(removed));
+        // kept, deprecated, while CLOSE_FAILURE is the default (SPECIFICATION 5.2)
+        assertNotNull(ApproovService.class.getMethod("setProceedOnNetworkFail", boolean.class).getAnnotation(Deprecated.class));
+        assertNotNull(ApproovService.class.getMethod("getProceedOnNetworkFail").getAnnotation(Deprecated.class));
         // signing is switched with enableMessageSigning, never through a mutator
         assertFalse("createDefaultServiceMutator must be removed", names.contains("createDefaultServiceMutator"));
         for (String retained : new String[] {"getMessageSignature", "prefetch", "setApproovHeader",
@@ -2318,6 +2517,40 @@ public class ApproovServiceMiniSdkTest {
             assertEquals(200, response.code());
             return new JSONObject(response.body().string());
         }
+    }
+
+    // installs a client builder that counts the attempts reaching the network
+    private AtomicInteger countNetworkAttempts() {
+        AtomicInteger attempts = new AtomicInteger();
+        ApproovService.setOkHttpClientBuilder(new OkHttpClient.Builder().addNetworkInterceptor(chain -> {
+            attempts.incrementAndGet();
+            return chain.proceed(chain.request());
+        }));
+        return attempts;
+    }
+
+    // sends a request to the protected target with the given token fetch status
+    // directive (none if null) and returns the echoed reply
+    private JSONObject sendWithTokenStatus(String status) throws Exception {
+        if (status != null)
+            setDirective("{\"operation\": \"fetchApproovToken\", \"response\": {\"status\": \"" + status + "\"}}");
+        return send(ApproovService.getOkHttpClient(), new Request.Builder().url(getTargetURL()).get().build());
+    }
+
+    // asserts that a token fetch status aborts the request with exactly the given
+    // exception type, carrying the status, and that nothing reaches the network
+    private void assertTokenFetchAborts(String status, Class<?> expected, AtomicInteger attempts) throws Exception {
+        int before = attempts.get();
+        setDirective("{\"operation\": \"fetchApproovToken\", \"response\": {\"status\": \"" + status + "\"}}");
+        try (Response response = ApproovService.getOkHttpClient().newCall(
+                new Request.Builder().url(getTargetURL()).get().build()).execute()) {
+            fail(status + " must abort the request, got " + response.code());
+        } catch (IOException e) {
+            assertEquals(status + ": " + e, expected, e.getClass());
+            assertEquals(status, Approov.TokenFetchStatus.valueOf(status),
+                ((ApproovFetchStatusException) e).getTokenFetchStatus());
+        }
+        assertEquals(status + " must send nothing", before, attempts.get());
     }
 
     // asserts both default signatures as members of the same dictionaries

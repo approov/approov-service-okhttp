@@ -118,6 +118,10 @@ public class ApproovService {
     // disabled
     private static String approovStatusHeader = null;
 
+    // true if ApproovServiceMutator.CLOSE_FAILURE (the 3.8.0 default) should let the
+    // network failure statuses proceed with an empty token header (deprecated)
+    private static boolean proceedOnNetworkFail = false;
+
     // any prefix String to be added before the transmitted Approov token
     private static String approovTokenPrefix = null;
 
@@ -207,6 +211,7 @@ public class ApproovService {
         approovTraceIDHeader = APPROOV_TRACE_ID_HEADER;
         approovStatusHeader = APPROOV_STATUS_HEADER;
         approovTokenPrefix = APPROOV_TOKEN_PREFIX;
+        proceedOnNetworkFail = false;
         bindingHeader = null;
         staleProtectionRefreshMS = DEFAULT_STALE_PROTECTION_REFRESH_MS;
         serviceMutator = ApproovServiceMutator.DEFAULT;
@@ -275,6 +280,7 @@ public class ApproovService {
         approovTraceIDHeader = null;
         approovStatusHeader = null;
         approovTokenPrefix = APPROOV_TOKEN_PREFIX;
+        proceedOnNetworkFail = false;
         bindingHeader = null;
         staleProtectionRefreshMS = DEFAULT_STALE_PROTECTION_REFRESH_MS;
         serviceMutator = ApproovServiceMutator.DEFAULT;
@@ -367,6 +373,37 @@ public class ApproovService {
      */
     static synchronized ApproovDefaultMessageSigning getActiveMessageSigning() {
         return messageSigningEnabled ? messageSigning : null;
+    }
+
+    /**
+     * Sets whether a request proceeds when no Approov token could be obtained
+     * because of the network (NO_NETWORK, POOR_NETWORK or UNTRUSTED_NETWORK) under
+     * ApproovServiceMutator.CLOSE_FAILURE, the 3.8.0 default. When true such a
+     * request is sent with an empty token header and the status on the status
+     * header instead of failing with ApproovNetworkException. It has no effect on
+     * other mutators, nor on secure string substitutions. Reset by initialize().
+     *
+     * @param proceed true to proceed on a network failure, false to fail
+     * @deprecated Install ApproovServiceMutator.ALWAYS_PROCEED instead, which
+     *             proceeds on every status. Removed in 4.0.0, when proceeding
+     *             becomes the default.
+     */
+    @Deprecated
+    public static synchronized void setProceedOnNetworkFail(boolean proceed) {
+        Log.d(TAG, "setProceedOnNetworkFail " + proceed);
+        proceedOnNetworkFail = proceed;
+    }
+
+    /**
+     * Gets whether a request proceeds when no Approov token could be obtained
+     * because of the network under ApproovServiceMutator.CLOSE_FAILURE.
+     *
+     * @return true if such a request proceeds, false if it fails
+     * @deprecated See setProceedOnNetworkFail.
+     */
+    @Deprecated
+    public static synchronized boolean getProceedOnNetworkFail() {
+        return proceedOnNetworkFail;
     }
 
     /**
@@ -1479,11 +1516,12 @@ class ApproovTokenInterceptor implements Interceptor {
 
     /**
      * Constructs a new interceptor that adds Approov tokens and substitutes headers
-     * or query parameters. The request always proceeds: if a token cannot be
-     * obtained the request is sent with an empty token header, and if a secure
-     * string substitution fails the placeholder value is left in place. The
-     * Approov fetch status is reported on the status header for every processed
-     * request.
+     * or query parameters. Whether a request proceeds when a token or a secure
+     * string cannot be obtained is decided by the service mutator (see
+     * ApproovServiceMutator.CLOSE_FAILURE, the 3.8.0 default, and ALWAYS_PROCEED).
+     * A request that proceeds without a token is sent with an empty token header,
+     * and the Approov fetch status is reported on the status header for every
+     * processed request.
      */
     public ApproovTokenInterceptor() {
     }

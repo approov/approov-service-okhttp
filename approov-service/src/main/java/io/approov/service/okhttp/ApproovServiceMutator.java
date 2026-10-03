@@ -28,41 +28,66 @@ import java.util.regex.Matcher;
  * ApproovServiceMutator provides an interface for modifying the behavior of
  * the ApproovService class by overriding the default implementations of the
  * defined callbacks. Opportunities to modify behavior are offered at key
- * points in the service and attestation flows.
+ * points in the service and attestation flows. It is the single place where an
+ * app changes the request decisions of the layer.
  *
  * The interface provides default implementations for all methods, so
  * implementing classes can choose to override only the methods they are
- * interested in.
+ * interested in. Three standard decision sets are provided:
  *
- * From 3.8.0 the default interceptor decisions always proceed with the request.
- * A token fetch outcome other than SUCCESS (no network, untrusted network, no
- * Approov service, rejection, ...) is an outcome, not a failure: the request is
- * sent with an empty Approov token header, a failed secure string substitution
- * leaves its placeholder in place, and the Approov fetch status is reported on
- * the status header (see ApproovService.setStatusHeader) so that the backend,
- * which is the enforcement point, can decide.
+ * - {@link #CLOSE_FAILURE}: the 3.5.x interceptor decisions, which are also the
+ *   interface defaults. A token fetch proceeds on SUCCESS (token header) and
+ *   NO_APPROOV_SERVICE (empty token header), a request to an UNKNOWN_URL or
+ *   UNPROTECTED_URL is sent with no Approov headers, NO_NETWORK, POOR_NETWORK and
+ *   UNTRUSTED_NETWORK throw ApproovNetworkException (unless the deprecated
+ *   ApproovService.setProceedOnNetworkFail(true) is set, when they proceed with
+ *   an empty token header), and every other status throws
+ *   ApproovFetchStatusException, REJECTED included. A secure string substitution
+ *   is made on SUCCESS, the placeholder is left on UNKNOWN_KEY, REJECTED throws
+ *   ApproovRejectionException, the network statuses throw ApproovNetworkException
+ *   and every other status throws ApproovFetchStatusException.
+ * - {@link #ALWAYS_PROCEED}: never aborts a request. A token fetch outcome other
+ *   than SUCCESS is an outcome, not a failure: the request is sent with an empty
+ *   Approov token header, a failed secure string substitution leaves its
+ *   placeholder in place, and the backend, which is the enforcement point,
+ *   decides.
+ * - {@link #DEFAULT}: the mutator installed by ApproovService.initialize() and
+ *   reinstated by ApproovService.setServiceMutator(null). It is CLOSE_FAILURE in
+ *   3.8.0 and becomes ALWAYS_PROCEED in 4.0.0, a breaking change kept for the
+ *   major release; an app that wants a decision set to stay fixed across 4.0.0
+ *   names CLOSE_FAILURE or ALWAYS_PROCEED explicitly.
  *
- * An app that wants a request aborted for some outcome opts in by overriding the
- * relevant interceptor hook and throwing. Such an exception must be a standard
- * network stack exception (java.io.IOException or one of its platform subclasses
- * such as java.net.ConnectException or javax.net.ssl.SSLException), not an
- * Approov specific type: the abort is the app's own policy and must surface to
- * the app's error handling and support as an ordinary network failure. The
- * interceptor hooks therefore declare IOException. The direct fetch APIs
- * (fetchToken, fetchSecureString, fetchCustomJWT, precheck) return a value to
- * the caller and continue to report failures with an ApproovException subclass.
+ * Whatever the decisions, the fetch status is reported on the status header
+ * (see ApproovService.setStatusHeader) of every request that proceeds with the
+ * token header. No mutator signs requests, and installing a mutator never
+ * switches message signing on or off: signing is independent of the decisions
+ * (see ApproovService.enableMessageSigning).
+ *
+ * An app that wants a request aborted for some further outcome opts in by
+ * overriding the relevant interceptor hook and throwing. Such an exception must
+ * be a standard network stack exception (java.io.IOException or one of its
+ * platform subclasses such as java.net.ConnectException or
+ * javax.net.ssl.SSLException), not an Approov specific type: the abort is the
+ * app's own policy and must surface to the app's error handling and support as
+ * an ordinary network failure. The interceptor hooks therefore declare
+ * IOException. The aborts of CLOSE_FAILURE keep the 3.5.x Approov exception types
+ * (subclasses of IOException) so that 3.8.0 does not change what an existing app
+ * catches. The direct fetch APIs (fetchToken, fetchSecureString, fetchCustomJWT,
+ * precheck) return a value to the caller and continue to report failures with
+ * an ApproovException subclass.
  */
 public interface ApproovServiceMutator {
     /**
-     * Mutator that provides the standard decisions, installed by
-     * ApproovService.initialize() and reinstated by
-     * ApproovService.setServiceMutator(null). No mutator signs requests: message
-     * signing is switched on separately with ApproovService.enableMessageSigning.
+     * The 3.5.x interceptor decisions, which are the interface defaults: proceed on
+     * SUCCESS and NO_APPROOV_SERVICE, send UNKNOWN_URL and UNPROTECTED_URL
+     * untouched, and throw the layer's Approov exception for every other token
+     * fetch status, and for every failed secure string substitution other than
+     * UNKNOWN_KEY. Never signs.
      */
-    public static final ApproovServiceMutator DEFAULT = new ApproovServiceMutator() {
+    public static final ApproovServiceMutator CLOSE_FAILURE = new ApproovServiceMutator() {
         @Override
         public String toString() {
-            return "ApproovServiceMutator.DEFAULT";
+            return "ApproovServiceMutator.CLOSE_FAILURE";
         }
 
         @Override
@@ -72,6 +97,61 @@ public interface ApproovServiceMutator {
             return true;
         }
     };
+
+    /**
+     * Decisions that never abort a request: every token fetch status except
+     * UNKNOWN_URL and UNPROTECTED_URL proceeds with the token header (empty if no
+     * token was obtained) and the status header, and a secure string is
+     * substituted only on SUCCESS, the placeholder being left in place otherwise.
+     * Never signs.
+     */
+    public static final ApproovServiceMutator ALWAYS_PROCEED = new ApproovServiceMutator() {
+        @Override
+        public String toString() {
+            return "ApproovServiceMutator.ALWAYS_PROCEED";
+        }
+
+        @Override
+        public boolean handleInterceptorFetchTokenResult(Approov.TokenFetchResult approovResults, String url) {
+            switch (approovResults.getStatus()) {
+                case UNKNOWN_URL:
+                case UNPROTECTED_URL:
+                    // continue without any headers for unprotected URLs (anti-MitM)
+                    return false;
+                default:
+                    // SUCCESS adds the token; any failure proceeds with an empty token
+                    // header, and the status is reported on the status header
+                    return true;
+            }
+        }
+
+        @Override
+        public boolean handleInterceptorHeaderSubstitutionResult(Approov.TokenFetchResult approovResults,
+                String header) {
+            return approovResults.getStatus() == Approov.TokenFetchStatus.SUCCESS;
+        }
+
+        @Override
+        public boolean handleInterceptorQueryParamSubstitutionResult(Approov.TokenFetchResult approovResults,
+                String queryKey) {
+            return approovResults.getStatus() == Approov.TokenFetchStatus.SUCCESS;
+        }
+
+        @Override
+        public boolean supportsProtectionRefresh() {
+            // the default handleInterceptorProcessedRequest makes no changes so it
+            // is trivially safe to invoke again
+            return true;
+        }
+    };
+
+    /**
+     * The out-of-the-box decisions, installed by ApproovService.initialize() and
+     * reinstated by ApproovService.setServiceMutator(null): {@link #CLOSE_FAILURE}
+     * in 3.8.0, {@link #ALWAYS_PROCEED} from 4.0.0. Name one of those explicitly
+     * for decisions that stay fixed across 4.0.0.
+     */
+    public static final ApproovServiceMutator DEFAULT = CLOSE_FAILURE;
 
     /**
      * Indicates whether a token fetch status is a network failure, meaning that
@@ -249,33 +329,51 @@ public interface ApproovServiceMutator {
      * Decides how to handle the token fetch result from a call to
      * Approov.fetchApproovTokenAndWait() from within the interceptor.
      *
-     * The default never throws. A SUCCESS result adds the token header. An
+     * The default is the {@link #CLOSE_FAILURE} decision. SUCCESS adds the token
+     * header and NO_APPROOV_SERVICE adds it empty (evidence that Approov processing
+     * occurred), with the status reported on the status header in both cases. An
      * UNKNOWN_URL or UNPROTECTED_URL result sends the request with no Approov
      * headers at all, since the domain is not protected by Approov and headers
-     * must not be leaked to it. Every other status proceeds with an empty token
-     * header (evidence that Approov processing occurred); the interceptor reports
-     * the status on the Approov status header in every case, SUCCESS included.
+     * must not be leaked to it. NO_NETWORK, POOR_NETWORK and UNTRUSTED_NETWORK
+     * throw ApproovNetworkException, or proceed with an empty token header if the
+     * deprecated ApproovService.setProceedOnNetworkFail(true) is set, and every
+     * other status throws ApproovFetchStatusException. {@link #ALWAYS_PROCEED}
+     * overrides this to never throw.
      *
      * @param approovResults the TokenFetchResult from Approov
      * @param url            the URL string for which the token was requested
      * @return true if the token header should be added (its value is empty if no
      *         token was obtained), false if the request should proceed without
      *         any Approov headers
-     * @throws IOException an overriding implementation may throw a standard network
-     *                     stack exception (never an Approov specific type) to abort
-     *                     the request, which the default never does
+     * @throws IOException to abort the request: the default throws an
+     *                     ApproovException subclass as described above, and an
+     *                     overriding implementation opting in to an abort of its
+     *                     own throws a standard network stack exception (never an
+     *                     Approov specific type)
      */
+    @SuppressWarnings("deprecation")
     default boolean handleInterceptorFetchTokenResult(Approov.TokenFetchResult approovResults, String url)
             throws IOException {
-        switch (approovResults.getStatus()) {
+        Approov.TokenFetchStatus status = approovResults.getStatus();
+        switch (status) {
+            case SUCCESS:
+            case NO_APPROOV_SERVICE:
+                // NO_APPROOV_SERVICE proceeds with an empty token header (and any trace
+                // ID) as evidence that Approov processing occurred
+                return true;
             case UNKNOWN_URL:
             case UNPROTECTED_URL:
                 // continue without any headers for unprotected URLs (anti-MitM)
                 return false;
             default:
-                // SUCCESS adds the token; any failure proceeds with an empty token header,
-                // and the status is reported on the status header by the interceptor
-                return true;
+                if (isNetworkFailure(status)) {
+                    if (ApproovService.getProceedOnNetworkFail())
+                        return true;
+                    throw new ApproovNetworkException(status,
+                            "Approov token fetch for " + url + ": " + status.toString());
+                }
+                throw new ApproovFetchStatusException(status,
+                        "Approov token fetch for " + url + ": " + status.toString());
         }
     }
 
@@ -286,20 +384,25 @@ public interface ApproovServiceMutator {
      * current header value (minus a prefix) as the key. This method is called once
      * per header being processed for substitution.
      *
-     * The default never throws: the header is substituted on SUCCESS and left
-     * unchanged (the placeholder value is sent) otherwise, for the backend to
-     * decide.
+     * The default is the {@link #CLOSE_FAILURE} decision: the header is substituted
+     * on SUCCESS and left unchanged on UNKNOWN_KEY (the value is not a secure
+     * string key); REJECTED throws ApproovRejectionException, NO_NETWORK,
+     * POOR_NETWORK and UNTRUSTED_NETWORK throw ApproovNetworkException and every
+     * other status throws ApproovFetchStatusException. {@link #ALWAYS_PROCEED}
+     * overrides this to substitute on SUCCESS and leave the placeholder otherwise.
      *
      * @param approovResults the TokenFetchResult from Approov
      * @param header         the header being substituted
      * @return true if substitution should proceed, false if it should be skipped
-     * @throws IOException an overriding implementation may throw a standard network
-     *                     stack exception (never an Approov specific type) to abort
-     *                     the request, which the default never does
+     * @throws IOException to abort the request: the default throws an
+     *                     ApproovException subclass as described above, and an
+     *                     overriding implementation opting in to an abort of its
+     *                     own throws a standard network stack exception (never an
+     *                     Approov specific type)
      */
     default boolean handleInterceptorHeaderSubstitutionResult(Approov.TokenFetchResult approovResults, String header)
             throws IOException {
-        return approovResults.getStatus() == Approov.TokenFetchStatus.SUCCESS;
+        return closeFailureSubstitution(approovResults, "Header substitution for " + header);
     }
 
     /**
@@ -309,20 +412,52 @@ public interface ApproovServiceMutator {
      * query value of a matching query key. This method is called once for each
      * matched query parameter being processed for substitution.
      *
-     * The default never throws: the parameter is substituted on SUCCESS and left
-     * unchanged (the placeholder value is sent) otherwise, for the backend to
-     * decide.
+     * The default is the {@link #CLOSE_FAILURE} decision, as for
+     * {@link #handleInterceptorHeaderSubstitutionResult}. {@link #ALWAYS_PROCEED}
+     * overrides this to substitute on SUCCESS and leave the placeholder otherwise.
      *
      * @param approovResults the TokenFetchResult from Approov
      * @param queryKey       the query parameter key being substituted
      * @return true if substitution should proceed, false if it should be skipped
-     * @throws IOException an overriding implementation may throw a standard network
-     *                     stack exception (never an Approov specific type) to abort
-     *                     the request, which the default never does
+     * @throws IOException to abort the request: the default throws an
+     *                     ApproovException subclass as described above, and an
+     *                     overriding implementation opting in to an abort of its
+     *                     own throws a standard network stack exception (never an
+     *                     Approov specific type)
      */
     default boolean handleInterceptorQueryParamSubstitutionResult(Approov.TokenFetchResult approovResults,
             String queryKey) throws IOException {
-        return approovResults.getStatus() == Approov.TokenFetchStatus.SUCCESS;
+        return closeFailureSubstitution(approovResults, "Query parameter substitution for " + queryKey);
+    }
+
+    /**
+     * The {@link #CLOSE_FAILURE} substitution decision (the 3.5.x one): substitute
+     * on SUCCESS, leave the placeholder on UNKNOWN_KEY, and throw the Approov
+     * exception for the status otherwise.
+     *
+     * @param approovResults the secure string fetch result
+     * @param what           the substitution, for the exception message
+     * @return true to substitute, false to leave the placeholder
+     * @throws ApproovException for every status other than SUCCESS and UNKNOWN_KEY
+     */
+    static boolean closeFailureSubstitution(Approov.TokenFetchResult approovResults, String what)
+            throws ApproovException {
+        Approov.TokenFetchStatus status = approovResults.getStatus();
+        switch (status) {
+            case SUCCESS:
+                return true;
+            case UNKNOWN_KEY:
+                return false;
+            case REJECTED:
+                String arc = approovResults.getARC();
+                String rejectionReasons = approovResults.getRejectionReasons();
+                throw new ApproovRejectionException(what + ": " + status.toString() + ": " + arc + " "
+                        + rejectionReasons, arc, rejectionReasons);
+            default:
+                if (isNetworkFailure(status))
+                    throw new ApproovNetworkException(status, what + ": " + status.toString());
+                throw new ApproovFetchStatusException(status, what + ": " + status.toString());
+        }
     }
 
     /**
