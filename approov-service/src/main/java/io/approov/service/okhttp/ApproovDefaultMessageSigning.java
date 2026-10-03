@@ -31,10 +31,11 @@ import java.security.NoSuchAlgorithmException;
 import java.util.ArrayList;
 import java.util.Arrays;
 import java.util.Collections;
-import java.util.HashMap;
 import java.util.LinkedHashMap;
 import java.util.List;
+import java.util.Locale;
 import java.util.Map;
+import java.util.concurrent.ConcurrentHashMap;
 
 import io.approov.util.okhttp.http.sfv.ByteSequenceItem;
 import io.approov.util.okhttp.http.sfv.Dictionary;
@@ -49,26 +50,38 @@ import okio.Buffer;
 import okio.ByteString;
 
 /**
- * Provides a base implementation of message signing for Approov when using
- * OkHttp requests. This class provides mechanisms to configure and apply
- * message signatures to HTTP requests based on specified parameters and
- * algorithms.
+ * HTTP message signing (RFC 9421) of the requests Approov protects, and the
+ * signature parameters factory API that configures it.
  *
- * From 3.8.0 an instance of this class configured with
- * {@link #generateDefaultSignatureParametersFactory()} is the mutator that
- * ApproovService installs out of the box, so every request carrying an Approov
- * token header is signed with both the install (ECDSA P-256, per app
- * installation) and the account (HMAC-SHA256, shared account key) signatures,
- * emitted as two members of the same Signature and Signature-Input dictionaries
- * over the same covered components. Both are produced so that a device without
- * secure hardware for the install key still yields a verifiable signature; the
- * backend chooses which it verifies. A signature that cannot be produced is
- * omitted and the request proceeds with the remaining one, or unsigned, since
- * the backend is the enforcement point. The only deliberate failures are
- * configuration errors by the integrator: a required body digest that cannot be
- * generated, or an unsupported signature algorithm.
+ * Message signing is not a service mutator. It is off by default in 3.8.0 and
+ * switched on with {@link ApproovService#enableMessageSigning()}, whichever
+ * {@link ApproovServiceMutator} makes the request decisions, and installing a
+ * mutator never switches it on or off. Once on, every request carrying the
+ * Approov token header is signed last, after the mutator's decisions, the
+ * secure string substitutions and its handleInterceptorProcessedRequest
+ * callback, so the signature covers what is sent. It is signed again whenever
+ * its protection is reapplied (a redirect within a protected domain, an
+ * authenticator retry, a stale protection refresh). From 4.0.0 signing is on
+ * and compulsory.
+ *
+ * The default factory ({@link #generateDefaultSignatureParametersFactory()})
+ * produces both the install (ECDSA P-256, per app installation key held in the
+ * device secure hardware) and the account (HMAC-SHA256, shared account key)
+ * signatures, emitted as the members "install" and "account" of the same
+ * Signature and Signature-Input dictionaries over the same covered components.
+ * Both are produced so that a device without secure hardware for the install
+ * key still yields a verifiable signature; the backend chooses which it
+ * verifies. A signature that cannot be produced is omitted and the request
+ * proceeds with the remaining one, or unsigned, since the backend is the
+ * enforcement point. The only deliberate failures are configuration errors by
+ * the integrator: a required body digest that cannot be generated, or an
+ * unsupported signature algorithm.
+ *
+ * Apps never construct this class: they pass a {@link SignatureParametersFactory}
+ * to {@link ApproovService#enableMessageSigning(SignatureParametersFactory)} or
+ * {@link ApproovService#putMessageSigningHostFactory(String, SignatureParametersFactory)}.
  */
-public class ApproovDefaultMessageSigning implements ApproovServiceMutator {
+public class ApproovDefaultMessageSigning {
     // logging tag
     private static final String TAG = "ApproovMsgSign";
 
@@ -104,21 +117,18 @@ public class ApproovDefaultMessageSigning implements ApproovServiceMutator {
      */
     public final static String SIG_ID_ACCOUNT = "account";
 
-    /**
-     * The default factory for generating signature parameters.
-     */
-    protected SignatureParametersFactory defaultFactory;
+    // the factory used for every host without a factory of its own, or null to
+    // sign nothing; read on the request threads, so volatile
+    private volatile SignatureParametersFactory defaultFactory;
+
+    // factories for individual hosts, keyed by the lowercase host name (no port),
+    // read on the request threads
+    private final Map<String, SignatureParametersFactory> hostFactories = new ConcurrentHashMap<>();
 
     /**
-     * A map of host-specific factories for generating signature parameters.
+     * Constructs a signer with no factory. Only ApproovService constructs one.
      */
-    protected final Map<String, SignatureParametersFactory> hostFactories;
-
-    /**
-     * Constructs an instance of {@code ApproovDefaultMessageSigning}.
-     */
-    public ApproovDefaultMessageSigning() {
-        hostFactories = new HashMap<>();
+    ApproovDefaultMessageSigning() {
     }
 
     @Override
@@ -127,76 +137,80 @@ public class ApproovDefaultMessageSigning implements ApproovServiceMutator {
     }
 
     /**
-     * Sets the default factory for generating signature parameters.
+     * Sets the factory used for every host without a factory of its own.
      *
-     * @param factory The factory to set as the default.
-     * @return The current instance for method chaining.
+     * @param factory the factory, or null to sign nothing for such hosts
+     * @return this signer
      */
-    public ApproovDefaultMessageSigning setDefaultFactory(SignatureParametersFactory factory) {
+    ApproovDefaultMessageSigning setDefaultFactory(SignatureParametersFactory factory) {
         this.defaultFactory = factory;
         return this;
     }
 
     /**
-     * Associates a specific host with a factory for generating signature
-     * parameters.
+     * Uses a factory for requests to one host instead of the default factory.
      *
-     * @param hostName The host name.
-     * @param factory  The factory to associate with the host.
-     * @return The current instance for method chaining.
+     * @param hostName the host name, matched without regard to case and without
+     *                 any port
+     * @param factory  the factory for the host, or null to remove the host's
+     *                 factory so that the default factory applies again
+     * @return this signer
      */
-    public ApproovDefaultMessageSigning putHostFactory(String hostName, SignatureParametersFactory factory) {
-        this.hostFactories.put(hostName, factory);
+    ApproovDefaultMessageSigning putHostFactory(String hostName, SignatureParametersFactory factory) {
+        if (hostName == null)
+            throw new IllegalArgumentException("hostName must not be null");
+        String key = hostName.toLowerCase(Locale.ROOT);
+        if (factory == null)
+            hostFactories.remove(key);
+        else
+            hostFactories.put(key, factory);
         return this;
     }
 
     /**
-     * Builds the signature parameters for a given request.
+     * Selects the factory for a request: the factory of its host if there is one,
+     * otherwise the default factory.
      *
-     * @param provider The component provider for the request.
-     * @param changes  The request mutations to apply.
-     * @return The generated {@link SignatureParameters}, or {@code null} if no
-     *         factory is available.
+     * @param provider the component provider for the request
+     * @return the factory, or null if none applies
      */
-    protected SignatureParameters buildSignatureParameters(OkHttpComponentProvider provider,
-            ApproovRequestMutations changes) {
-        SignatureParametersFactory factory = hostFactories.get(provider.getAuthority());
-        if (factory == null) {
-            factory = defaultFactory;
-            if (factory == null) {
-                return null;
-            }
-        }
-        return factory.buildSignatureParameters(provider, changes);
+    private SignatureParametersFactory factoryFor(OkHttpComponentProvider provider) {
+        SignatureParametersFactory factory = hostFactories.get(provider.getAuthority().toLowerCase(Locale.ROOT));
+        return (factory != null) ? factory : defaultFactory;
     }
 
     /**
-     * Adds message signature to requests that have passed through the Approov
-     * interceptor. The request is only modified to include message signature
-     * headers if an ApproovToken has been added to the request and if there is
-     * a defined SignatureParameter factory for the request.
+     * Signs a request that the Approov interceptor has protected. The request is
+     * only modified if it carries the Approov token header and a factory applies
+     * to its host.
      *
-     * @param request The original HTTP request.
-     * @param changes The request mutations that were applied by the Approov
-     *                interceptor.
-     * @return The processed HTTP request with the signature headers added.
-     * @throws ApproovException If an error occurs during processing.
+     * @param request the request as the Approov interceptor and the service
+     *                mutator left it
+     * @param changes the protection the Approov interceptor applied to it
+     * @return the request with the signature headers added, or the request
+     *         unchanged if it is not signed
+     * @throws RequiredBodyDigestException if a body digest configured as required
+     *                                     cannot be generated
+     * @throws IllegalStateException       if a signature algorithm is unsupported
      */
-    @Override
-    public Request handleInterceptorProcessedRequest(Request request, ApproovRequestMutations changes)
-            throws IOException {
+    Request sign(Request request, ApproovRequestMutations changes) {
         if (changes == null || changes.getTokenHeaderKey() == null) {
             // the request doesn't have an Approov token header, so we don't need to sign it
+            return request;
+        }
+        OkHttpComponentProvider provider = new OkHttpComponentProvider(request);
+        SignatureParametersFactory factory = factoryFor(provider);
+        if (factory == null) {
+            // no factory applies to this host so the request is not signed
             return request;
         }
         // Build the signature parameters. This fails CLOSED (the IllegalStateException is rethrown)
         // only when a body digest configured as required cannot be generated — that must abort the
         // request. Any other failure here (including from a custom SignatureParametersFactory) fails
         // OPEN: we log at error and proceed unsigned, because the backend is the enforcement point.
-        OkHttpComponentProvider provider = new OkHttpComponentProvider(request);
         SignatureParameters params;
         try {
-            params = buildSignatureParameters(provider, changes);
+            params = factory.buildSignatureParameters(provider, changes);
         } catch (RequiredBodyDigestException e) {
             // The only deliberate fail-closed build condition: a body digest configured as
             // required could not be generated, so the request must be aborted.
@@ -218,10 +232,7 @@ public class ApproovDefaultMessageSigning implements ApproovServiceMutator {
         if (params.getAlg() != null) {
             algs = Collections.singletonList(params.getAlg());
         } else {
-            SignatureParametersFactory factory = hostFactories.get(provider.getAuthority());
-            if (factory == null)
-                factory = defaultFactory;
-            algs = (factory != null) ? factory.getAlgs() : Collections.singletonList(ALG_ES256);
+            algs = factory.getAlgs();
         }
         for (String alg : algs) {
             // an unsupported algorithm is an integrator configuration error and the
@@ -296,19 +307,6 @@ public class ApproovDefaultMessageSigning implements ApproovServiceMutator {
         // provides access to your API
         // Log.d(TAG, "Request String: " + signed.toString());
         return signed;
-    }
-
-    /**
-     * The default message signing only ever sets its headers with replace
-     * semantics and regenerates the signatures from the current request state,
-     * so it is safe for the stale protection refresh to invoke
-     * handleInterceptorProcessedRequest again.
-     *
-     * @return true as reinvocation is supported
-     */
-    @Override
-    public boolean supportsProtectionRefresh() {
-        return true;
     }
 
     /**
@@ -789,7 +787,7 @@ public class ApproovDefaultMessageSigning implements ApproovServiceMutator {
      * OkHttpComponentProvider implements the ComponentProvider interface for
      * OkHttp3 requests.
      */
-    protected static final class OkHttpComponentProvider implements ComponentProvider {
+    public static final class OkHttpComponentProvider implements ComponentProvider {
         private Request request;
 
         private HttpUrl okURL;

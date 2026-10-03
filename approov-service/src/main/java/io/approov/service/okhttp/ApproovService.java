@@ -131,9 +131,16 @@ public class ApproovService {
 
     // The mutator instance used to control ApproovService behavior at key points in
     // the flow. Unless set using the ApproovService.setServiceMutator() method, the
-    // out-of-the-box mutator created by createDefaultServiceMutator() (message
-    // signing with both install and account signatures) is used.
-    private static ApproovServiceMutator serviceMutator = createDefaultServiceMutator();
+    // out-of-the-box decisions of ApproovServiceMutator.DEFAULT are used. Mutators
+    // carry decisions only: message signing is switched separately.
+    private static ApproovServiceMutator serviceMutator = ApproovServiceMutator.DEFAULT;
+
+    // the message signing applied to protected requests while it is enabled, holding
+    // the default and per host signature parameters factories
+    private static ApproovDefaultMessageSigning messageSigning = new ApproovDefaultMessageSigning();
+
+    // true if message signing is enabled; off by default in 3.8.0
+    private static boolean messageSigningEnabled = false;
 
     // map of headers that should have their values substituted for secure strings,
     // mapped to their
@@ -202,7 +209,9 @@ public class ApproovService {
         approovTokenPrefix = APPROOV_TOKEN_PREFIX;
         bindingHeader = null;
         staleProtectionRefreshMS = DEFAULT_STALE_PROTECTION_REFRESH_MS;
-        serviceMutator = createDefaultServiceMutator();
+        serviceMutator = ApproovServiceMutator.DEFAULT;
+        messageSigning = new ApproovDefaultMessageSigning();
+        messageSigningEnabled = false;
         substitutionHeaders = new HashMap<>();
         substitutionQueryParams = new HashMap<>();
         exclusionURLRegexs = new HashMap<>();
@@ -268,28 +277,96 @@ public class ApproovService {
         approovTokenPrefix = APPROOV_TOKEN_PREFIX;
         bindingHeader = null;
         staleProtectionRefreshMS = DEFAULT_STALE_PROTECTION_REFRESH_MS;
-        serviceMutator = createDefaultServiceMutator();
+        serviceMutator = ApproovServiceMutator.DEFAULT;
+        messageSigning = new ApproovDefaultMessageSigning();
+        messageSigningEnabled = false;
         substitutionHeaders = null;
         substitutionQueryParams = null;
         exclusionURLRegexs = null;
     }
 
     /**
-     * Creates the mutator that the service layer installs out of the box: the
-     * standard decisions of ApproovServiceMutator plus message signing of every
-     * request carrying an Approov token header with both the install (per app
-     * installation, ECDSA P-256 key held in the device secure hardware) and the
-     * account (shared account key, HMAC-SHA256) signatures. Both are produced so
-     * that devices without secure hardware still yield a verifiable signature;
-     * the backend decides which it accepts. Use setServiceMutator to install a
-     * customized ApproovDefaultMessageSigning, or ApproovServiceMutator.DEFAULT
-     * to switch message signing off.
-     *
-     * @return a new default service mutator instance
+     * Switches message signing on with the default signature parameters factory
+     * ({@link ApproovDefaultMessageSigning#generateDefaultSignatureParametersFactory()}),
+     * which produces both the install signature (member "install",
+     * ecdsa-p256-sha256, per installation key held in the device secure hardware)
+     * and the account signature (member "account", hmac-sha256, account key
+     * delivered on attestation) over the same covered components. See
+     * {@link #enableMessageSigning(ApproovDefaultMessageSigning.SignatureParametersFactory)}.
      */
-    public static ApproovServiceMutator createDefaultServiceMutator() {
-        return new ApproovDefaultMessageSigning().setDefaultFactory(
-                ApproovDefaultMessageSigning.generateDefaultSignatureParametersFactory());
+    public static void enableMessageSigning() {
+        enableMessageSigning(ApproovDefaultMessageSigning.generateDefaultSignatureParametersFactory());
+    }
+
+    /**
+     * Switches message signing on. Message signing is off by default in 3.8.0 (it
+     * is on and compulsory from 4.0.0). Once on, every request carrying the Approov
+     * token header is signed (RFC 9421) after the service mutator's decisions,
+     * the secure string substitutions and its processed request callback, so the
+     * signature covers what is sent, and it is signed again whenever its
+     * protection is reapplied. Signing is independent of the service mutator: it
+     * works the same under ApproovServiceMutator.DEFAULT, CLOSE_FAILURE,
+     * ALWAYS_PROCEED and any custom mutator, and setServiceMutator never switches
+     * it on or off. initialize() switches it off again and drops any host
+     * factories.
+     *
+     * @param defaultFactory the signature parameters factory for every host
+     *                       without a factory of its own (see
+     *                       putMessageSigningHostFactory), or null for the default
+     *                       factory
+     */
+    public static synchronized void enableMessageSigning(
+            ApproovDefaultMessageSigning.SignatureParametersFactory defaultFactory) {
+        if (defaultFactory == null)
+            defaultFactory = ApproovDefaultMessageSigning.generateDefaultSignatureParametersFactory();
+        Log.d(TAG, "enableMessageSigning");
+        messageSigning.setDefaultFactory(defaultFactory);
+        messageSigningEnabled = true;
+    }
+
+    /**
+     * Switches message signing off: no Signature or Signature-Input header is
+     * added to any request. The configured factories are kept for a later
+     * enableMessageSigning.
+     */
+    public static synchronized void disableMessageSigning() {
+        Log.d(TAG, "disableMessageSigning");
+        messageSigningEnabled = false;
+    }
+
+    /**
+     * Indicates whether message signing is enabled.
+     *
+     * @return true if protected requests are signed, false otherwise
+     */
+    public static synchronized boolean isMessageSigningEnabled() {
+        return messageSigningEnabled;
+    }
+
+    /**
+     * Signs requests to one host with the given signature parameters factory
+     * instead of the default factory passed to enableMessageSigning. It applies
+     * while message signing is enabled and is kept until initialize().
+     *
+     * @param hostName the host name, matched without regard to case and without
+     *                 any port
+     * @param factory  the signature parameters factory for the host, or null to
+     *                 remove the host's factory so that the default factory
+     *                 applies again
+     */
+    public static synchronized void putMessageSigningHostFactory(String hostName,
+            ApproovDefaultMessageSigning.SignatureParametersFactory factory) {
+        Log.d(TAG, "putMessageSigningHostFactory " + hostName);
+        messageSigning.putHostFactory(hostName, factory);
+    }
+
+    /**
+     * Gets the message signing to apply to protected requests.
+     *
+     * @return the message signing, or null while message signing is disabled
+     */
+    static synchronized ApproovDefaultMessageSigning getActiveMessageSigning() {
+        return messageSigningEnabled ? messageSigning : null;
     }
 
     /**
@@ -564,11 +641,10 @@ public class ApproovService {
      * request is in flight, or if the app employs its own request queueing or
      * backoff mechanism. Note that such a refresh reissues the Approov token
      * fetch (usually satisfied instantly from the SDK's cache) and reapplies
-     * any message signing by reinvoking the service mutator's processed
-     * request callback, so it is only performed if the mutator's
+     * any message signing and the service mutator's processed request
+     * callback, so it is only performed if the mutator's
      * supportsProtectionRefresh() indicates that this is safe (true for the
-     * default mutator and ApproovDefaultMessageSigning, false for custom
-     * mutators unless they opt in). The period should be comfortably less than the
+     * standard mutators, false for custom mutators unless they opt in). The period should be comfortably less than the
      * message signature expiry (15 seconds by default) but high enough that
      * ordinary requests are not reprocessed. The default is 3000ms.
      *
@@ -598,16 +674,17 @@ public class ApproovService {
      * layer implementation needs to be forked in order to introduce custom
      * behavior.
      *
+     * Mutators carry decisions only: installing one never switches message
+     * signing on or off (see enableMessageSigning).
+     *
      * @param mutator is the ApproovServiceMutator with callback handlers that may
      *                override the default behavior of the ApproovService singleton.
      *                Passing null to this method reinstates the out-of-the-box
-     *                mutator from createDefaultServiceMutator(), including default
-     *                message signing; pass ApproovServiceMutator.DEFAULT to keep
-     *                the standard decisions without message signing.
+     *                ApproovServiceMutator.DEFAULT.
      */
     public static synchronized void setServiceMutator(ApproovServiceMutator mutator) {
         if (mutator == null) {
-            mutator = createDefaultServiceMutator();
+            mutator = ApproovServiceMutator.DEFAULT;
         }
         Log.d(TAG, "Applied ApproovServiceMutator:" + mutator.toString());
         serviceMutator = mutator;
@@ -1416,14 +1493,16 @@ class ApproovTokenInterceptor implements Interceptor {
         // cache the mutator for the duration of the interceptor to make sure
         // it is not changed mid-flight
         ApproovServiceMutator mutator = ApproovService.getServiceMutator();
-        return chain.proceed(applyProtection(chain.request(), mutator, true));
+        ApproovDefaultMessageSigning signing = ApproovService.getActiveMessageSigning();
+        return chain.proceed(applyProtection(chain.request(), mutator, signing, true));
     }
 
     /**
      * Applies Approov protection to a request: decides whether the request is
      * processed at all, fetches a token for its URL, adds the token, trace and
-     * status headers, performs secure string substitutions and invokes the
-     * mutator's processed request callback. The returned request carries an
+     * status headers, performs secure string substitutions, invokes the
+     * mutator's processed request callback and finally, if message signing is
+     * enabled, signs the request. The returned request carries an
      * ApproovRequestFreshness marker describing exactly the protection applied
      * to it, so that the network layer can strip and reapply that protection on
      * a stale attempt or on a redirect followup. A request that is not processed
@@ -1432,14 +1511,16 @@ class ApproovTokenInterceptor implements Interceptor {
      *
      * @param request         the request to protect, carrying no Approov protection
      * @param mutator         the service mutator to consult
+     * @param signing         the message signing to apply, or null if message
+     *                        signing is disabled
      * @param invokeProcessed whether the mutator's processed request callback may
      *                        be invoked (false when reapplying protection under a
      *                        mutator that does not support refresh)
      * @return the protected request
      * @throws IOException if the mutator opts in to aborting the request
      */
-    static Request applyProtection(Request request, ApproovServiceMutator mutator, boolean invokeProcessed)
-            throws IOException {
+    static Request applyProtection(Request request, ApproovServiceMutator mutator,
+            ApproovDefaultMessageSigning signing, boolean invokeProcessed) throws IOException {
         // first check if we are to proceed with any Approov processing
         if (!mutator.handleInterceptorShouldProcessRequest(request)) {
             // we are not to proceed with any Approov processing so just continue
@@ -1613,9 +1694,16 @@ class ApproovTokenInterceptor implements Interceptor {
         else
             Log.d(TAG, "Protection reapplied without the processed request callback of " + mutator);
 
+        // message signing runs last, over the final token, status, trace and
+        // substituted values and whatever the processed request callback changed,
+        // whichever mutator made the decisions above; only a request carrying the
+        // token header is signed
+        if ((signing != null) && (freshness != null))
+            processedRequest = signing.sign(processedRequest, changes);
+
         // record the time at which the protection was applied, the URL it was applied
         // to, and the names of any headers added by the processed request callback
-        // (normally message signature headers), so that the freshness interceptor can
+        // or the message signing, so that the freshness interceptor can
         // strip and reapply the protection at the network layer if the request is
         // held too long before transmission or is redirected
         if (freshness != null) {
@@ -1725,6 +1813,9 @@ class ApproovFreshnessInterceptor implements Interceptor {
 
         ApproovServiceMutator mutator;
         boolean invokeProcessed;
+        // message signing is independent of the mutator and is reapplied whenever the
+        // protection is reapplied
+        ApproovDefaultMessageSigning signing = ApproovService.getActiveMessageSigning();
         if (rebuilt) {
             Log.d(TAG, "Request rebuilt since protection was applied to " + appliedURL +
                     " (now " + request.method() + " " + request.url() + "), reapplying Approov protection");
@@ -1769,7 +1860,7 @@ class ApproovFreshnessInterceptor implements Interceptor {
         // the one the protection was applied to, whatever else changed; a redirect
         // target is the server's URL and is left alone.
         Request stripped = ApproovTokenInterceptor.stripProtection(request, freshness, !urlChanged);
-        Request refreshed = ApproovTokenInterceptor.applyProtection(stripped, mutator, invokeProcessed);
+        Request refreshed = ApproovTokenInterceptor.applyProtection(stripped, mutator, signing, invokeProcessed);
         // the refreshed request is already at the network layer, so its header baseline
         // is what it carries now
         ApproovRequestFreshness refreshedMarker = refreshed.tag(ApproovRequestFreshness.class);

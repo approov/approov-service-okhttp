@@ -54,13 +54,10 @@ import java.util.regex.Matcher;
  */
 public interface ApproovServiceMutator {
     /**
-     * Mutator that provides the standard decisions with no message signing.
-     * Note that this is not the mutator installed by ApproovService.initialize():
-     * from 3.8.0 the out-of-the-box mutator is an ApproovDefaultMessageSigning
-     * instance producing both install and account signatures (see
-     * ApproovService.createDefaultServiceMutator). Install this instance with
-     * ApproovService.setServiceMutator(ApproovServiceMutator.DEFAULT) to switch
-     * message signing off while retaining every other default decision.
+     * Mutator that provides the standard decisions, installed by
+     * ApproovService.initialize() and reinstated by
+     * ApproovService.setServiceMutator(null). No mutator signs requests: message
+     * signing is switched on separately with ApproovService.enableMessageSigning.
      */
     public static final ApproovServiceMutator DEFAULT = new ApproovServiceMutator() {
         @Override

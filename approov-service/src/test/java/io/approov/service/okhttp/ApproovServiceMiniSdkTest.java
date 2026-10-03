@@ -520,6 +520,7 @@ public class ApproovServiceMiniSdkTest {
     @Test
     public void testFailedTokenFetchStillSignedWithTokenAndStatusHeadersCovered() throws Exception {
         reinitializeServiceWithTargetHost("");
+        ApproovService.enableMessageSigning();
         setDirective("{\"operation\": \"fetchApproovToken\", \"response\": {\"status\": \"NO_APPROOV_SERVICE\"}}");
         OkHttpClient client = ApproovService.getOkHttpClient();
         Request request = new Request.Builder().url(getTargetURL()).get().build();
@@ -745,6 +746,7 @@ public class ApproovServiceMiniSdkTest {
     @Test
     public void testUntrustedNetworkProceedsOnTheWire() throws Exception {
         reinitializeServiceWithTargetHost("");
+        ApproovService.enableMessageSigning();
         setDirective("{\"operation\": \"fetchApproovToken\", \"response\": {\"status\": \"UNTRUSTED_NETWORK\"}}");
         OkHttpClient client = ApproovService.getOkHttpClient();
         try (Response response = client.newCall(new Request.Builder().url(getTargetURL()).get().build()).execute()) {
@@ -987,46 +989,120 @@ public class ApproovServiceMiniSdkTest {
     // ==================================================================================
 
     /**
-     * M37-25 / T37-04: guard the default. Out of the box, with no setServiceMutator
-     * call, every request carrying an Approov token is signed with both the install
-     * and the account signatures as members of the same Signature and
-     * Signature-Input dictionaries. A change of this default cannot ship
-     * unreviewed.
+     * SPECIFICATION 3.1, 3.2, 3.6 / T37-04: guard the out-of-the-box signing state
+     * so that a change of default cannot ship unreviewed. In 3.8.0 no request
+     * carries Signature or Signature-Input until enableMessageSigning() is called;
+     * after that one call every protected request carries both the install
+     * (ecdsa-p256-sha256) and the account (hmac-sha256) members of the same
+     * dictionaries. From 4.0.0 signing is on and compulsory and this test changes.
      */
     @Test
-    public void testDefaultMutatorSignsWithInstallAndAccountSignatures() throws Exception {
+    public void testMessageSigningIsOffByDefaultAndOneCallTurnsItOn() throws Exception {
         reinitializeServiceWithTargetHost("");
-        assertTrue(ApproovService.getServiceMutator() instanceof ApproovDefaultMessageSigning);
+        assertFalse(ApproovService.isMessageSigningEnabled());
+        assertSame(ApproovServiceMutator.DEFAULT, ApproovService.getServiceMutator());
 
         OkHttpClient client = ApproovService.getOkHttpClient();
         Request request = new Request.Builder().url(getTargetURL()).get().build();
-        try (Response response = client.newCall(request).execute()) {
-            JSONObject reply = new JSONObject(response.body().string());
-            assertNotNull(getHeader(reply, "Approov-Token"));
+        JSONObject reply = send(client, request);
+        String token = getHeader(reply, "Approov-Token");
+        assertNotNull(token);
+        assertFalse(token.isEmpty());
+        assertNull(getHeader(reply, "Signature"));
+        assertNull(getHeader(reply, "Signature-Input"));
 
-            String signatureInput = getHeader(reply, "Signature-Input");
-            assertNotNull(signatureInput);
-            assertTrue(signatureInput, signatureInput.startsWith("install=("));
-            assertTrue(signatureInput, signatureInput.contains(", account=("));
-            assertTrue(signatureInput, signatureInput.contains("alg=\"ecdsa-p256-sha256\""));
-            assertTrue(signatureInput, signatureInput.contains("alg=\"hmac-sha256\""));
+        ApproovService.enableMessageSigning();
+        assertTrue(ApproovService.isMessageSigningEnabled());
+        assertBothSignatures(send(client, request));
+    }
 
-            String signature = getHeader(reply, "Signature");
-            assertNotNull(signature);
-            assertTrue(signature, signature.startsWith("install=:"));
-            assertTrue(signature, signature.contains(", account=:"));
-            assertTrue(signature, signature.endsWith(":"));
-        }
+    /**
+     * SPECIFICATION 3.1, 5.5 / T37-04: signing is independent of the mutator. It
+     * works the same under the default and a custom mutator, it runs after the
+     * custom mutator's processed request callback so it covers that callback's
+     * changes, setServiceMutator never switches it on or off, and
+     * disableMessageSigning removes the signature headers.
+     */
+    @Test
+    public void testMessageSigningIsIndependentOfTheMutator() throws Exception {
+        reinitializeServiceWithTargetHost("");
+        ApproovService.enableMessageSigning();
+        OkHttpClient client = ApproovService.getOkHttpClient();
+        Request request = new Request.Builder().url(getTargetURL()).get().build();
 
-        // setServiceMutator(null) reinstates the same default, DEFAULT switches signing off
-        ApproovService.setServiceMutator(null);
-        assertTrue(ApproovService.getServiceMutator() instanceof ApproovDefaultMessageSigning);
+        // a custom mutator whose processed request callback adds a covered header
+        ApproovServiceMutator custom = new ApproovServiceMutator() {
+            @Override
+            public Request handleInterceptorProcessedRequest(Request request, ApproovRequestMutations changes) {
+                return request.newBuilder().header("Authorization", "Bearer from-hook").build();
+            }
+        };
+
         ApproovService.setServiceMutator(ApproovServiceMutator.DEFAULT);
-        try (Response response = client.newCall(request).execute()) {
-            JSONObject reply = new JSONObject(response.body().string());
-            assertNotNull(getHeader(reply, "Approov-Token"));
-            assertNull(getHeader(reply, "Signature"));
-        }
+        assertTrue(ApproovService.isMessageSigningEnabled());
+        assertBothSignatures(send(client, request));
+
+        ApproovService.setServiceMutator(custom);
+        assertTrue(ApproovService.isMessageSigningEnabled());
+        JSONObject reply = send(client, request);
+        assertBothSignatures(reply);
+        assertEquals("Bearer from-hook", getHeader(reply, "Authorization"));
+        String signatureInput = getHeader(reply, "Signature-Input");
+        assertTrue("signing must run after the processed request callback: " + signatureInput,
+            signatureInput.contains("\"authorization\""));
+
+        ApproovService.setServiceMutator(null);
+        assertSame(ApproovServiceMutator.DEFAULT, ApproovService.getServiceMutator());
+        assertTrue(ApproovService.isMessageSigningEnabled());
+        assertBothSignatures(send(client, request));
+
+        ApproovService.disableMessageSigning();
+        assertFalse(ApproovService.isMessageSigningEnabled());
+        reply = send(client, request);
+        assertNotNull(getHeader(reply, "Approov-Token"));
+        assertNull(getHeader(reply, "Signature"));
+        assertNull(getHeader(reply, "Signature-Input"));
+
+        // installing a mutator never switches signing back on
+        ApproovService.setServiceMutator(custom);
+        ApproovService.setServiceMutator(null);
+        assertFalse(ApproovService.isMessageSigningEnabled());
+        reply = send(client, request);
+        assertNull(getHeader(reply, "Signature"));
+        assertNull(getHeader(reply, "Signature-Input"));
+    }
+
+    /**
+     * SPECIFICATION 3.1: a host factory replaces the default factory for its host
+     * (matched without regard to case), removing it reinstates the default, and
+     * initialize() switches signing off and drops the host factories.
+     */
+    @Test
+    public void testHostFactoryAppliesAndInitializeResetsSigning() throws Exception {
+        reinitializeServiceWithTargetHost("");
+        ApproovDefaultMessageSigning.SignatureParametersFactory accountOnly =
+            ApproovDefaultMessageSigning.generateDefaultSignatureParametersFactory().setUseAccountMessageSigning();
+        ApproovService.putMessageSigningHostFactory(getTargetHost().toUpperCase(java.util.Locale.ROOT), accountOnly);
+        ApproovService.enableMessageSigning();
+        Request request = new Request.Builder().url(getTargetURL()).get().build();
+
+        JSONObject reply = send(ApproovService.getOkHttpClient(), request);
+        assertTrue(getHeader(reply, "Signature"), getHeader(reply, "Signature").startsWith("account=:"));
+        assertFalse(getHeader(reply, "Signature-Input"), getHeader(reply, "Signature-Input").contains("install="));
+
+        ApproovService.putMessageSigningHostFactory(getTargetHost(), null);
+        assertBothSignatures(send(ApproovService.getOkHttpClient(), request));
+
+        // initialize switches signing off and drops the host factories
+        ApproovService.putMessageSigningHostFactory(getTargetHost(), accountOnly);
+        ApproovService.initialize(context, validInitialConfig, "reinit");
+        assertFalse(ApproovService.isMessageSigningEnabled());
+        reply = send(ApproovService.getOkHttpClient(), request);
+        assertNotNull(getHeader(reply, "Approov-Token"));
+        assertNull(getHeader(reply, "Signature"));
+        // null selects the default factory
+        ApproovService.enableMessageSigning(null);
+        assertBothSignatures(send(ApproovService.getOkHttpClient(), request));
     }
 
     /**
@@ -1057,6 +1133,7 @@ public class ApproovServiceMiniSdkTest {
         reinitializeService(scenarioJson(uniqueCaseName("no-install-key-default"),
             "\"protectedDomains\": [\"" + targetHost + "\"]," +
             "\"simulateInstallKeyFailure\": true"));
+        ApproovService.enableMessageSigning();
 
         OkHttpClient client = ApproovService.getOkHttpClient();
         Request request = new Request.Builder().url(getTargetURL()).get().build();
@@ -1087,7 +1164,7 @@ public class ApproovServiceMiniSdkTest {
         ApproovDefaultMessageSigning.SignatureParametersFactory factory = 
             ApproovDefaultMessageSigning.generateDefaultSignatureParametersFactory()
             .setUseInstallMessageSigning();
-        ApproovService.setServiceMutator(new ApproovDefaultMessageSigning().setDefaultFactory(factory));
+        ApproovService.enableMessageSigning(factory);
  
         OkHttpClient client = ApproovService.getOkHttpClient();
         Request request = new Request.Builder().url(getTargetURL()).get().build();
@@ -1129,7 +1206,7 @@ public class ApproovServiceMiniSdkTest {
         ApproovDefaultMessageSigning.SignatureParametersFactory factory = 
             ApproovDefaultMessageSigning.generateDefaultSignatureParametersFactory()
             .setUseAccountMessageSigning();
-        ApproovService.setServiceMutator(new ApproovDefaultMessageSigning().setDefaultFactory(factory));
+        ApproovService.enableMessageSigning(factory);
  
         OkHttpClient client = ApproovService.getOkHttpClient();
         Request request = new Request.Builder().url(getTargetURL()).get().build();
@@ -1166,7 +1243,7 @@ public class ApproovServiceMiniSdkTest {
         
         ApproovDefaultMessageSigning.SignatureParametersFactory factory =
             ApproovDefaultMessageSigning.generateDefaultSignatureParametersFactory().setUseInstallMessageSigning();
-        ApproovService.setServiceMutator(new ApproovDefaultMessageSigning().setDefaultFactory(factory));
+        ApproovService.enableMessageSigning(factory);
 
         OkHttpClient client = ApproovService.getOkHttpClient();
         Request request = new Request.Builder().url(getTargetURL()).get().build();
@@ -1195,7 +1272,7 @@ public class ApproovServiceMiniSdkTest {
             .setUseInstallMessageSigning();
         factory.setBodyDigestConfig(ApproovDefaultMessageSigning.DIGEST_SHA256, true);
         
-        ApproovService.setServiceMutator(new ApproovDefaultMessageSigning().setDefaultFactory(factory));
+        ApproovService.enableMessageSigning(factory);
 
         String[] methods = {"POST", "PUT", "PATCH"};
         for (String method : methods) {
@@ -1375,16 +1452,23 @@ public class ApproovServiceMiniSdkTest {
     // Stale Protection Refresh
     // ==================================================================================
 
-    // message signing mutator that counts processed request callback invocations so
-    // that tests can observe how many times protection was applied to a request
-    private static class CountingMessageSigning extends ApproovDefaultMessageSigning {
+    // mutator with the standard decisions that opts in to protection refresh and
+    // counts processed request callback invocations, so that tests can observe how
+    // many times protection was applied to a request (message signing, switched on
+    // separately, runs after each invocation)
+    private static class CountingMutator implements ApproovServiceMutator {
         final AtomicInteger processedCount = new AtomicInteger();
 
         @Override
         public Request handleInterceptorProcessedRequest(Request request, ApproovRequestMutations changes)
                 throws IOException {
             processedCount.incrementAndGet();
-            return super.handleInterceptorProcessedRequest(request, changes);
+            return request;
+        }
+
+        @Override
+        public boolean supportsProtectionRefresh() {
+            return true;
         }
     }
 
@@ -1400,10 +1484,10 @@ public class ApproovServiceMiniSdkTest {
     public void testStaleRequestProtectionRefreshedAtNetworkLayer() throws Exception {
         reinitializeServiceWithTargetHost("");
 
-        CountingMessageSigning signing = new CountingMessageSigning();
-        signing.setDefaultFactory(ApproovDefaultMessageSigning.generateDefaultSignatureParametersFactory()
-            .setUseInstallMessageSigning());
+        CountingMutator signing = new CountingMutator();
         ApproovService.setServiceMutator(signing);
+        ApproovService.enableMessageSigning(ApproovDefaultMessageSigning.generateDefaultSignatureParametersFactory()
+            .setUseInstallMessageSigning());
 
         // simulate a device suspend between protection and transmission on the
         // first network attempt only
@@ -1447,10 +1531,10 @@ public class ApproovServiceMiniSdkTest {
     public void testProtectionNotRefreshedWhenFreshOrDisabled() throws Exception {
         reinitializeServiceWithTargetHost("");
 
-        CountingMessageSigning signing = new CountingMessageSigning();
-        signing.setDefaultFactory(ApproovDefaultMessageSigning.generateDefaultSignatureParametersFactory()
-            .setUseInstallMessageSigning());
+        CountingMutator signing = new CountingMutator();
         ApproovService.setServiceMutator(signing);
+        ApproovService.enableMessageSigning(ApproovDefaultMessageSigning.generateDefaultSignatureParametersFactory()
+            .setUseInstallMessageSigning());
 
         // a request that is transmitted promptly is not reprocessed
         OkHttpClient client = ApproovService.getOkHttpClient();
@@ -1527,6 +1611,7 @@ public class ApproovServiceMiniSdkTest {
     @Test
     public void testStaleFailureRewritesStatusOnWire() throws Exception {
         reinitializeServiceWithTargetHost("");
+        ApproovService.enableMessageSigning();
         ApproovService.setOkHttpClientBuilder(new OkHttpClient.Builder().addNetworkInterceptor(chain -> {
             ShadowSystemClock.advanceBy(Duration.ofSeconds(10));
             setDirective("{\"operation\":\"fetchApproovToken\",\"response\":{\"status\":\"NO_NETWORK\"}}");
@@ -1547,6 +1632,7 @@ public class ApproovServiceMiniSdkTest {
     @Test
     public void testStaleUnprotectedRemovesHeadersOnWire() throws Exception {
         reinitializeServiceWithTargetHost("");
+        ApproovService.enableMessageSigning();
         ApproovService.setOkHttpClientBuilder(new OkHttpClient.Builder().addNetworkInterceptor(chain -> {
             ShadowSystemClock.advanceBy(Duration.ofSeconds(10));
             setDirective("{\"operation\":\"fetchApproovToken\",\"response\":{\"status\":\"UNPROTECTED_URL\"}}");
@@ -1567,6 +1653,7 @@ public class ApproovServiceMiniSdkTest {
     @Test
     public void testRedirectToUnprotectedHostRemovesProtectionOnWire() throws Exception {
         reinitializeServiceWithTargetHost("");
+        ApproovService.enableMessageSigning();
         AtomicInteger attempts = new AtomicInteger();
         ApproovService.setOkHttpClientBuilder(new OkHttpClient.Builder().addNetworkInterceptor(chain -> {
             Response response = chain.proceed(chain.request());
@@ -1592,6 +1679,7 @@ public class ApproovServiceMiniSdkTest {
     @Test
     public void testRedirectWithinProtectedHostReprotectsForNewURL() throws Exception {
         reinitializeServiceWithTargetHost("");
+        ApproovService.enableMessageSigning();
         AtomicInteger attempts = new AtomicInteger();
         ApproovService.setOkHttpClientBuilder(new OkHttpClient.Builder().addNetworkInterceptor(chain -> {
             Response response = chain.proceed(chain.request());
@@ -1686,7 +1774,7 @@ public class ApproovServiceMiniSdkTest {
             }
         };
         factory.setAddApproovTokenHeader(true).setAddApproovStatusHeader(true).setUseInstallAndAccountMessageSigning();
-        ApproovService.setServiceMutator(new ApproovDefaultMessageSigning().setDefaultFactory(factory));
+        ApproovService.enableMessageSigning(factory);
         try (Response response = ApproovService.getOkHttpClient().newCall(new Request.Builder().url(getTargetURL()).build()).execute()) {
             JSONObject reply = new JSONObject(response.body().string());
             assertTrue(getHeader(reply, "Signature").startsWith("account=:"));
@@ -1696,26 +1784,34 @@ public class ApproovServiceMiniSdkTest {
     }
 
     /**
-     * Findings 5 and 6: every interceptor hook, including the pinning hook and the
-     * default signing class's processed request override, declares IOException so
-     * that an opt-in abort can be a standard network exception (SPECIFICATION 6.3).
+     * Findings 5 and 6 / T37-17: every interceptor hook, including the pinning hook,
+     * declares IOException so that an opt-in abort can be a standard network
+     * exception, and a delegating override can declare it (SPECIFICATION 6.3).
+     * Message signing is not a mutator (SPECIFICATION 3.1, 5.5), so it has no
+     * processed request override of its own.
      */
     @Test
     public void testAllInterceptorHooksDeclareIOException() throws Exception {
-        assertTrue(java.util.Arrays.asList(ApproovServiceMutator.class.getMethod("handlePinningShouldProcessRequest", Request.class).getExceptionTypes()).contains(IOException.class));
-        assertTrue(java.util.Arrays.asList(ApproovDefaultMessageSigning.class.getMethod("handleInterceptorProcessedRequest", Request.class, ApproovRequestMutations.class).getExceptionTypes()).contains(IOException.class));
-        // a signing subclass may declare the standard exception on its override
-        ApproovDefaultMessageSigning signer = new ApproovDefaultMessageSigning() {
+        int hooks = 0;
+        for (java.lang.reflect.Method m : ApproovServiceMutator.class.getMethods()) {
+            if (m.getName().startsWith("handleInterceptor") || m.getName().equals("handlePinningShouldProcessRequest")) {
+                hooks++;
+                assertTrue(m.getName(), java.util.Arrays.asList(m.getExceptionTypes()).contains(IOException.class));
+            }
+        }
+        assertEquals(6, hooks);
+        assertFalse(ApproovServiceMutator.class.isAssignableFrom(ApproovDefaultMessageSigning.class));
+        ApproovServiceMutator delegating = new ApproovServiceMutator() {
             @Override
             public Request handleInterceptorProcessedRequest(Request request, ApproovRequestMutations changes) throws IOException {
-                return super.handleInterceptorProcessedRequest(request, changes);
+                return ApproovServiceMutator.DEFAULT.handleInterceptorProcessedRequest(request, changes);
             }
             @Override
             public boolean handlePinningShouldProcessRequest(Request request) throws IOException {
                 return true;
             }
         };
-        assertNotNull(signer);
+        assertNotNull(delegating);
     }
 
     /**
@@ -1767,6 +1863,7 @@ public class ApproovServiceMiniSdkTest {
     @Test
     public void testSameURL303ReprotectsForTheNewMethod() throws Exception {
         reinitializeServiceWithTargetHost("");
+        ApproovService.enableMessageSigning();
         AtomicInteger attempts = new AtomicInteger();
         ApproovService.setOkHttpClientBuilder(new OkHttpClient.Builder().addNetworkInterceptor(chain -> {
             Response response = chain.proceed(chain.request());
@@ -1803,6 +1900,7 @@ public class ApproovServiceMiniSdkTest {
             "\"protectedDomains\": [\"" + targetHost + "\"]," +
             "\"initialSecureStrings\": {\"header-key\": \"  padded-secret  \"}"
         ));
+        ApproovService.enableMessageSigning();
         ApproovService.addSubstitutionHeader("Api-Key", null);
         AtomicInteger attempts = new AtomicInteger();
         ApproovService.setOkHttpClientBuilder(new OkHttpClient.Builder().addNetworkInterceptor(chain -> {
@@ -1829,6 +1927,7 @@ public class ApproovServiceMiniSdkTest {
     @Test
     public void testAuthenticatorRetryIsResignedOverNewAuthorization() throws Exception {
         reinitializeServiceWithTargetHost("");
+        ApproovService.enableMessageSigning();
         List<String> signatures = new ArrayList<>();
         List<String> authorizations = new ArrayList<>();
         AtomicInteger attempts = new AtomicInteger();
@@ -2021,6 +2120,7 @@ public class ApproovServiceMiniSdkTest {
     @Test
     public void testRenamedStatusHeaderIsCoveredBySignature() throws Exception {
         reinitializeServiceWithTargetHost("");
+        ApproovService.enableMessageSigning();
         ApproovService.setStatusHeader("X-Approov-Fetch-Status");
         try (Response response = ApproovService.getOkHttpClient().newCall(new Request.Builder().url(getTargetURL()).build()).execute()) {
             JSONObject reply = new JSONObject(response.body().string());
@@ -2068,9 +2168,12 @@ public class ApproovServiceMiniSdkTest {
                 "setUseApproovStatusIfNoToken", "getUseApproovStatusIfNoToken",
                 "setApproovInterceptorExtensions", "getApproovInterceptorExtensions"})
             assertFalse(removed + " must be removed on 3.8.x", names.contains(removed));
+        // signing is switched with enableMessageSigning, never through a mutator
+        assertFalse("createDefaultServiceMutator must be removed", names.contains("createDefaultServiceMutator"));
         for (String retained : new String[] {"getMessageSignature", "prefetch", "setApproovHeader",
                 "setApproovTraceIDHeader", "setTokenHeader", "setTraceIDHeader", "setStatusHeader",
-                "createDefaultServiceMutator", "getLastARC"})
+                "getLastARC", "enableMessageSigning", "disableMessageSigning", "isMessageSigningEnabled",
+                "putMessageSigningHostFactory"})
             assertTrue(retained + " must be present", names.contains(retained));
         try {
             Class.forName("io.approov.service.okhttp.ApproovInterceptorExtensions");
@@ -2078,12 +2181,17 @@ public class ApproovServiceMiniSdkTest {
         } catch (ClassNotFoundException expected) {
             // removed
         }
-        try {
-            ApproovDefaultMessageSigning.class.getMethod("processedRequest", Request.class, ApproovRequestMutations.class);
-            fail("deprecated processedRequest must be removed on 3.8.x");
-        } catch (NoSuchMethodException expected) {
-            // removed
+        for (String removed : new String[] {"processedRequest", "handleInterceptorProcessedRequest"}) {
+            try {
+                ApproovDefaultMessageSigning.class.getMethod(removed, Request.class, ApproovRequestMutations.class);
+                fail(removed + " must not be part of ApproovDefaultMessageSigning on 3.8.x");
+            } catch (NoSuchMethodException expected) {
+                // removed
+            }
         }
+        // apps never construct the signer: it is configured through ApproovService
+        for (java.lang.reflect.Constructor<?> c : ApproovDefaultMessageSigning.class.getConstructors())
+            fail("ApproovDefaultMessageSigning must have no public constructor: " + c);
     }
 
     /**
@@ -2093,9 +2201,9 @@ public class ApproovServiceMiniSdkTest {
     @Test
     public void testStaleRefreshRegeneratesBothSignaturesOnce() throws Exception {
         reinitializeServiceWithTargetHost("");
-        CountingMessageSigning signing = new CountingMessageSigning();
-        signing.setDefaultFactory(ApproovDefaultMessageSigning.generateDefaultSignatureParametersFactory());
+        CountingMutator signing = new CountingMutator();
         ApproovService.setServiceMutator(signing);
+        ApproovService.enableMessageSigning();
         AtomicInteger attempts = new AtomicInteger();
         ApproovService.setOkHttpClientBuilder(new OkHttpClient.Builder().addNetworkInterceptor(chain -> {
             if (attempts.getAndIncrement() == 0)
@@ -2203,6 +2311,29 @@ public class ApproovServiceMiniSdkTest {
     // ==================================================================================
     // Test Helpers
     // ==================================================================================
+
+    // sends a request and returns the echoed reply
+    private JSONObject send(OkHttpClient client, Request request) throws Exception {
+        try (Response response = client.newCall(request).execute()) {
+            assertEquals(200, response.code());
+            return new JSONObject(response.body().string());
+        }
+    }
+
+    // asserts both default signatures as members of the same dictionaries
+    private void assertBothSignatures(JSONObject reply) throws Exception {
+        String signatureInput = getHeader(reply, "Signature-Input");
+        assertNotNull("Signature-Input missing", signatureInput);
+        assertTrue(signatureInput, signatureInput.startsWith("install=("));
+        assertTrue(signatureInput, signatureInput.contains(", account=("));
+        assertTrue(signatureInput, signatureInput.contains("alg=\"ecdsa-p256-sha256\""));
+        assertTrue(signatureInput, signatureInput.contains("alg=\"hmac-sha256\""));
+        String signature = getHeader(reply, "Signature");
+        assertNotNull("Signature missing", signature);
+        assertTrue(signature, signature.startsWith("install=:"));
+        assertTrue(signature, signature.contains(", account=:"));
+        assertTrue(signature, signature.endsWith(":"));
+    }
 
     private String getTargetURL() {
         String url = System.getenv("TESTING_REPLY_URL");
