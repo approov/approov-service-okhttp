@@ -1,7 +1,8 @@
 plugins {
     id 'com.android.library'
     id 'maven-publish'
-    id 'com.gradleup.shadow' version '8.3.11'
+    // only the ShadowJar task type is used, to relocate Tink (see relocatedTinkJar)
+    id 'com.gradleup.shadow' version '9.6.1' apply false
 }
 
 repositories {
@@ -60,26 +61,49 @@ android {
 }
 
 configurations {
-    shadowed
-
     testImplementation {
         exclude group: 'io.approov', module: 'approov-android-sdk'
     }
+
+    // Tink converts the SDK's DER install signature to raw r||s. It is bundled
+    // inside the AAR, relocated with its runtime dependencies under this layer's
+    // own prefix io.approov.util.okhttp, so apps that ship their own Tink,
+    // protobuf or Gson, or another Approov layer with its own relocated copy,
+    // never see duplicate classes. The published POM therefore carries no Tink
+    // dependency. The version is pinned to approov-service-android's because
+    // EllipticCurves sits in Tink's subtle package, which has no API stability
+    // promise; Es256DerToRawTest pins its behaviour.
+    relocatedTink {
+        canBeConsumed = false
+        canBeResolved = true
+    }
 }
 
-tasks.register('shadowJar', com.github.jengelman.gradle.plugins.shadow.tasks.ShadowJar) {
-    archiveClassifier.set('shadow')
-    configurations = [project.configurations.shadowed]
-    relocate 'org.bouncycastle', 'io.approov.internal.okhttp.bouncycastle'
+def relocatedTinkJar = tasks.register('relocatedTinkJar', com.github.jengelman.gradle.plugins.shadow.tasks.ShadowJar) {
+    description = 'Bundles Tink and its runtime dependencies relocated under io.approov.util.okhttp.'
+    archiveBaseName.set('approov-okhttp-relocated-tink')
+    archiveVersion.set('')
+    archiveClassifier.set('')
+    destinationDirectory.set(layout.buildDirectory.dir('relocated-tink'))
+    configurations = [project.configurations.relocatedTink]
+    relocate 'com.google.crypto.tink', 'io.approov.util.okhttp.tink'
+    relocate 'com.google.gson', 'io.approov.util.okhttp.gson'
+    relocate 'com.google.errorprone.annotations', 'io.approov.util.okhttp.errorprone.annotations'
+    relocate 'javax.annotation', 'io.approov.util.okhttp.jsr305'
+    // embedded R8 rules name the old packages; the one Tink rule that is still
+    // relevant is restated for the relocated package in consumer-rules.pro
     exclude 'META-INF/**'
+    exclude '**/module-info.class'
 }
 
 dependencies {
     implementation 'com.squareup.okhttp3:okhttp:4.12.0'
     implementation 'io.approov:approov-android-sdk:3.5.3'
-    shadowed 'org.bouncycastle:bcprov-jdk15to18:1.84'
-    compileOnly files(tasks.named('shadowJar'))
-    implementation files(tasks.named('shadowJar'))
+    relocatedTink('com.google.crypto.tink:tink-android:1.23.0') {
+        // androidx.annotation is a regular dependency of this library below
+        exclude group: 'androidx.annotation'
+    }
+    implementation files(relocatedTinkJar)
     implementation 'androidx.annotation:annotation-jvm:1.9.1'
     testImplementation 'junit:junit:4.13.2'
     if (findProject(':approov-sdk') != null) {
@@ -91,8 +115,4 @@ dependencies {
     testImplementation 'org.robolectric:robolectric:4.11.1'
     testImplementation 'org.json:json:20231013'
     testImplementation 'androidx.test:core:1.6.1'
-}
-
-tasks.withType(JavaCompile) {
-    dependsOn tasks.named('shadowJar')
 }
