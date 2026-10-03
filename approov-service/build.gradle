@@ -116,3 +116,92 @@ dependencies {
     testImplementation 'org.json:json:20231013'
     testImplementation 'androidx.test:core:1.6.1'
 }
+
+def releaseAar = layout.buildDirectory.file('outputs/aar/approov-service-release.aar')
+tasks.register('verifyReleaseAar') {
+    group = 'verification'
+    description = 'Inspects the release AAR for required content and for bundled libraries that are not relocated under this layer.'
+    dependsOn 'bundleReleaseAar'
+    inputs.file(releaseAar)
+    doLast {
+        def archive = releaseAar.get().asFile
+        assert archive.isFile(): "release AAR not found: ${archive}"
+        def aar = new java.util.zip.ZipFile(archive)
+        try {
+            assert aar.getEntry('classes.jar') != null: 'release AAR has no classes.jar'
+            def rulesEntry = aar.getEntry('proguard.txt')
+            assert rulesEntry != null: 'release AAR has no consumer ProGuard rules'
+            def rules = aar.getInputStream(rulesEntry).getText('UTF-8')
+            assert rules.contains('io.approov.util.okhttp.tink.shaded.protobuf.GeneratedMessageLite'):
+                    'consumer rules do not restate the Tink protobuf rule for the relocated package'
+            // Tink must stay shrinkable: no rule may keep its classes wholesale
+            assert !(rules =~ /-keep[a-z]*\s+class\s+io\.approov\.util\.okhttp\.tink/):
+                    'consumer rules keep relocated Tink classes'
+
+            def required = [
+                    'io/approov/service/okhttp/ApproovService.class',
+                    'io/approov/service/okhttp/ApproovDefaultMessageSigning.class',
+                    'io/approov/util/okhttp/tink/subtle/EllipticCurves.class',
+                    'io/approov/util/okhttp/http/sfv/Parser.class',
+                    'io/approov/util/okhttp/sig/SignatureBaseBuilder.class'
+            ] as Set
+            // anything bundled must be relocated under this layer's own prefix so that
+            // it cannot collide with an app's own copy or with another Approov layer
+            def forbidden = [
+                    'org/bouncycastle/': 'BouncyCastle',
+                    'io/approov/internal/': 'the former BouncyCastle relocation',
+                    'com/google/': 'unrelocated Google (Tink, protobuf, Gson, Error Prone)',
+                    'javax/annotation/': 'unrelocated JSR-305',
+                    'okhttp3/': 'OkHttp (a dependency, never bundled)',
+                    'com/criticalblue/': 'the Approov SDK (a dependency, never bundled)',
+                    // the pre-relocation names that other Approov Android layers ship
+                    'io/approov/util/http/': 'colliding Structured Fields',
+                    'io/approov/util/sig/': 'colliding message-signature',
+                    'io/approov/util/universal/': 'approov-service-android\'s relocated classes'
+            ]
+            def found = [] as Set
+            def jars = aar.entries().findAll { it.name == 'classes.jar' || (it.name.startsWith('libs/') && it.name.endsWith('.jar')) }
+            jars.each { jar ->
+                def classes = new java.util.zip.ZipInputStream(aar.getInputStream(jar))
+                try {
+                    for (def entry = classes.nextEntry; entry != null; entry = classes.nextEntry) {
+                        if (required.contains(entry.name)) found.add(entry.name)
+                        forbidden.each { prefix, what ->
+                            assert !entry.name.startsWith(prefix): "AAR ${jar.name} bundles ${what} class ${entry.name}"
+                        }
+                        if (entry.name.endsWith('.class')) {
+                            assert entry.name.startsWith('io/approov/service/okhttp/') || entry.name.startsWith('io/approov/util/okhttp/'):
+                                    "AAR ${jar.name} bundles class ${entry.name} outside this layer's packages"
+                        }
+                    }
+                } finally {
+                    classes.close()
+                }
+            }
+            assert found == required: "release AAR missing entries: ${required - found}"
+        } finally {
+            aar.close()
+        }
+    }
+}
+
+tasks.register('verifyPublishedPom') {
+    group = 'verification'
+    description = 'Checks that the POM published with the AAR lists no bundled or removed library.'
+    def pomFile = layout.projectDirectory.file('pom.xml')
+    inputs.file(pomFile)
+    doLast {
+        def dependencies = new groovy.xml.XmlSlurper().parse(pomFile.asFile).dependencies.dependency
+        def artifacts = dependencies.collect { it.groupId.text() + ":" + it.artifactId.text() } as Set
+        ['com.squareup.okhttp3:okhttp', 'io.approov:approov-android-sdk'].each {
+            assert artifacts.contains(it): "published POM is missing runtime dependency ${it}"
+        }
+        // BouncyCastle is gone and Tink is bundled relocated, so none of these may be
+        // a dependency of the published library
+        def groups = dependencies.collect { it.groupId.text() } as Set
+        ['org.bouncycastle', 'com.google.crypto.tink', 'com.google.code.gson',
+         'com.google.errorprone', 'com.google.code.findbugs'].each {
+            assert !groups.contains(it): "bundled or removed library listed in the published POM: ${it}"
+        }
+    }
+}

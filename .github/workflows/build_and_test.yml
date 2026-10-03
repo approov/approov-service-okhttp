@@ -155,6 +155,10 @@ jobs:
         working-directory: approov-service-okhttp
         run: ./gradlew assembleRelease
 
+      - name: Verify AAR contents and published POM
+        working-directory: approov-service-okhttp
+        run: ./gradlew verifyReleaseAar verifyPublishedPom
+
       - name: Run unit tests
         working-directory: approov-service-okhttp
         env:

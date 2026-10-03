@@ -126,6 +126,9 @@ jobs:
       - name: Build AAR
         run: ./gradlew assembleRelease -PapproovServiceVersion="$CURRENT_TAG"
 
+      - name: Verify AAR contents and published POM
+        run: ./gradlew verifyReleaseAar verifyPublishedPom -PapproovServiceVersion="$CURRENT_TAG"
+
       - name: Create Package
         working-directory: .maven
         run: ./build-and-sign.sh
