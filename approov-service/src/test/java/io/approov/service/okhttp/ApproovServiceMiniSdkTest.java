@@ -2010,8 +2010,9 @@ public class ApproovServiceMiniSdkTest {
     }
 
     /**
-     * Finding 1: a handshake verdict reached against one generation of pins must not
-     * be cached once the pins have been rebuilt (SPECIFICATION 2.4, 2.5).
+     * Finding 1: a pin rebuild that lands while a request is being checked against
+     * the old pins applies to the next request (SPECIFICATION 2.4, 2.5). There is no
+     * verdict cache, so nothing reached against the old pins is reused.
      */
     @Test
     public void testPinUpdateCannotCacheOldGenerationVerdict() throws Exception {
@@ -2485,6 +2486,155 @@ public class ApproovServiceMiniSdkTest {
             }
         }
         assertEquals(afterConstruction, rebuilds.get());
+    }
+
+    // ==================================================================================
+    // TESTING_REQUIREMENTS 4 "Pin-Check Caches Must Be Keyed By Host" / SPECIFICATION 2.5
+    // (core-project-approov#723): every connection check evaluates the current pins for
+    // the request's host; no verdict is reused across hosts, handshakes or pin rebuilds
+    // ==================================================================================
+
+    // one certificate valid for two hosts, as behind a wildcard certificate or a CDN
+    private static final String GOOD_HOST = "good.pinned.example.com";
+    private static final String BAD_HOST = "bad.pinned.example.com";
+    private static final String NON_MATCHING_PIN = "sha256/AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA=";
+
+    private static okhttp3.tls.HeldCertificate sharedCertificate() {
+        return new okhttp3.tls.HeldCertificate.Builder()
+            .addSubjectAlternativeName(GOOD_HOST)
+            .addSubjectAlternativeName(BAD_HOST)
+            .build();
+    }
+
+    // GOOD_HOST pinned to the shared certificate, BAD_HOST to a pin it does not match
+    private static CertificatePinner sharedCertificatePinner(okhttp3.tls.HeldCertificate cert) {
+        return new CertificatePinner.Builder()
+            .add(GOOD_HOST, CertificatePinner.pin(cert.certificate()))
+            .add(BAD_HOST, NON_MATCHING_PIN)
+            .build();
+    }
+
+    private static okhttp3.Handshake handshakeFor(okhttp3.tls.HeldCertificate cert) {
+        return okhttp3.Handshake.get(okhttp3.TlsVersion.TLS_1_3, okhttp3.CipherSuite.TLS_AES_128_GCM_SHA256,
+            java.util.Collections.<java.security.cert.Certificate>singletonList(cert.certificate()),
+            java.util.Collections.<java.security.cert.Certificate>emptyList());
+    }
+
+    private static ApproovPinningInterceptor interceptorWith(ApproovPinningInterceptor interceptor,
+            CertificatePinner pinner) throws Exception {
+        java.lang.reflect.Field pinnerField = ApproovPinningInterceptor.class.getDeclaredField("certificatePinner");
+        pinnerField.setAccessible(true);
+        pinnerField.set(interceptor, pinner);
+        return interceptor;
+    }
+
+    // runs one connection check for the host over the given handshake
+    private static HandshakeChain check(ApproovPinningInterceptor interceptor, String host,
+            okhttp3.Handshake handshake) throws IOException {
+        HandshakeChain chain = new HandshakeChain(new Request.Builder().url("https://" + host + "/").build(), handshake);
+        interceptor.intercept(chain);
+        return chain;
+    }
+
+    private static void assertRejected(ApproovPinningInterceptor interceptor, String host,
+            okhttp3.Handshake handshake) throws IOException {
+        try {
+            check(interceptor, host, handshake);
+            fail(host + " must be rejected: its pin does not match the certificate");
+        } catch (javax.net.ssl.SSLPeerUnverifiedException expected) {
+            assertTrue(expected.getMessage(), expected.getMessage().contains(host));
+        }
+    }
+
+    /**
+     * TR 4 ordering (a): the mispinned host requested first, on a fresh interceptor,
+     * is rejected.
+     */
+    @Test
+    public void testMispinnedHostRequestedFirstIsRejected() throws Exception {
+        reinitializeServiceWithTargetHost("");
+        okhttp3.tls.HeldCertificate cert = sharedCertificate();
+        ApproovPinningInterceptor interceptor = interceptorWith(new ApproovPinningInterceptor(), sharedCertificatePinner(cert));
+        assertRejected(interceptor, BAD_HOST, handshakeFor(cert));
+    }
+
+    /**
+     * TR 4 ordering (b), on its own fresh interceptor: a correctly pinned host that
+     * shares the certificate passes first, then the mispinned host over the same
+     * handshake must still be rejected. Only this ordering detects a verdict reused
+     * across hosts (okhttp's Handshake equality ignores the host).
+     */
+    @Test
+    public void testMispinnedHostAfterSharedCertificateHostIsRejected() throws Exception {
+        reinitializeServiceWithTargetHost("");
+        okhttp3.tls.HeldCertificate cert = sharedCertificate();
+        okhttp3.Handshake handshake = handshakeFor(cert);
+        ApproovPinningInterceptor interceptor = interceptorWith(new ApproovPinningInterceptor(), sharedCertificatePinner(cert));
+        assertNotNull(check(interceptor, GOOD_HOST, handshake).proceededWith);
+        assertRejected(interceptor, BAD_HOST, handshake);
+        // and over an equal but distinct handshake object, as a new connection carries
+        assertRejected(interceptor, BAD_HOST, okhttp3.Handshake.get(handshake.tlsVersion(), handshake.cipherSuite(),
+            handshake.peerCertificates(), handshake.localCertificates()));
+    }
+
+    /**
+     * SPECIFICATION 2.5: after a pin rebuild the next request to a host is checked
+     * against the new pins, even over a handshake that passed against the old ones.
+     */
+    @Test
+    public void testPinRebuildAppliesToTheNextCheckOnTheSameHandshake() throws Exception {
+        reinitializeServiceWithTargetHost("");
+        okhttp3.tls.HeldCertificate cert = sharedCertificate();
+        okhttp3.Handshake handshake = handshakeFor(cert);
+        ApproovPinningInterceptor interceptor = interceptorWith(new ApproovPinningInterceptor(), sharedCertificatePinner(cert));
+        assertNotNull(check(interceptor, GOOD_HOST, handshake).proceededWith);
+        // the pins rotate: the good host's pin no longer matches
+        interceptor.buildPins();
+        interceptorWith(interceptor, new CertificatePinner.Builder().add(GOOD_HOST, NON_MATCHING_PIN).build());
+        assertRejected(interceptor, GOOD_HOST, handshake);
+    }
+
+    /**
+     * Every connection check consults the current pins: a second request over the
+     * same handshake to the same host is evaluated exactly like the first.
+     */
+    @Test
+    public void testPinsAreEvaluatedOnEveryCheck() throws Exception {
+        reinitializeServiceWithTargetHost("");
+        okhttp3.tls.HeldCertificate cert = sharedCertificate();
+        okhttp3.Handshake handshake = handshakeFor(cert);
+        AtomicInteger reads = new AtomicInteger();
+        ApproovPinningInterceptor interceptor = interceptorWith(new ApproovPinningInterceptor() {
+            @Override synchronized CertificatePinner getCertificatePinner() {
+                reads.incrementAndGet();
+                return super.getCertificatePinner();
+            }
+        }, sharedCertificatePinner(cert));
+        check(interceptor, GOOD_HOST, handshake);
+        int first = reads.getAndSet(0);
+        check(interceptor, GOOD_HOST, handshake);
+        assertEquals("the second check must evaluate the pins like the first", first, reads.get());
+        assertTrue(first >= 2);
+    }
+
+    // connection carrying a fixed TLS handshake
+    private static class HandshakeConnection implements okhttp3.Connection {
+        private final okhttp3.Handshake handshake;
+        HandshakeConnection(okhttp3.Handshake handshake) { this.handshake = handshake; }
+        @Override public okhttp3.Route route() { throw new UnsupportedOperationException(); }
+        @Override public java.net.Socket socket() { return new java.net.Socket(); }
+        @Override public okhttp3.Handshake handshake() { return handshake; }
+        @Override public okhttp3.Protocol protocol() { return okhttp3.Protocol.HTTP_2; }
+    }
+
+    // chain whose connection carries a fixed TLS handshake
+    private static class HandshakeChain extends NoHandshakeChain {
+        private final okhttp3.Connection connection;
+        HandshakeChain(Request request, okhttp3.Handshake handshake) {
+            super(request);
+            this.connection = new HandshakeConnection(handshake);
+        }
+        @Override public okhttp3.Connection connection() { return connection; }
     }
 
     // chain with no connection, standing for a cleartext attempt

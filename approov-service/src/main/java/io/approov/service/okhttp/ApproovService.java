@@ -31,7 +31,6 @@ import java.util.HashMap;
 import java.util.HashSet;
 import java.util.Iterator;
 import java.util.LinkedHashMap;
-import java.util.LinkedHashSet;
 import java.util.List;
 import java.util.Locale;
 import java.util.Map;
@@ -1908,45 +1907,31 @@ class ApproovFreshnessInterceptor implements Interceptor {
     }
 }
 
-// interceptor to implement pinning on network connections
+// interceptor to implement pinning on network connections. Every connection check
+// evaluates the current pins for the request's host: no verdict is cached, since a
+// cache keyed by the TLS handshake is host-blind (okhttp's Handshake equality covers
+// the TLS version, cipher suite and certificate chain only) and would admit a
+// mispinned host behind a certificate another host had passed with
+// (core-project-approov#723), while the check itself is cheap
 class ApproovPinningInterceptor implements Interceptor {
     // logging tag
     private final static String TAG = "ApproovPinningInterceptor";
 
-    // maximum number of elements that may be held in the handshake cache to allow
-    // caching
-    // of different concurrent connections but without causing a significant memory
-    // leak
-    private final static int maxCachedHandshakes = 10;
-
     // the certificate pinner to use for pinning that may be rebuilt if there is a
-    // change
-    // in the pinning configuration
+    // change in the pinning configuration
     private CertificatePinner certificatePinner;
-
-    // set of TLS handshakes that are known to be valid constrained to a size of
-    // maxCachedHandshakes
-    // to prevent a memory leak for long running apps
-    private LinkedHashSet<Handshake> knownValidHandshakes;
-
-    // incremented on every rebuild of the pins so that a handshake checked against an
-    // earlier generation of pins is never cached as valid for the current one
-    private long pinGeneration = 0;
 
     /**
      * Construct a new pinning interceptor.
      */
     public ApproovPinningInterceptor() {
-        knownValidHandshakes = new LinkedHashSet<>();
         buildPins();
     }
 
     /**
      * Rebuild the pinning configuration. This is called when the dynamic
-     * configuration
-     * changes and we need to update the pinning information. This forces all known
-     * valid
-     * handshakes to be cleared.
+     * configuration changes and we need to update the pinning information; the
+     * next connection check uses the new pins.
      */
     synchronized public void buildPins() {
         CertificatePinner.Builder pinBuilder = new CertificatePinner.Builder();
@@ -1968,17 +1953,6 @@ class ApproovPinningInterceptor implements Interceptor {
             }
         }
         certificatePinner = pinBuilder.build();
-        knownValidHandshakes.clear();
-        pinGeneration++;
-    }
-
-    /**
-     * Gets the current pin generation, which changes on every rebuild of the pins.
-     *
-     * @return the pin generation
-     */
-    synchronized long getPinGeneration() {
-        return pinGeneration;
     }
 
     /**
@@ -1989,42 +1963,6 @@ class ApproovPinningInterceptor implements Interceptor {
      */
     synchronized CertificatePinner getCertificatePinner() {
         return certificatePinner;
-    }
-
-    /**
-     * Determines if the given handshake is known to be valid, supporting different
-     * TLS
-     * negotiations on different domains as required.
-     *
-     * @param handshake ot be checked
-     * @return true if the handshake is known valid, false otherwise
-     */
-    synchronized private boolean isValidHandshake(Handshake handshake) {
-        return knownValidHandshakes.contains(handshake);
-    }
-
-    /**
-     * Adds a valid handshake to the cached set, clearing the cache if that would
-     * exceed
-     * the maximum size.
-     *
-     * @param handshake to be added as known valid
-     */
-    synchronized private void addValidHandshake(Handshake handshake, long generation) {
-        // a verdict reached against an earlier generation of pins is not cached: the
-        // pins were rebuilt while this handshake was being checked
-        if (generation != pinGeneration) {
-            Log.d(TAG, "Pins rebuilt during check, handshake verdict not cached");
-            return;
-        }
-        while (knownValidHandshakes.size() >= maxCachedHandshakes) {
-            Iterator<Handshake> it = knownValidHandshakes.iterator();
-            if (it.hasNext()) { // can't really fail, but this keeps it safe
-                it.next();
-                it.remove();
-            }
-        }
-        knownValidHandshakes.add(handshake);
     }
 
     @Override
@@ -2042,11 +1980,6 @@ class ApproovPinningInterceptor implements Interceptor {
         if (getCertificatePinner().getPins().isEmpty())
             buildPins();
 
-        // the generation is read before the pinner so that a rebuild between the two
-        // reads, or between the check and the caching of the verdict, is detected and
-        // the verdict is not cached against the new pins
-        long generation = getPinGeneration();
-
         String host = chain.request().url().host();
         Connection connection = chain.connection();
         Handshake handshake = (connection != null) ? connection.handshake() : null;
@@ -2060,23 +1993,17 @@ class ApproovPinningInterceptor implements Interceptor {
             Log.d(TAG, "Pinning failure: cleartext connection to pinned host " + host);
             throw new SSLPeerUnverifiedException("Approov pinning: cleartext connection to pinned host " + host);
         }
-        if (!isValidHandshake(handshake)) {
-            // if we haven't seen this handshake and pins combination before then we
-            // need to check it
-            List<Certificate> certs = handshake.peerCertificates();
-            try {
-                getCertificatePinner().check(host, certs);
-            } catch (SSLPeerUnverifiedException e) {
-                // if a certificate pinning error is detected then close the socket to force
-                // the next request to redo the TLS negotiation
-                Log.d(TAG, "Pinning failure: " + e.toString());
-                connection.socket().close();
-                throw e;
-            }
-
-            // pins were valid for the handshake so cache it, unless the pins changed
-            addValidHandshake(handshake, generation);
-            Log.d(TAG, "Valid pinning for: " + handshake.toString());
+        // check the peer certificates against the current pins for this host on every
+        // connection check
+        List<Certificate> certs = handshake.peerCertificates();
+        try {
+            getCertificatePinner().check(host, certs);
+        } catch (SSLPeerUnverifiedException e) {
+            // if a certificate pinning error is detected then close the socket to force
+            // the next request to redo the TLS negotiation
+            Log.d(TAG, "Pinning failure: " + e.toString());
+            connection.socket().close();
+            throw e;
         }
         return chain.proceed(chain.request());
     }

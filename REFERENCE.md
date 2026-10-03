@@ -92,7 +92,7 @@ Returns `true` only when the package was initialized with the Approov account ID
 
 
 ## getOkHttpClient
-Gets the default `OkHttpClient` that enables the Approov service. This adds the Approov token in a header to requests, performs and header or query parameter substitutions and also pins the connections. The `OkHttpClient` is constructed lazily on demand but is cached if there are no changes.
+Gets the default `OkHttpClient` that enables the Approov service. This adds the Approov token in a header to requests, performs and header or query parameter substitutions and also pins the connections, checking the current pins for the request's host on every request. The `OkHttpClient` is constructed lazily on demand but is cached if there are no changes.
 
 **Java:**
 ```Java
