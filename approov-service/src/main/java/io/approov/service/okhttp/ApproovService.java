@@ -158,10 +158,35 @@ public class ApproovService {
     // to the compiled Pattern
     private static Map<String, Pattern> exclusionURLRegexs = null;
 
+    // thin injectable boundary around the static Approov SDK API; package-private
+    // so that tests can record the calls the layer makes, the public API is unchanged
+    private static volatile ApproovSdkFacade sdkFacade = new DefaultApproovSdkFacade();
+
     /**
      * Construction is disallowed as this is a static only class.
      */
     private ApproovService() {
+    }
+
+    /**
+     * Gets the boundary through which every Approov SDK call is made.
+     *
+     * @return the SDK facade
+     */
+    static ApproovSdkFacade sdk() {
+        return sdkFacade;
+    }
+
+    /**
+     * Installs the SDK boundary, for tests only.
+     *
+     * @param facade the SDK facade to use
+     */
+    @VisibleForTesting
+    static synchronized void setSdkFacadeForTesting(ApproovSdkFacade facade) {
+        if (facade == null)
+            throw new IllegalArgumentException("SDK facade must not be null");
+        sdkFacade = facade;
     }
 
     /**
@@ -189,7 +214,7 @@ public class ApproovService {
         // operating mode (protected or bypass) if the call fails.
         if (!config.isEmpty()) {
             try {
-                boolean sdkInitialized = Approov.initialize(context.getApplicationContext(), config, "auto", comment);
+                boolean sdkInitialized = ApproovService.sdk().initialize(context.getApplicationContext(), config, "auto", comment);
                 if (!sdkInitialized) {
                     Log.d(TAG, "Approov SDK already initialized");
                 }
@@ -224,7 +249,7 @@ public class ApproovService {
         lastARC = "";
         if (isApproovEnabled()) {
             pinningInterceptor = new ApproovPinningInterceptor();
-            Approov.setUserProperty("approov-service-okhttp/" + BuildConfig.APPROOV_SERVICE_VERSION);
+            ApproovService.sdk().setUserProperty("approov-service-okhttp/" + BuildConfig.APPROOV_SERVICE_VERSION);
         } else {
             pinningInterceptor = null;
         }
@@ -288,6 +313,7 @@ public class ApproovService {
         substitutionHeaders = null;
         substitutionQueryParams = null;
         exclusionURLRegexs = null;
+        sdkFacade = new DefaultApproovSdkFacade();
     }
 
     /**
@@ -425,7 +451,7 @@ public class ApproovService {
             throw new ApproovException("setDevKey: SDK not initialized");
         }
         try {
-            Approov.setDevKey(devKey);
+            ApproovService.sdk().setDevKey(devKey);
             Log.d(TAG, "setDevKey");
         } catch (IllegalStateException e) {
             throw new ApproovException(e);
@@ -616,7 +642,7 @@ public class ApproovService {
             // absent; a present-but-empty value must still be forwarded to the SDK.
             String bindingValue = request.header(bindingHeader);
             if (bindingValue != null)
-                Approov.setDataHashInToken(bindingValue);
+                ApproovService.sdk().setDataHashInToken(bindingValue);
         }
     }
 
@@ -628,7 +654,7 @@ public class ApproovService {
      */
     static void updatePinsIfConfigChanged(Approov.TokenFetchResult approovResults) {
         if (approovResults.isConfigChanged()) {
-            Approov.fetchConfig();
+            ApproovService.sdk().fetchConfig();
             rebuildPins();
             Log.d(TAG, "Dynamic configuration updated");
         }
@@ -953,7 +979,7 @@ public class ApproovService {
     public static synchronized void prefetch() {
         if (isApproovEnabled())
             // fire and forget the prefetch
-            Approov.fetchApproovToken(new PrefetchCallbackHandler(), "approov.io");
+            ApproovService.sdk().fetchApproovToken(new PrefetchCallbackHandler(), "approov.io");
     }
 
     /**
@@ -981,7 +1007,7 @@ public class ApproovService {
         // try and fetch a non-existent secure string in order to check for a rejection
         Approov.TokenFetchResult approovResults;
         try {
-            approovResults = Approov.fetchSecureStringAndWait("precheck-dummy-key", null);
+            approovResults = ApproovService.sdk().fetchSecureStringAndWait("precheck-dummy-key", null);
             recordLastARC(approovResults);
             Log.d(TAG, "precheck: " + approovResults.getStatus().toString());
         } catch (IllegalStateException e) {
@@ -1010,7 +1036,7 @@ public class ApproovService {
             throw new ApproovException("getDeviceID: SDK not initialized");
         }
         try {
-            String deviceID = Approov.getDeviceID();
+            String deviceID = ApproovService.sdk().getDeviceID();
             Log.d(TAG, "getDeviceID: " + deviceID);
             return deviceID;
         } catch (IllegalStateException e) {
@@ -1038,7 +1064,7 @@ public class ApproovService {
             throw new ApproovException("setDataHashInToken: SDK not initialized");
         }
         try {
-            Approov.setDataHashInToken(data);
+            ApproovService.sdk().setDataHashInToken(data);
             Log.d(TAG, "setDataHashInToken");
         } catch (IllegalStateException e) {
             throw new ApproovException(e);
@@ -1075,7 +1101,7 @@ public class ApproovService {
         // fetch the Approov token
         Approov.TokenFetchResult approovResults;
         try {
-            approovResults = Approov.fetchApproovTokenAndWait(url);
+            approovResults = ApproovService.sdk().fetchApproovTokenAndWait(url);
             recordLastARC(approovResults);
             Log.d(TAG, "fetchToken: " + approovResults.getStatus().toString());
         } catch (IllegalStateException e) {
@@ -1140,7 +1166,7 @@ public class ApproovService {
             throw new ApproovException("getAccountMessageSignature: SDK not initialized");
         }
         try {
-            String signature = Approov.getAccountMessageSignature(message);
+            String signature = ApproovService.sdk().getAccountMessageSignature(message);
             Log.d(TAG, "getAccountMessageSignature");
             if (signature == null)
                 throw new ApproovException("no account signature available");
@@ -1181,7 +1207,7 @@ public class ApproovService {
             throw new ApproovException("getInstallMessageSignature: SDK not initialized");
         }
         try {
-            String signature = Approov.getInstallMessageSignature(message);
+            String signature = ApproovService.sdk().getInstallMessageSignature(message);
             Log.d(TAG, "getInstallMessageSignature");
             if (signature == null)
                 throw new ApproovException("no device signature available");
@@ -1236,7 +1262,7 @@ public class ApproovService {
         // might throw
         Approov.TokenFetchResult approovResults;
         try {
-            approovResults = Approov.fetchSecureStringAndWait(key, newDef);
+            approovResults = ApproovService.sdk().fetchSecureStringAndWait(key, newDef);
             recordLastARC(approovResults);
             Log.d(TAG, "fetchSecureString " + type + ": " + key + ", " + approovResults.getStatus().toString());
         } catch (IllegalStateException e) {
@@ -1274,7 +1300,7 @@ public class ApproovService {
         // fetch the custom JWT catching any exceptions the SDK might throw
         Approov.TokenFetchResult approovResults;
         try {
-            approovResults = Approov.fetchCustomJWTAndWait(payload);
+            approovResults = ApproovService.sdk().fetchCustomJWTAndWait(payload);
             recordLastARC(approovResults);
             Log.d(TAG, "fetchCustomJWT: " + approovResults.getStatus().toString());
         } catch (IllegalStateException e) {
@@ -1341,7 +1367,7 @@ public class ApproovService {
             throw new ApproovException("setInstallAttrsInToken: SDK not initialized");
         }
         try {
-            Approov.setInstallAttrsInToken(attrs);
+            ApproovService.sdk().setInstallAttrsInToken(attrs);
             Log.d(TAG, "setInstallAttrsInToken");
         } catch (IllegalArgumentException e) {
             Log.e(TAG, "setInstallAttrsInToken failed with IllegalArgument: " + e.getMessage());
@@ -1570,7 +1596,7 @@ class ApproovTokenInterceptor implements Interceptor {
         HttpUrl url = request.url();
 
         // request an Approov token for the request URL
-        Approov.TokenFetchResult approovResults = Approov.fetchApproovTokenAndWait(url.toString());
+        Approov.TokenFetchResult approovResults = ApproovService.sdk().fetchApproovTokenAndWait(url.toString());
         ApproovService.recordLastARC(approovResults);
 
         // provide information about the obtained token or error (note "approov token
@@ -1631,7 +1657,7 @@ class ApproovTokenInterceptor implements Interceptor {
             String prefix = entry.getValue();
             String value = request.header(header);
             if ((value != null) && value.startsWith(prefix) && (value.length() > prefix.length())) {
-                approovResults = Approov.fetchSecureStringAndWait(value.substring(prefix.length()), null);
+                approovResults = ApproovService.sdk().fetchSecureStringAndWait(value.substring(prefix.length()), null);
                 ApproovService.recordLastARC(approovResults);
                 Log.d(TAG, "Substituting header: " + header + ", " + approovResults.getStatus().toString());
                 // a failed substitution leaves the placeholder value in the header and the
@@ -1659,7 +1685,7 @@ class ApproovTokenInterceptor implements Interceptor {
                 // we have found an occurrence of the query parameter to be replaced so we look
                 // up the existing value as a key for a secure string
                 String queryValue = matcher.group(1);
-                approovResults = Approov.fetchSecureStringAndWait(queryValue, null);
+                approovResults = ApproovService.sdk().fetchSecureStringAndWait(queryValue, null);
                 ApproovService.recordLastARC(approovResults);
                 Log.d(TAG, "Substituting query parameter: " + queryKey + ", " + approovResults.getStatus().toString());
                 if (mutator.handleInterceptorQueryParamSubstitutionResult(approovResults, queryKey)) {
@@ -1935,7 +1961,7 @@ class ApproovPinningInterceptor implements Interceptor {
      */
     synchronized public void buildPins() {
         CertificatePinner.Builder pinBuilder = new CertificatePinner.Builder();
-        Map<String, List<String>> allPins = Approov.getPins("public-key-sha256");
+        Map<String, List<String>> allPins = ApproovService.sdk().getPins("public-key-sha256");
         for (Map.Entry<String, List<String>> entry : allPins.entrySet()) {
             String domain = entry.getKey();
             if (!domain.equals("*")) {
