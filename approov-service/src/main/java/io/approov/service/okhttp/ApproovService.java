@@ -934,23 +934,6 @@ public class ApproovService {
     }
 
     /**
-     * Allows an Approov fetch operation to be performed as early as possible. This
-     * permits a token or secure strings to be available while an application might
-     * be loading resources or is awaiting user input. Since the initial fetch is
-     * the
-     * most expensive the prefetch can hide the most latency.
-     *
-     * @deprecated This method is now automatically called when the service is
-     *             initialized.
-     */
-    @Deprecated
-    public static synchronized void prefetch() {
-        if (isApproovProtectionEnabled())
-            // fire and forget the prefetch
-            ApproovService.sdk().fetchApproovToken(new PrefetchCallbackHandler(), "approov.io");
-    }
-
-    /**
      * Performs a precheck to determine if the app will pass attestation. This
      * requires secure
      * strings to be enabled for the account, although no strings need to be set up.
@@ -978,9 +961,9 @@ public class ApproovService {
             approovResults = ApproovService.sdk().fetchSecureStringAndWait("precheck-dummy-key", null);
             recordLastARC(approovResults);
             Log.d(TAG, "precheck: " + approovResults.getStatus().toString());
-        } catch (IllegalStateException e) {
-            throw new ApproovException(e);
-        } catch (IllegalArgumentException e) {
+        } catch (IllegalStateException | IllegalArgumentException e) {
+            // the fetch failed without a result, so it leaves no ARC behind
+            recordLastARC(null);
             throw new ApproovException(e);
         }
 
@@ -1072,9 +1055,9 @@ public class ApproovService {
             approovResults = ApproovService.sdk().fetchApproovTokenAndWait(url);
             recordLastARC(approovResults);
             Log.d(TAG, "fetchToken: " + approovResults.getStatus().toString());
-        } catch (IllegalStateException e) {
-            throw new ApproovException(e);
-        } catch (IllegalArgumentException e) {
+        } catch (IllegalStateException | IllegalArgumentException e) {
+            // the fetch failed without a result, so it leaves no ARC behind
+            recordLastARC(null);
             throw new ApproovException(e);
         }
 
@@ -1233,9 +1216,9 @@ public class ApproovService {
             approovResults = ApproovService.sdk().fetchSecureStringAndWait(key, newDef);
             recordLastARC(approovResults);
             Log.d(TAG, "fetchSecureString " + type + ": " + key + ", " + approovResults.getStatus().toString());
-        } catch (IllegalStateException e) {
-            throw new ApproovException(e);
-        } catch (IllegalArgumentException e) {
+        } catch (IllegalStateException | IllegalArgumentException e) {
+            // the fetch failed without a result, so it leaves no ARC behind
+            recordLastARC(null);
             throw new ApproovException(e);
         }
 
@@ -1271,9 +1254,9 @@ public class ApproovService {
             approovResults = ApproovService.sdk().fetchCustomJWTAndWait(payload);
             recordLastARC(approovResults);
             Log.d(TAG, "fetchCustomJWT: " + approovResults.getStatus().toString());
-        } catch (IllegalStateException e) {
-            throw new ApproovException(e);
-        } catch (IllegalArgumentException e) {
+        } catch (IllegalStateException | IllegalArgumentException e) {
+            // the fetch failed without a result, so it leaves no ARC behind
+            recordLastARC(null);
             throw new ApproovException(e);
         }
 
@@ -1283,21 +1266,23 @@ public class ApproovService {
     }
 
     /**
-     * Gets the Attestation Response Code (ARC) from the most recent token, secure
-     * string or custom JWT fetch performed by this layer, whether from the
-     * interceptor or from a direct method. Returns an empty string if no fetch has
-     * been made since initialization, if the last fetch produced no ARC, or if ARC
-     * is not enabled for the account. This performs no network activity: it reports
-     * the result the app already received, so it can be read after a rejected
-     * request to correlate with the backend's view.
+     * Gets the Attestation Response Code (ARC) from the most recent fetch this layer
+     * performed: a token, secure string or custom JWT fetch, from the interceptor
+     * (including secure string substitutions and stale protection refreshes) or
+     * from a direct method (fetchToken, fetchSecureString, fetchCustomJWT,
+     * precheck). It performs no fetch of its own and no network activity: it
+     * reports the result the app already received, so it can be read after a
+     * rejected request to correlate with the backend's view.
+     *
+     * The empty string is returned when no fetch has been made since
+     * initialization, when the last fetch carried no ARC, when ARC is not enabled
+     * for the account, or when the last fetch failed without a result (an SDK
+     * exception in a direct method). Prefer receiving the ARC on the server side
+     * where possible.
      *
      * @return the ARC of the most recent fetch, or an empty string
      */
     public static synchronized String getLastARC() {
-        if (!isApproovProtectionEnabled()) {
-            Log.e(TAG, "getLastARC: SDK not initialized");
-            return "";
-        }
         return lastARC;
     }
 
@@ -1306,7 +1291,8 @@ public class ApproovService {
      * getLastARC. An empty or null ARC clears the previous value, matching the SDK
      * semantics of the ARC belonging to the last fetch.
      *
-     * @param approovResults the fetch result just obtained
+     * @param approovResults the fetch result just obtained, or null if the fetch
+     *                       failed without a result
      */
     static synchronized void recordLastARC(Approov.TokenFetchResult approovResults) {
         String arc = (approovResults != null) ? approovResults.getARC() : null;
@@ -1480,25 +1466,6 @@ public class ApproovService {
      */
     public static synchronized OkHttpClient getOkHttpClient() {
         return getOkHttpClient(DEFAULT_BUILDER_NAME);
-    }
-}
-
-/**
- * Callback handler for prefetching. We simply log as we don't need the result
- * itself, as it will be returned as a cached value on a subsequent fetch.
- */
-final class PrefetchCallbackHandler implements Approov.TokenFetchCallback {
-    // logging tag
-    private static final String TAG = "ApproovPrefetch";
-
-    @Override
-    public void approovCallback(Approov.TokenFetchResult result) {
-        ApproovService.recordLastARC(result);
-        if ((result.getStatus() == Approov.TokenFetchStatus.SUCCESS) ||
-                (result.getStatus() == Approov.TokenFetchStatus.UNKNOWN_URL))
-            Log.d(TAG, "Prefetch success");
-        else
-            Log.e(TAG, "Prefetch failure: " + result.getStatus().toString());
     }
 }
 

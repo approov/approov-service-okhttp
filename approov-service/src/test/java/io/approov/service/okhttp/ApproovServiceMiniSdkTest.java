@@ -1947,19 +1947,6 @@ public class ApproovServiceMiniSdkTest {
     }
 
     /**
-     * Finding 7: the prefetch callback records the ARC of its result like every other
-     * fetch this layer performs (SPECIFICATION 5.3).
-     */
-    @Test
-    public void testPrefetchCallbackRecordsARC() throws Exception {
-        reinitializeServiceWithTargetHost("");
-        setDirective("{\"operation\":\"fetchApproovToken\",\"response\":{\"status\":\"REJECTED\",\"arc\":\"PREFETCH-ARC\"}}");
-        Approov.TokenFetchResult result = Approov.fetchApproovTokenAndWait("https://approov.io");
-        new PrefetchCallbackHandler().approovCallback(result);
-        assertEquals("PREFETCH-ARC", ApproovService.getLastARC());
-    }
-
-    /**
      * Control: a factory subclass setting an explicit algorithm produces that single
      * signature, and debug mode emits a per-member Signature-Base-Digest.
      */
@@ -2371,11 +2358,11 @@ public class ApproovServiceMiniSdkTest {
         for (String removed : new String[] {
                 "setUseApproovStatusIfNoToken", "getUseApproovStatusIfNoToken",
                 "setApproovInterceptorExtensions", "getApproovInterceptorExtensions",
-                "setProceedOnNetworkFail", "getProceedOnNetworkFail"})
+                "setProceedOnNetworkFail", "getProceedOnNetworkFail", "prefetch"})
             assertFalse(removed + " must be removed on 3.8.x", names.contains(removed));
         // signing is switched with enableMessageSigning, never through a mutator
         assertFalse("createDefaultServiceMutator must be removed", names.contains("createDefaultServiceMutator"));
-        for (String retained : new String[] {"getMessageSignature", "prefetch", "setApproovHeader",
+        for (String retained : new String[] {"getMessageSignature", "setApproovHeader",
                 "setApproovTraceIDHeader", "setTokenHeader", "setTraceIDHeader", "setStatusHeader",
                 "getLastARC", "enableMessageSigning", "disableMessageSigning", "isMessageSigningEnabled",
                 "putMessageSigningHostFactory"})
