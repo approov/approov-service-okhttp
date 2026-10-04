@@ -48,4 +48,12 @@ public class PublicSurface380Test {
         assertFalse(hasPublicMethod(ApproovService.class, "isInitialized"));
         assertFalse(hasPublicMethod(ApproovService.class, "isApproovEnabled"));
     }
+
+    @Test
+    public void proceedOnNetworkFailIsRemoved() {
+        // SPECIFICATION 5.2 (changed 2026-10-04): a decision on the network statuses
+        // belongs to the mutator, ALWAYS_PROCEED or the app's own
+        assertFalse(hasPublicMethod(ApproovService.class, "setProceedOnNetworkFail"));
+        assertFalse(hasPublicMethod(ApproovService.class, "getProceedOnNetworkFail"));
+    }
 }

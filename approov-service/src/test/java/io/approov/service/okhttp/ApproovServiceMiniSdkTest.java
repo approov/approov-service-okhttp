@@ -955,11 +955,10 @@ public class ApproovServiceMiniSdkTest {
      * SUCCESS adds the token, NO_APPROOV_SERVICE an empty token, UNKNOWN_URL and
      * UNPROTECTED_URL send no Approov headers, the network statuses throw the
      * network exception and every other status the fetch status exception, with no
-     * request reaching the wire. The deprecated setProceedOnNetworkFail(true) lets
-     * the network statuses proceed, and only those; initialize() resets it.
+     * request reaching the wire. setProceedOnNetworkFail is removed in 3.8.0
+     * (SPECIFICATION 5.2): the network statuses always throw under CLOSE_FAILURE.
      */
     @Test
-    @SuppressWarnings("deprecation")
     public void testCloseFailureTokenFetchDecisions() throws Exception {
         reinitializeServiceWithTargetHost("");
         ApproovService.setServiceMutator(ApproovServiceMutator.CLOSE_FAILURE);
@@ -980,19 +979,6 @@ public class ApproovServiceMiniSdkTest {
             "MISSING_LIB_DEPENDENCY", "DISABLED"};
         for (String status : others)
             assertTokenFetchAborts(status, ApproovFetchStatusException.class, attempts);
-
-        ApproovService.setProceedOnNetworkFail(true);
-        for (String status : network) {
-            reply = sendWithTokenStatus(status);
-            assertEquals(status, "", getHeader(reply, "Approov-Token"));
-            assertEquals(status, status.toLowerCase(), getHeader(reply, "Approov-Status"));
-        }
-        assertTokenFetchAborts("REJECTED", ApproovFetchStatusException.class, attempts);
-
-        ApproovService.initialize(context, validInitialConfig, "reinit");
-        assertFalse("initialize must reset setProceedOnNetworkFail", ApproovService.getProceedOnNetworkFail());
-        attempts = countNetworkAttempts();
-        assertTokenFetchAborts("NO_NETWORK", ApproovNetworkException.class, attempts);
     }
 
     /**
@@ -2363,11 +2349,9 @@ public class ApproovServiceMiniSdkTest {
             names.add(m.getName());
         for (String removed : new String[] {
                 "setUseApproovStatusIfNoToken", "getUseApproovStatusIfNoToken",
-                "setApproovInterceptorExtensions", "getApproovInterceptorExtensions"})
+                "setApproovInterceptorExtensions", "getApproovInterceptorExtensions",
+                "setProceedOnNetworkFail", "getProceedOnNetworkFail"})
             assertFalse(removed + " must be removed on 3.8.x", names.contains(removed));
-        // kept, deprecated, while CLOSE_FAILURE is the default (SPECIFICATION 5.2)
-        assertNotNull(ApproovService.class.getMethod("setProceedOnNetworkFail", boolean.class).getAnnotation(Deprecated.class));
-        assertNotNull(ApproovService.class.getMethod("getProceedOnNetworkFail").getAnnotation(Deprecated.class));
         // signing is switched with enableMessageSigning, never through a mutator
         assertFalse("createDefaultServiceMutator must be removed", names.contains("createDefaultServiceMutator"));
         for (String retained : new String[] {"getMessageSignature", "prefetch", "setApproovHeader",

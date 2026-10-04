@@ -39,9 +39,9 @@ import java.util.regex.Matcher;
  *   interface defaults. A token fetch proceeds on SUCCESS (token header) and
  *   NO_APPROOV_SERVICE (empty token header), a request to an UNKNOWN_URL or
  *   UNPROTECTED_URL is sent with no Approov headers, NO_NETWORK, POOR_NETWORK and
- *   UNTRUSTED_NETWORK throw ApproovNetworkException (unless the deprecated
- *   ApproovService.setProceedOnNetworkFail(true) is set, when they proceed with
- *   an empty token header), and every other status throws
+ *   UNTRUSTED_NETWORK throw ApproovNetworkException (an app that wants them to
+ *   proceed installs ALWAYS_PROCEED or its own mutator), and every other status
+ *   throws
  *   ApproovFetchStatusException, REJECTED included. A secure string substitution
  *   is made on SUCCESS, the placeholder is left on UNKNOWN_KEY, REJECTED throws
  *   ApproovRejectionException, the network statuses throw ApproovNetworkException
@@ -335,9 +335,8 @@ public interface ApproovServiceMutator {
      * UNKNOWN_URL or UNPROTECTED_URL result sends the request with no Approov
      * headers at all, since the domain is not protected by Approov and headers
      * must not be leaked to it. NO_NETWORK, POOR_NETWORK and UNTRUSTED_NETWORK
-     * throw ApproovNetworkException, or proceed with an empty token header if the
-     * deprecated ApproovService.setProceedOnNetworkFail(true) is set, and every
-     * other status throws ApproovFetchStatusException. {@link #ALWAYS_PROCEED}
+     * throw ApproovNetworkException and every other status throws
+     * ApproovFetchStatusException. {@link #ALWAYS_PROCEED}
      * overrides this to never throw.
      *
      * @param approovResults the TokenFetchResult from Approov
@@ -366,12 +365,9 @@ public interface ApproovServiceMutator {
                 // continue without any headers for unprotected URLs (anti-MitM)
                 return false;
             default:
-                if (isNetworkFailure(status)) {
-                    if (ApproovService.getProceedOnNetworkFail())
-                        return true;
+                if (isNetworkFailure(status))
                     throw new ApproovNetworkException(status,
                             "Approov token fetch for " + url + ": " + status.toString());
-                }
                 throw new ApproovFetchStatusException(status,
                         "Approov token fetch for " + url + ": " + status.toString());
         }
