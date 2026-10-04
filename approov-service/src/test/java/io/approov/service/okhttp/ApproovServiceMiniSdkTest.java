@@ -982,11 +982,15 @@ public class ApproovServiceMiniSdkTest {
     }
 
     /**
-     * SPECIFICATION 6.2: every CLOSE_FAILURE substitution decision, for headers and
-     * query parameters: SUCCESS substitutes, UNKNOWN_KEY leaves the placeholder and
-     * the request proceeds, REJECTED throws the rejection exception, the network
-     * statuses the network exception and every other status the fetch status
-     * exception, with no request reaching the wire.
+     * SPECIFICATION 6.2 (changed 2026-10-04): every CLOSE_FAILURE substitution
+     * decision, for headers and query parameters, under CLOSE_FAILURE and under
+     * DEFAULT (setServiceMutator(null)). The decision mirrors the token decision
+     * for the same status: SUCCESS substitutes; UNKNOWN_KEY, REJECTED and
+     * NO_APPROOV_SERVICE leave the placeholder and the request proceeds with the
+     * token and a "success" status header; the network statuses throw the network
+     * exception and every other status the fetch status exception, carrying the
+     * status, with no request reaching the wire. A REJECTED secure string no longer
+     * throws: the backend is the enforcement point.
      */
     @Test
     public void testCloseFailureSubstitutionDecisions() throws Exception {
@@ -995,7 +999,6 @@ public class ApproovServiceMiniSdkTest {
             "\"protectedDomains\": [\"" + targetHost + "\"]," +
             "\"initialSecureStrings\": {\"the-key\": \"the-secret\"}"
         ));
-        ApproovService.setServiceMutator(ApproovServiceMutator.CLOSE_FAILURE);
         ApproovService.addSubstitutionHeader("Api-Key", null);
         ApproovService.addSubstitutionQueryParam("api_key");
         AtomicInteger attempts = countNetworkAttempts();
@@ -1003,39 +1006,57 @@ public class ApproovServiceMiniSdkTest {
         Request header = new Request.Builder().url(getTargetURL()).header("Api-Key", "the-key").build();
         Request query = new Request.Builder().url(getTargetURL() + "?api_key=the-key").build();
 
-        JSONObject reply = send(client, header);
-        assertEquals("the-secret", getHeader(reply, "Api-Key"));
-        reply = send(client, query);
-        assertTrue(reply.getString("url"), reply.getString("url").contains("api_key=the-secret"));
+        for (ApproovServiceMutator mutator : new ApproovServiceMutator[] {ApproovServiceMutator.CLOSE_FAILURE, null}) {
+            ApproovService.setServiceMutator(mutator);
+            assertSame(ApproovServiceMutator.CLOSE_FAILURE, ApproovService.getServiceMutator());
 
-        // a value that is not a secure string key is left in place
-        reply = send(client, new Request.Builder().url(getTargetURL()).header("Api-Key", "not-a-key").build());
-        assertEquals("not-a-key", getHeader(reply, "Api-Key"));
-        assertFalse(getHeader(reply, "Approov-Token").isEmpty());
-        reply = send(client, new Request.Builder().url(getTargetURL() + "?api_key=not-a-key").build());
-        assertTrue(reply.getString("url"), reply.getString("url").contains("api_key=not-a-key"));
+            JSONObject reply = send(client, header);
+            assertEquals("the-secret", getHeader(reply, "Api-Key"));
+            reply = send(client, query);
+            assertTrue(reply.getString("url"), reply.getString("url").contains("api_key=the-secret"));
 
-        Object[][] failing = {
-            {"REJECTED", ApproovRejectionException.class},
-            {"NO_NETWORK", ApproovNetworkException.class},
-            {"POOR_NETWORK", ApproovNetworkException.class},
-            {"UNTRUSTED_NETWORK", ApproovNetworkException.class},
-            {"NO_APPROOV_SERVICE", ApproovFetchStatusException.class},
-            {"INTERNAL_ERROR", ApproovFetchStatusException.class},
-        };
-        for (Request request : new Request[] {header, query}) {
-            for (Object[] f : failing) {
-                String status = (String) f[0];
-                int before = attempts.get();
+            // a value that is not a secure string key is left in place
+            reply = send(client, new Request.Builder().url(getTargetURL()).header("Api-Key", "not-a-key").build());
+            assertEquals("not-a-key", getHeader(reply, "Api-Key"));
+            assertFalse(getHeader(reply, "Approov-Token").isEmpty());
+            reply = send(client, new Request.Builder().url(getTargetURL() + "?api_key=not-a-key").build());
+            assertTrue(reply.getString("url"), reply.getString("url").contains("api_key=not-a-key"));
+
+            for (String status : new String[] {"UNKNOWN_KEY", "REJECTED", "NO_APPROOV_SERVICE"}) {
                 setDirective("{\"operation\": \"fetchSecureString\", \"response\": {\"status\": \"" + status + "\"}}");
-                try (Response response = client.newCall(request).execute()) {
-                    fail(status + " substitution must abort under CLOSE_FAILURE");
-                } catch (IOException e) {
-                    assertEquals(status + ": " + e, f[1], e.getClass());
-                    assertEquals(status, Approov.TokenFetchStatus.valueOf(status),
-                        ((ApproovFetchStatusException) e).getTokenFetchStatus());
+                reply = send(client, header);
+                assertEquals(status + " keeps the placeholder", "the-key", getHeader(reply, "Api-Key"));
+                assertFalse(status + " still carries the token", getHeader(reply, "Approov-Token").isEmpty());
+                assertEquals(status, "success", getHeader(reply, "Approov-Status"));
+                setDirective("{\"operation\": \"fetchSecureString\", \"response\": {\"status\": \"" + status + "\"}}");
+                reply = send(client, query);
+                assertTrue(status + ": " + reply.getString("url"), reply.getString("url").contains("api_key=the-key"));
+                assertFalse(status + " still carries the token", getHeader(reply, "Approov-Token").isEmpty());
+                assertEquals(status, "success", getHeader(reply, "Approov-Status"));
+            }
+
+            Object[][] failing = {
+                {"NO_NETWORK", ApproovNetworkException.class},
+                {"POOR_NETWORK", ApproovNetworkException.class},
+                {"UNTRUSTED_NETWORK", ApproovNetworkException.class},
+                {"INTERNAL_ERROR", ApproovFetchStatusException.class},
+                {"BAD_URL", ApproovFetchStatusException.class},
+                {"DISABLED", ApproovFetchStatusException.class},
+            };
+            for (Request request : new Request[] {header, query}) {
+                for (Object[] f : failing) {
+                    String status = (String) f[0];
+                    int before = attempts.get();
+                    setDirective("{\"operation\": \"fetchSecureString\", \"response\": {\"status\": \"" + status + "\"}}");
+                    try (Response response = client.newCall(request).execute()) {
+                        fail(status + " substitution must abort under CLOSE_FAILURE");
+                    } catch (IOException e) {
+                        assertEquals(status + ": " + e, f[1], e.getClass());
+                        assertEquals(status, Approov.TokenFetchStatus.valueOf(status),
+                            ((ApproovFetchStatusException) e).getTokenFetchStatus());
+                    }
+                    assertEquals(status + " must send nothing", before, attempts.get());
                 }
-                assertEquals(status + " must send nothing", before, attempts.get());
             }
         }
     }

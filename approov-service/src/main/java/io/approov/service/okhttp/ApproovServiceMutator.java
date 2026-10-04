@@ -43,9 +43,10 @@ import java.util.regex.Matcher;
  *   proceed installs ALWAYS_PROCEED or its own mutator), and every other status
  *   throws
  *   ApproovFetchStatusException, REJECTED included. A secure string substitution
- *   is made on SUCCESS, the placeholder is left on UNKNOWN_KEY, REJECTED throws
- *   ApproovRejectionException, the network statuses throw ApproovNetworkException
- *   and every other status throws ApproovFetchStatusException.
+ *   mirrors the token decision for the same status: it is made on SUCCESS, the
+ *   placeholder is left and the request proceeds on UNKNOWN_KEY, REJECTED and
+ *   NO_APPROOV_SERVICE, the network statuses throw ApproovNetworkException and
+ *   every other status throws ApproovFetchStatusException.
  * - {@link #ALWAYS_PROCEED}: never aborts a request. A token fetch outcome other
  *   than SUCCESS is an outcome, not a failure: the request is sent with an empty
  *   Approov token header, a failed secure string substitution leaves its
@@ -81,8 +82,9 @@ public interface ApproovServiceMutator {
      * The 3.5.x interceptor decisions, which are the interface defaults: proceed on
      * SUCCESS and NO_APPROOV_SERVICE, send UNKNOWN_URL and UNPROTECTED_URL
      * untouched, and throw the layer's Approov exception for every other token
-     * fetch status, and for every failed secure string substitution other than
-     * UNKNOWN_KEY. Never signs.
+     * fetch status. A secure string substitution mirrors the token decision: it
+     * leaves the placeholder on UNKNOWN_KEY, REJECTED and NO_APPROOV_SERVICE and
+     * throws for the network statuses and every other failure. Never signs.
      */
     public static final ApproovServiceMutator CLOSE_FAILURE = new ApproovServiceMutator() {
         @Override
@@ -380,9 +382,10 @@ public interface ApproovServiceMutator {
      * current header value (minus a prefix) as the key. This method is called once
      * per header being processed for substitution.
      *
-     * The default is the {@link #CLOSE_FAILURE} decision: the header is substituted
-     * on SUCCESS and left unchanged on UNKNOWN_KEY (the value is not a secure
-     * string key); REJECTED throws ApproovRejectionException, NO_NETWORK,
+     * The default is the {@link #CLOSE_FAILURE} decision, which mirrors the token
+     * decision for the same status: the header is substituted on SUCCESS and left
+     * unchanged, with the request proceeding, on UNKNOWN_KEY (the value is not a
+     * secure string key), REJECTED and NO_APPROOV_SERVICE; NO_NETWORK,
      * POOR_NETWORK and UNTRUSTED_NETWORK throw ApproovNetworkException and every
      * other status throws ApproovFetchStatusException. {@link #ALWAYS_PROCEED}
      * overrides this to substitute on SUCCESS and leave the placeholder otherwise.
@@ -427,14 +430,16 @@ public interface ApproovServiceMutator {
     }
 
     /**
-     * The {@link #CLOSE_FAILURE} substitution decision (the 3.5.x one): substitute
-     * on SUCCESS, leave the placeholder on UNKNOWN_KEY, and throw the Approov
-     * exception for the status otherwise.
+     * The {@link #CLOSE_FAILURE} substitution decision, which mirrors the token
+     * decision for the same status (SPECIFICATION 6.2): substitute on SUCCESS,
+     * leave the placeholder on UNKNOWN_KEY, REJECTED and NO_APPROOV_SERVICE, and
+     * throw the Approov exception for the status otherwise.
      *
      * @param approovResults the secure string fetch result
      * @param what           the substitution, for the exception message
      * @return true to substitute, false to leave the placeholder
-     * @throws ApproovException for every status other than SUCCESS and UNKNOWN_KEY
+     * @throws ApproovException for the network statuses and every status not
+     *                          listed above
      */
     static boolean closeFailureSubstitution(Approov.TokenFetchResult approovResults, String what)
             throws ApproovException {
@@ -443,12 +448,10 @@ public interface ApproovServiceMutator {
             case SUCCESS:
                 return true;
             case UNKNOWN_KEY:
-                return false;
             case REJECTED:
-                String arc = approovResults.getARC();
-                String rejectionReasons = approovResults.getRejectionReasons();
-                throw new ApproovRejectionException(what + ": " + status.toString() + ": " + arc + " "
-                        + rejectionReasons, arc, rejectionReasons);
+            case NO_APPROOV_SERVICE:
+                // the placeholder reaches the backend, which is the enforcement point
+                return false;
             default:
                 if (isNetworkFailure(status))
                     throw new ApproovNetworkException(status, what + ": " + status.toString());
