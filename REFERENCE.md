@@ -13,14 +13,20 @@ import io.approov.service.okhttp.ApproovService
 
 Whether a request made through an `OkHttpClient` from `getOkHttpClient` proceeds when it could not be protected is decided by the installed `ApproovServiceMutator` (see [setServiceMutator](#setservicemutator) and [ADVANCED.md](ADVANCED.md#what-happens-by-default)). In 3.8.0 the default, `ApproovServiceMutator.DEFAULT`, is `CLOSE_FAILURE`, the 3.5.x decisions: a request proceeds on `SUCCESS` and `NO_APPROOV_SERVICE` and otherwise fails with an `ApproovException` subclass as listed below. With `ApproovServiceMutator.ALWAYS_PROCEED` it always proceeds, with the fetch status on the `Approov-Status` header and an empty `Approov-Token` header if it could not be protected; from 4.0.0 that is the default. Whatever the mutator, the other exceptions that can reach the caller from the request path are the app's own configuration errors (`IllegalStateException` for a required body digest that cannot be generated or an unsupported signing algorithm), pinning failures on the app's API domains (`javax.net.ssl.SSLPeerUnverifiedException`, as for any OkHttp pinning failure), and aborts the app itself opted in to through a service mutator, which throw a standard network stack exception (`IOException` or a subclass), never an Approov type. The direct methods (`precheck`, `fetchToken`, `fetchSecureString`, `fetchCustomJWT`, ...) return a value to the caller and report a failure with the exceptions below.
 
-Various methods may throw an `ApproovException` (an `IOException`) if there is a problem. The method `getMessage()` provides a descriptive message. An `ApproovFetchStatusException` (a subclass of `ApproovException`) carries the SDK fetch status in `getTokenFetchStatus()`.
+Before `initialize` and in bypass mode a request made through the `OkHttpClient` goes out without any Approov processing and without Approov pinning: it is neither failed nor held.
+
+Various methods may throw an `ApproovException` (an `IOException`, so a checked exception) if there is a problem. The method `getMessage()` provides a descriptive message. An `ApproovFetchStatusException` (a subclass of `ApproovException`) carries the SDK fetch status in `getTokenFetchStatus()`. Every method that calls the Approov SDK (`setDevKey`, `precheck`, `getDeviceID`, `setDataHashInToken`, `fetchToken`, `getMessageSignature`, `getAccountMessageSignature`, `getInstallMessageSignature`, `fetchSecureString`, `fetchCustomJWT` and `setInstallAttributes`) throws `ApproovException` with the message `<method>: Approov protection not enabled`, without calling the SDK, while [isApproovProtectionEnabled](#isapproovprotectionenabled) is `false`.
 
 If a method throws an `ApproovNetworkException` (a subclass of `ApproovFetchStatusException`) then this indicates the problem was caused by a networking issue (`NO_NETWORK`, `POOR_NETWORK` or `UNTRUSTED_NETWORK`), and a user initiated retry should be allowed.
 
-If a method throws an `ApproovRejectionException` (a subclass of `ApproovException`) the this indicates the problem was that the app failed attestation. An additional method `getARC()` provides the [Attestation Response Code](https://approov.io/docs/latest/approov-usage-documentation/#attestation-response-code), which could be provided to the user for communication with your app support to determine the reason for failure, without this being revealed to the end user. The method `getRejectionReasons()` provides the [Rejection Reasons](https://approov.io/docs/latest/approov-usage-documentation/#rejection-reasons) if the feature is enabled, providing a comma separated list of reasons why the app attestation was rejected.
+If a method throws an `ApproovRejectionException` (a subclass of `ApproovFetchStatusException`) this indicates the problem was that the app failed attestation. An additional method `getARC()` provides the [Attestation Response Code](https://approov.io/docs/latest/approov-usage-documentation/#attestation-response-code), which could be provided to the user for communication with your app support to determine the reason for failure, without this being revealed to the end user. The method `getRejectionReasons()` provides the [Rejection Reasons](https://approov.io/docs/latest/approov-usage-documentation/#rejection-reasons) if the feature is enabled, providing a comma separated list of reasons why the app attestation was rejected.
 
 ## initialize
-Initializes the Approov SDK and thus enables the Approov features. The `config` parameter is your Approov account ID: the string from your onboarding email, also available from the CLI with `approov sdk -getConfigString` (the CLI and the SDK call it the SDK config string). It identifies your account to the SDK, is not a secret, and is the same for every app in the account. See [obtaining it](https://approov.io/docs/latest/approov-usage-documentation/#getting-the-initial-sdk-configuration). Initialization throws `IllegalArgumentException` only if the account ID was not copied exactly, and `IllegalStateException` if a second attempt is made with a different account ID.
+Initializes the Approov SDK and thus enables the Approov features. The `config` parameter is your Approov account ID: the string from your onboarding email, also available from the CLI with `approov sdk -getConfigString` (the CLI and the SDK call it the SDK config string). It identifies your account to the SDK, is not a secret, and is the same for every app in the account. See [obtaining it](https://approov.io/docs/latest/approov-usage-documentation/#getting-the-initial-sdk-configuration).
+
+Every non-empty account ID is forwarded to the Approov SDK with the comment exactly as passed, and the SDK decides; the package does not store or compare the account ID. A first initialization succeeds. The same account ID and comment again is reported by the SDK as already initialized, and `initialize` returns at once, so every place in the process that uses Approov may call it. Anything else the SDK rejects, a different account ID or comment, or an account ID that did not reach the app intact, is the SDK's own `IllegalStateException` or `IllegalArgumentException`, thrown unchanged to the caller with the package state unchanged.
+
+`initialize` never resets configuration: the token, trace, status and binding headers, substitutions, exclusions, the service mutator, message signing and its host factories, the stale protection refresh period and the `OkHttpClient` builders keep the values set before or after it, from any caller. It changes only what [isApproovServiceEnabled](#isapproovserviceenabled) and [isApproovProtectionEnabled](#isapproovprotectionenabled) report. Initialize before the first request: a request made before any `initialize` goes out without Approov processing.
 
 This is the standard form and should be used in most cases. The `comment` parameter defaults to `null` when not supplied.
 
@@ -36,9 +42,9 @@ fun initialize(context: Context, config: String)
 
 The [application context](https://developer.android.com/reference/android/content/Context#getApplicationContext()) must be provided using the `context` parameter.
 
-It is possible to pass an empty string instead of the account ID to bypass Approov SDK initialization. In that case the package still reports itself as initialized, but any `OkHttpClient` obtained from it behaves as a plain client with no Approov token injection, message signing, secure strings, or pinning.
+It is possible to pass an empty string instead of the account ID to bypass Approov SDK initialization. In that case `isApproovServiceEnabled()` is `true` and `isApproovProtectionEnabled()` is `false`, the SDK is not called, and requests through the `OkHttpClient` go out with no Approov token, message signing, secure strings or Approov pinning: connections are validated by OS trust alone, even if another caller in the process initialized the SDK.
 
-This bypass mode is intended as a bootstrap state for advanced integrations. A later call to `initialize()` with the account ID is allowed and will then enable the native Approov SDK at runtime. By contrast, reinitializing from one account ID to a different one is rejected by the platform SDK.
+This bypass mode is intended as a bootstrap state for advanced integrations. A later call to `initialize()` with the account ID is forwarded and enables Approov protection when the SDK accepts it; if the SDK rejects it the package stays in bypass mode. An empty string after protection is enabled is ignored and not forwarded.
 
 If you need to supply a `comment` to the native SDK (for example to pass `options:...` startup flags or trigger a `reinit...` flow), use the extended form instead:
 
@@ -55,40 +61,40 @@ fun initialize(context: Context, config: String, comment: String?)
 The `comment` parameter is passed directly to the native Approov SDK. Key uses:
 * Pass a string starting with `options:` during the initial setup to forward custom startup options to the native SDK.
 * Pass a string starting with `reinit` to trigger native re-initialization on a subsequent same-config call.
-* Pass `null` (or use the 2-arg form) when no comment is needed — this is the default.
+* Pass `null` (or use the 2-arg form) when no comment is needed; this is the default. `null` and `""` are different comments to the SDK.
 
 Please refer to the [Approov SDK documentation](https://approov.io/docs/latest/approov-direct-sdk-integration/#sdk-initialization-options) for full details on supported comment values.
 
 
-## isInitialized
-Returns whether the package itself has been initialized.
+## isApproovServiceEnabled
+Returns whether the package is enabled, that is processing requests. Replaces `isInitialized()`, removed in 3.8.0.
 
 **Java:**
 ```java
-boolean isInitialized()
+boolean isApproovServiceEnabled()
 ```
 
 **Kotlin:**
 ```kotlin
-fun isInitialized(): Boolean
+fun isApproovServiceEnabled(): Boolean
 ```
 
-Returns `true` if `initialize` has been called successfully, including when bypass mode is active (empty string instead of the account ID). Returns `false` only if `initialize` has never been called successfully. A rejected later call (for example with a different account ID) throws and leaves the previous state in place, so this keeps returning `true`. Use `isApproovEnabled()` to distinguish between bypass and protected modes.
+Returns `true` once any `initialize` has succeeded, including bypass mode (empty string instead of the account ID). Returns `false` only if no `initialize` has succeeded. A rejected later call (for example with a different account ID) throws and leaves the previous state in place, so this keeps returning `true`. Use `isApproovProtectionEnabled()` to distinguish between bypass and protected modes.
 
-## isApproovEnabled
-Returns whether Approov protection is currently enabled.
+## isApproovProtectionEnabled
+Returns whether Approov protection is enabled. Replaces `isApproovEnabled()`, removed in 3.8.0.
 
 **Java:**
 ```java
-boolean isApproovEnabled()
+boolean isApproovProtectionEnabled()
 ```
 
 **Kotlin:**
 ```kotlin
-fun isApproovEnabled(): Boolean
+fun isApproovProtectionEnabled(): Boolean
 ```
 
-Returns `true` only when the package was initialized with the Approov account ID and the native Approov SDK is active. Returns `false` in all other cases: not initialized, or initialized in bypass mode (empty string). All direct Approov SDK methods (such as `fetchToken`, `precheck`, `fetchSecureString`) will throw `ApproovException` if called when this returns `false`.
+Returns `true` once the Approov SDK has been initialized with the account ID and Approov protection is active. Returns `false` before initialization and in bypass mode (empty string). The methods that call the Approov SDK (such as `fetchToken`, `precheck`, `fetchSecureString`) throw `ApproovException` without calling the SDK while this returns `false`. After a successful `initialize`, check `isApproovServiceEnabled()` and then this; it is `false` only in deliberate bypass mode.
 
 
 ## getOkHttpClient
@@ -104,7 +110,7 @@ OkHttpClient getOkHttpClient()
 fun getOkHttpClient(): OkHttpClient
 ```
 
-You must initialize the package before calling this method. If initialization used an empty string instead of the account ID then this provides a plain `OkHttpClient` without any Approov protection.
+The client may be obtained at any time, also before `initialize`. Its requests go out without any Approov processing or Approov pinning while Approov protection is not enabled (before `initialize` and in bypass mode), and the same client protects its requests once `initialize` enables protection.
 
 Use `setOkHttpClientBuilder` to provide any special builder properties. If you wish to use multiple different builders in your application you can set them by also providing a builder name to `setOkHttpClientBuilder`. In this case you get an `OkHttpClient` using a specific builder using:
 
@@ -119,7 +125,7 @@ fun getOkHttpClient(builderName: String): OkHttpClient
 ```
 
 ## setOkHttpClientBuilder
-Sets the `OkHttpClient.Builder` to be used for constructing the default Approov `OkHttpClient`. This allows a custom configuration to be set, with additional interceptors and properties.
+Sets the `OkHttpClient.Builder` to be used for constructing the default Approov `OkHttpClient`. This allows a custom configuration to be set, with additional interceptors and properties. It may be called before or after `initialize`, which keeps it, and takes effect for the next `getOkHttpClient` call.
 
 **Java:**
 ```Java
@@ -156,11 +162,11 @@ void setServiceMutator(ApproovServiceMutator mutator)
 fun setServiceMutator(mutator: ApproovServiceMutator?)
 ```
 
-The mutator installed by `initialize` is `ApproovServiceMutator.DEFAULT`, and passing `null` reinstates it. Mutators carry decisions only: installing one never switches message signing on or off (see [enableMessageSigning](#enablemessagesigning)). Three standard decision sets are provided:
+The out-of-the-box mutator is `ApproovServiceMutator.DEFAULT`, and passing `null` reinstates it; `initialize` keeps whichever mutator is installed. Mutators carry decisions only: installing one never switches message signing on or off (see [enableMessageSigning](#enablemessagesigning)). Three standard decision sets are provided:
 
 | Mutator | Decisions |
 | :--- | :--- |
-| `ApproovServiceMutator.CLOSE_FAILURE` | the 3.5.x decisions, which are also the interface defaults: a token fetch proceeds on `SUCCESS` (token header) and `NO_APPROOV_SERVICE` (empty token header); `UNKNOWN_URL` and `UNPROTECTED_URL` send the request with no Approov headers; `NO_NETWORK`, `POOR_NETWORK` and `UNTRUSTED_NETWORK` throw `ApproovNetworkException` (unless the deprecated [setProceedOnNetworkFail](#setproceedonnetworkfail)`(true)` is set); every other status throws `ApproovFetchStatusException`, `REJECTED` included. A secure string substitution is made on `SUCCESS` and skipped on `UNKNOWN_KEY`; `REJECTED` throws `ApproovRejectionException`, the network statuses `ApproovNetworkException`, every other status `ApproovFetchStatusException` |
+| `ApproovServiceMutator.CLOSE_FAILURE` | the 3.5.x decisions, which are also the interface defaults: a token fetch proceeds on `SUCCESS` (token header) and `NO_APPROOV_SERVICE` (empty token header); `UNKNOWN_URL` and `UNPROTECTED_URL` send the request with no Approov headers; `NO_NETWORK`, `POOR_NETWORK` and `UNTRUSTED_NETWORK` throw `ApproovNetworkException`; every other status throws `ApproovFetchStatusException`, `REJECTED` included. A secure string substitution mirrors the token decision for the same status: it is made on `SUCCESS`; on `UNKNOWN_KEY`, `REJECTED` and `NO_APPROOV_SERVICE` the placeholder is left and the request proceeds; the network statuses throw `ApproovNetworkException` and every other status `ApproovFetchStatusException` |
 | `ApproovServiceMutator.ALWAYS_PROCEED` | never aborts: every token fetch status except `UNKNOWN_URL` and `UNPROTECTED_URL` sends the token header, empty if there is no token, and the status header; a secure string is substituted on `SUCCESS` and the placeholder is left otherwise |
 | `ApproovServiceMutator.DEFAULT` | `CLOSE_FAILURE` in 3.8.0, `ALWAYS_PROCEED` from 4.0.0. Name one of the two explicitly to keep your decisions fixed across 4.0.0 |
 
@@ -177,7 +183,7 @@ ApproovService.setServiceMutator(ApproovServiceMutator.ALWAYS_PROCEED)
 A custom mutator gets the `CLOSE_FAILURE` decisions for every hook it does not override; one that should never abort delegates the three interceptor decisions to `ALWAYS_PROCEED` (see [ADVANCED.md](ADVANCED.md#opting-in-to-aborting-requests)). A custom mutator may opt in to aborting a request from any interceptor hook by throwing a standard network stack exception (`java.io.IOException` or a platform subclass), never an Approov specific type, so that the abort surfaces to the app as an ordinary network failure; that is an explicit integrator decision. The aborts `CLOSE_FAILURE` makes keep the 3.5.x Approov exception types (all subclasses of `IOException`), so an existing app catches the same exceptions as before.
 
 ## enableMessageSigning
-Switches message signing on. Message signing is **off by default in 3.8.0** and on and compulsory from 4.0.0. Once on, every request carrying the Approov token header is signed (RFC 9421) after the service mutator's decisions, the secure string substitutions and the mutator's `handleInterceptorProcessedRequest` callback, so the signature covers what is sent, and it is signed again whenever its protection is reapplied (a redirect within a protected domain, an authenticator retry, a stale protection refresh). It works the same under every mutator, and `setServiceMutator` never switches it on or off. `initialize` switches it off again and drops any host factories.
+Switches message signing on. Message signing is **off by default in 3.8.0** and on and compulsory from 4.0.0. Once on, every request carrying the Approov token header is signed (RFC 9421) after the service mutator's decisions, the secure string substitutions and the mutator's `handleInterceptorProcessedRequest` callback, so the signature covers what is sent, and it is signed again whenever its protection is reapplied (a redirect within a protected domain, an authenticator retry, a stale protection refresh). It works the same under every mutator, and `setServiceMutator` never switches it on or off. `initialize` leaves it, and any host factories, as they are.
 
 Without an argument it uses `ApproovDefaultMessageSigning.generateDefaultSignatureParametersFactory()`: both the install signature (member `install`, `ecdsa-p256-sha256`, per installation key held in the device secure hardware) and the account signature (member `account`, `hmac-sha256`, account key delivered on attestation), over the same covered components. Pass a [SignatureParametersFactory](#approovdefaultmessagesigningsignatureparametersfactory) to choose the signatures and covered components for every host without a host factory; `null` selects the default factory.
 
@@ -220,7 +226,7 @@ fun isMessageSigningEnabled(): Boolean
 ```
 
 ## putMessageSigningHostFactory
-Signs requests to one host with the given factory instead of the default factory passed to `enableMessageSigning`. The host name is matched without regard to case and without any port. Passing `null` as the factory removes the host's factory so that the default applies again. It applies while message signing is enabled and is kept until `initialize`. A factory is shared by every request it applies to, so use a separate instance per distinct configuration.
+Signs requests to one host with the given factory instead of the default factory passed to `enableMessageSigning`. The host name is matched without regard to case and without any port. Passing `null` as the factory removes the host's factory so that the default applies again. It applies while message signing is enabled; `initialize` keeps it. A factory is shared by every request it applies to, so use a separate instance per distinct configuration.
 
 **Java:**
 ```java
@@ -245,33 +251,21 @@ ApproovServiceMutator getServiceMutator()
 fun getServiceMutator(): ApproovServiceMutator
 ```
 
-## setProceedOnNetworkFail
-**Deprecated.** Under `ApproovServiceMutator.CLOSE_FAILURE`, the 3.8.0 default, `true` makes a request whose token fetch failed with `NO_NETWORK`, `POOR_NETWORK` or `UNTRUSTED_NETWORK` proceed with an empty token header and the status header instead of failing with `ApproovNetworkException`. Every other failing status still throws, secure string substitutions are not affected, and other mutators ignore it. `initialize` resets it to `false`. Install `ApproovServiceMutator.ALWAYS_PROCEED` instead, which proceeds on every status; this method is removed in 4.0.0, when proceeding becomes the default. `getProceedOnNetworkFail()` returns the current value.
-
-**Java:**
-```java
-void setProceedOnNetworkFail(boolean proceed)
-boolean getProceedOnNetworkFail()
-```
-
-**Kotlin:**
-```kotlin
-fun setProceedOnNetworkFail(proceed: Boolean)
-fun getProceedOnNetworkFail(): Boolean
-```
-
 ## setDevKey
 [Sets a development key](https://approov.io/docs/latest/approov-usage-documentation/#using-a-development-key) in order to force an app to be passed. This can be used if the app has to be resigned in a test environment and would thus fail attestation otherwise.
 
 **Java:**
 ```Java
-void setDevKey(String devKey)
+void setDevKey(String devKey) throws ApproovException
 ```
 
 **Kotlin:**
 ```kotlin
+@Throws(ApproovException::class)
 fun setDevKey(devKey: String)
 ```
+
+This throws `ApproovException` if the SDK rejects the development key. Before `initialize` and in bypass mode it throws `ApproovException` with the message `setDevKey: Approov protection not enabled`, without calling the SDK.
 
 ## setTokenHeader
 Sets the `header` that the Approov token is added on, as well as an optional `prefix` String (such as "`Bearer `"). Pass `null` or the empty string for `prefix` if it is not required; `null` never prepends the literal string "null". By default the token is provided on `Approov-Token` with no prefix. If no token could be obtained the header is still sent, with an empty value after any prefix, and the status is reported on the status header (see `setStatusHeader`). Failure information is never placed in this header.
@@ -426,7 +420,7 @@ fun removeSubstitutionHeader(header: String)
 ## getSubstitutionHeaders
 Gets the map of headers currently subject to secure string substitution, mapped to their required prefixes.
 
-This throws `IllegalStateException` if `ApproovService` is not initialized.
+It may be called before `initialize`, and returns a copy.
 
 **Java:**
 ```java
@@ -469,7 +463,7 @@ fun removeSubstitutionQueryParam(key: String)
 ## getSubstitutionQueryParams
 Gets the map of query parameter keys to compiled regex patterns currently subject to secure string substitution.
 
-This throws `IllegalStateException` if `ApproovService` is not initialized.
+It may be called before `initialize`, and returns a copy.
 
 **Java:**
 ```java
@@ -512,7 +506,7 @@ fun removeExclusionURLRegex(urlRegex: String)
 ## getExclusionURLRegexs
 Gets the current map of exclusion URL regular expressions.
 
-This throws `IllegalStateException` if `ApproovService` is not initialized.
+It may be called before `initialize`, and returns a copy.
 
 **Java:**
 ```java
@@ -522,21 +516,6 @@ Map<String, Pattern> getExclusionURLRegexs()
 **Kotlin:**
 ```kotlin
 fun getExclusionURLRegexs(): Map<String, Pattern>
-```
-
-## prefetch
-Allows an Approov fetch operation to be performed as early as possible. This permits a token or secure strings to be available while an application might be loading resources or is awaiting user input. Since the initial fetch is the most expensive the prefetch can hide the most latency.
-
-**DEPRECATED**: This method is now automatically called when the service is initialized.
-
-**Java:**
-```Java
-void prefetch()
-```
-
-**Kotlin:**
-```kotlin
-fun prefetch()
 ```
 
 ## precheck
@@ -553,7 +532,7 @@ void precheck() throws ApproovException
 fun precheck()
 ```
 
-This throws `ApproovException` if the precheck failed. This will likely require network access so may take some time to complete, and should not be called from the UI thread.
+This throws `ApproovException` if the precheck failed, an `ApproovFetchStatusException` carrying the status in `getTokenFetchStatus()`. This will likely require network access so may take some time to complete, and should not be called from the UI thread. Before `initialize` and in bypass mode it throws `ApproovException` with the message `precheck: Approov protection not enabled`, without calling the SDK.
 
 ## getDeviceID
 Gets the [device ID](https://approov.io/docs/latest/approov-usage-documentation/#extracting-the-device-id) used by Approov to identify the particular device that the SDK is running on. Note that different Approov apps on the same device will return a different ID. Moreover, the ID may be changed by an uninstall and reinstall of the app.
@@ -569,7 +548,7 @@ String getDeviceID() throws ApproovException
 fun getDeviceID(): String
 ```
 
-This throws `ApproovException` if there was a problem obtaining the device ID.
+This throws `ApproovException` if there was a problem obtaining the device ID. Before `initialize` and in bypass mode it throws `ApproovException` with the message `getDeviceID: Approov protection not enabled`, without calling the SDK.
 
 ## setDataHashInToken
 Directly sets the [token binding](https://approov.io/docs/latest/approov-usage-documentation/#token-binding) hash for subsequently fetched Approov tokens. If the hash is different from any previously set value then this will cause the next token fetch operation to fetch a new token with the correct payload data hash. The resulting token is expected to carry the `pay` claim as a base64 encoded string of the SHA256 hash of the data. Note that the data is hashed locally and never sent to the Approov cloud service. This is an alternative to using `setBindingHeader` and you should not use both methods at the same time.
@@ -585,7 +564,7 @@ void setDataHashInToken(String data) throws ApproovException
 fun setDataHashInToken(data: String)
 ```
 
-This throws `ApproovException` if there was a problem changing the data hash.
+This throws `ApproovException` if there was a problem changing the data hash. Before `initialize` and in bypass mode it throws `ApproovException` with the message `setDataHashInToken: Approov protection not enabled`, without calling the SDK.
 
 ## fetchToken
 Performs an Approov token fetch for the given `url`. This should be used in situations where it is not possible to use the networking interception to add the token. Note that the returned token should NEVER be cached by your app, you should call this function when it is needed.
@@ -601,7 +580,7 @@ String fetchToken(String url) throws ApproovException
 fun fetchToken(url: String): String
 ```
 
-This throws `ApproovException` if there was a problem obtaining an Approov token. This may require network access so may take some time to complete, and should not be called from the UI thread.
+This throws `ApproovException` if there was a problem obtaining an Approov token, an `ApproovFetchStatusException` carrying the status in `getTokenFetchStatus()` when the fetch did not succeed. This may require network access so may take some time to complete, and should not be called from the UI thread. Before `initialize` and in bypass mode it throws `ApproovException` with the message `fetchToken: Approov protection not enabled`, without calling the SDK.
 
 ## getMessageSignature
 **DEPRECATED**, replaced by `getAccountMessageSignature`.
@@ -617,6 +596,8 @@ String getMessageSignature(String message) throws ApproovException
 fun getMessageSignature(message: String): String
 ```
 
+Before `initialize` and in bypass mode it throws `ApproovException` with the message `getMessageSignature: Approov protection not enabled`, without calling the SDK.
+
 ## getAccountMessageSignature
 Gets the [account message signature](https://approov.io/docs/latest/approov-usage-documentation/#account-message-signing) for the given message. This is returned as a base64 encoded signature. This feature uses an account specific message signing key that is transmitted to the SDK after a successful fetch if the facility is enabled for the account. Note that if the attestation failed then the signing key provided is actually random so that the signature will be incorrect. An Approov token should always be included in the message being signed and sent alongside this signature to prevent replay attacks.
     
@@ -631,7 +612,7 @@ String getAccountMessageSignature(String message) throws ApproovException
 fun getAccountMessageSignature(message: String): String
 ```
 
-This throws `ApproovException` if no signature is available, because there has been no prior fetch or the feature is not enabled.
+This throws `ApproovException` if no signature is available, because there has been no prior fetch or the feature is not enabled. Before `initialize` and in bypass mode it throws `ApproovException` with the message `getAccountMessageSignature: Approov protection not enabled`, without calling the SDK.
 
 ## getInstallMessageSignature
 Gets the [install message signature](https://approov.io/docs/latest/approov-usage-documentation/#installation-message-signing) for the given message. This is returned as the base64 encoding of the signature in ASN.1 DER format. This feature uses an app install specific message signing key that is generated the first time an app launches. This signing mechanism uses an ECC key pair where the private key is managed by the secure element or trusted execution environment of the device. Where it can, Approov uses attested key pairs to perform the message signing. An Approov token should always be included in the message being signed and sent alongside this signature to prevent replay attacks.
@@ -647,7 +628,7 @@ public static String getInstallMessageSignature(String message) throws ApproovEx
 fun getInstallMessageSignature(message: String): String
 ```
 
-This throws `ApproovException` if no signature is available, because there has been no prior fetch or the feature is not enabled.
+This throws `ApproovException` if no signature is available, because there has been no prior fetch or the feature is not enabled. Before `initialize` and in bypass mode it throws `ApproovException` with the message `getInstallMessageSignature: Approov protection not enabled`, without calling the SDK.
 
 ## fetchSecureString
 Fetches a [secure string](https://approov.io/docs/latest/approov-usage-documentation/#secure-strings) with the given `key` if `newDef` is `null`. Returns `null` if the `key` secure string is not defined. If `newDef` is not `null` then a secure string for the particular app instance may be defined. In this case the new value is returned as the secure string. Use of an empty string for `newDef` removes the string entry. Note that the returned string should NEVER be cached by your app, you should call this function when it is needed.
@@ -663,7 +644,7 @@ String fetchSecureString(String key, String newDef) throws ApproovException
 fun fetchSecureString(key: String, newDef: String?): String?
 ```
 
-This throws `ApproovException` if there was a problem obtaining the secure string. This may require network access so may take some time to complete, and should not be called from the UI thread.
+This throws `ApproovException` if there was a problem obtaining the secure string, an `ApproovFetchStatusException` carrying the status in `getTokenFetchStatus()` when the fetch did not succeed (an `ApproovRejectionException`, with the ARC and rejection reasons, for `REJECTED`). This may require network access so may take some time to complete, and should not be called from the UI thread. Before `initialize` and in bypass mode it throws `ApproovException` with the message `fetchSecureString: Approov protection not enabled`, without calling the SDK.
 
 ## fetchCustomJWT
 Fetches a [custom JWT](https://approov.io/docs/latest/approov-usage-documentation/#custom-jwts) with the given marshaled JSON `payload`.
@@ -679,10 +660,10 @@ String fetchCustomJWT(String payload) throws ApproovException
 fun fetchCustomJWT(payload: String): String
 ```
 
-This throws `ApproovException` if there was a problem obtaining the custom JWT. This may require network access so may take some time to complete, and should not be called from the UI thread.
+This throws `ApproovException` if there was a problem obtaining the custom JWT, an `ApproovFetchStatusException` carrying the status in `getTokenFetchStatus()` when the fetch did not succeed (an `ApproovRejectionException`, with the ARC and rejection reasons, for `REJECTED`). This may require network access so may take some time to complete, and should not be called from the UI thread. Before `initialize` and in bypass mode it throws `ApproovException` with the message `fetchCustomJWT: Approov protection not enabled`, without calling the SDK.
 
 ## getLastARC
-Gets the [Attestation Response Code](https://approov.io/docs/latest/approov-usage-documentation/#attestation-response-code) from the most recent token, secure string or custom JWT fetch made by this layer, from the interceptor or a direct method. Returns an empty string if no fetch has been made since initialization, if the last fetch produced no ARC, or if ARC is not enabled for the account. No network activity is performed: the value is the one the app already received, so read it after a rejected request to correlate with the backend. Prefer logging the ARC your backend observed where possible.
+Gets the [Attestation Response Code](https://approov.io/docs/latest/approov-usage-documentation/#attestation-response-code) from the most recent token, secure string or custom JWT fetch made by this layer, from the interceptor (including secure string substitutions and stale protection refreshes) or a direct method (`fetchToken`, `fetchSecureString`, `fetchCustomJWT`, `precheck`). Returns an empty string if no fetch has been made, if the last fetch produced no ARC, if ARC is not enabled for the account, or if the last fetch failed without a result (an SDK exception in a direct method). It makes no SDK call and performs no fetch: the value is the one the app already received, so read it after a rejected request to correlate with the backend. Prefer logging the ARC your backend observed where possible.
 
 **Java:**
 ```java
@@ -694,19 +675,21 @@ String getLastARC()
 fun getLastARC(): String
 ```
 
-## setInstallAttrsInToken
-Sets an [install attributes token](https://approov.io/docs/latest/approov-usage-documentation/#application-installation-attributes) to be sent to the server and associated with this particular app installation for future Approov token fetches.
+## setInstallAttributes
+Sets an [install attributes token](https://approov.io/docs/latest/approov-usage-documentation/#application-installation-attributes) to be sent to the server and associated with this particular app installation for future Approov token fetches. The token must be signed, within its expiry time and bound to the correct device ID. It replaces `setInstallAttrsInToken`, removed in 3.8.0, and passes the token to the SDK's `Approov.setInstallAttrsInToken`.
 
 **Java:**
 ```java
-void setInstallAttrsInToken(String attrs) throws ApproovException
+void setInstallAttributes(String attrs) throws ApproovException
 ```
 
 **Kotlin:**
 ```kotlin
 @Throws(ApproovException::class)
-fun setInstallAttrsInToken(attrs: String)
+fun setInstallAttributes(attrs: String)
 ```
+
+This throws `ApproovException` if the SDK refuses the attributes. Before `initialize` and in bypass mode it throws `ApproovException` with the message `setInstallAttributes: Approov protection not enabled`, without calling the SDK.
 
 # Extension classes
 
@@ -719,8 +702,8 @@ Interface with default methods, installed with `setServiceMutator`. The intercep
 | Method | Default decision |
 | :--- | :--- |
 | `boolean handleInterceptorShouldProcessRequest(Request) throws IOException` | `false` if the URL matches an exclusion regex, else `true` |
-| `boolean handleInterceptorFetchTokenResult(TokenFetchResult, String url) throws IOException` | `true` for `SUCCESS` and `NO_APPROOV_SERVICE` (token header, empty if no token, and status header); `false` for `UNKNOWN_URL` and `UNPROTECTED_URL` (no Approov headers); throws `ApproovNetworkException` for `NO_NETWORK`, `POOR_NETWORK`, `UNTRUSTED_NETWORK` (or `true` with `setProceedOnNetworkFail(true)`) and `ApproovFetchStatusException` for every other status |
-| `boolean handleInterceptorHeaderSubstitutionResult(TokenFetchResult, String header) throws IOException` | `true` for `SUCCESS`, `false` for `UNKNOWN_KEY`; throws `ApproovRejectionException` for `REJECTED`, `ApproovNetworkException` for the network statuses, `ApproovFetchStatusException` otherwise |
+| `boolean handleInterceptorFetchTokenResult(TokenFetchResult, String url) throws IOException` | `true` for `SUCCESS` and `NO_APPROOV_SERVICE` (token header, empty if no token, and status header); `false` for `UNKNOWN_URL` and `UNPROTECTED_URL` (no Approov headers); throws `ApproovNetworkException` for `NO_NETWORK`, `POOR_NETWORK`, `UNTRUSTED_NETWORK` and `ApproovFetchStatusException` for every other status |
+| `boolean handleInterceptorHeaderSubstitutionResult(TokenFetchResult, String header) throws IOException` | mirrors the token decision: `true` for `SUCCESS`; `false` (placeholder left, request proceeds) for `UNKNOWN_KEY`, `REJECTED` and `NO_APPROOV_SERVICE`; throws `ApproovNetworkException` for the network statuses and `ApproovFetchStatusException` otherwise |
 | `boolean handleInterceptorQueryParamSubstitutionResult(TokenFetchResult, String queryKey) throws IOException` | as for headers |
 | `Request handleInterceptorProcessedRequest(Request, ApproovRequestMutations) throws IOException` | returns the request unchanged; message signing, when enabled, runs after it |
 | `boolean supportsProtectionRefresh()` | `false`; `true` for `DEFAULT`, `CLOSE_FAILURE` and `ALWAYS_PROCEED` |

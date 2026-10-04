@@ -27,7 +27,7 @@ The package supports Android 6.0 (API level 23) and later. Add these permissions
 
 ## INITIALIZING
 
-Initialize `ApproovService` when your app starts, usually in your `Application` class's `onCreate`, with your **Approov account ID**. Initialization throws if the value it receives is not a complete, unaltered account ID, so wrap the call: the app then logs the problem and starts in **bypass mode**, without Approov protection, instead of failing to start. The device ID log is optional. Approov knows an installation only by its device ID, so logging it next to your own user or session identifier gives you the correlation between the two.
+Initialize `ApproovService` when your app starts, in your `Application` class's `onCreate`, before the first request, with your **Approov account ID**; a request made before initialization goes out without Approov protection. Initialization throws if the value it receives is not a complete, unaltered account ID, so wrap the call: the app then logs the problem and starts in **bypass mode**, without Approov protection, instead of failing to start. The device ID log is optional. Approov knows an installation only by its device ID, so logging it next to your own user or session identifier gives you the correlation between the two.
 
 ```kotlin
 import android.util.Log
@@ -39,7 +39,7 @@ class YourApp : Application() {
         try {
             // your Approov account ID, from your onboarding email or "approov sdk -getConfigString"
             ApproovService.initialize(applicationContext, "<your-approov-account-id>")
-            if (ApproovService.isApproovEnabled())
+            if (ApproovService.isApproovServiceEnabled() && ApproovService.isApproovProtectionEnabled())
                 Log.i("YourApp", "Approov initialized; deviceID=${ApproovService.getDeviceID()}")
         } catch (e: Exception) {
             // the value passed was not a valid account ID; run without Approov rather than not at all
@@ -64,7 +64,7 @@ public class YourApp extends Application {
         try {
             // your Approov account ID, from your onboarding email or "approov sdk -getConfigString"
             ApproovService.initialize(getApplicationContext(), "<your-approov-account-id>");
-            if (ApproovService.isApproovEnabled())
+            if (ApproovService.isApproovServiceEnabled() && ApproovService.isApproovProtectionEnabled())
                 Log.i("YourApp", "Approov initialized; deviceID=" + ApproovService.getDeviceID());
         } catch (Exception e) {
             // the value passed was not a valid account ID; run without Approov rather than not at all
@@ -102,7 +102,7 @@ OkHttpClient client = ApproovService.getOkHttpClient();
 ```
 </details>
 
-If you already configure an OkHttp client, for example to set timeouts or add interceptors, pass its builder to `ApproovService` after initialization and before obtaining the client:
+If you already configure an OkHttp client, for example to set timeouts or add interceptors, pass its builder to `ApproovService` before obtaining the client (initialization keeps it, like every other setting):
 
 ```kotlin
 ApproovService.setOkHttpClientBuilder(
@@ -133,13 +133,16 @@ Run your app and make a request. The package never logs a token; it logs the [lo
 
 ## UPGRADING FROM 3.5.x
 
-By default 3.8.0 makes the same request decisions as 3.5.x and throws the same exceptions. What changes:
+By default 3.8.0 makes the same token decisions as 3.5.x and throws the same exceptions. What changes:
 
 * Every protected request also carries the `Approov-Status` header, and a request that proceeds without a token (`NO_APPROOV_SERVICE`) sends an empty `Approov-Token` header. Your backend must tolerate both.
 * Message signing is switched on with `ApproovService.enableMessageSigning()`, not by installing a mutator. If you installed `ApproovDefaultMessageSigning` with `setServiceMutator`, replace that call with `enableMessageSigning(factory)` (it no longer compiles).
 * The message signing helper classes moved: change imports of `io.approov.util.sig.*` to `io.approov.util.okhttp.sig.*` and of `io.approov.util.http.sfv.*` to `io.approov.util.okhttp.http.sfv.*`.
 * The package no longer depends on BouncyCastle; it bundles its own relocated copy of Google Tink, so it cannot clash with your app's Tink, Gson or BouncyCastle, or with another Approov package.
-* `setUseApproovStatusIfNoToken` is removed; `setProceedOnNetworkFail` works again but is deprecated in favour of `ApproovServiceMutator.ALWAYS_PROCEED`.
+* A secure string substitution now mirrors the token decision: a `REJECTED` or `NO_APPROOV_SERVICE` secure string leaves the placeholder and the request proceeds, where 3.5.x threw `ApproovRejectionException` or `ApproovFetchStatusException`.
+* `initialize` never resets configuration: settings made before or after it are kept, a repeat with the same account ID returns at once, and the SDK's own exception reaches the caller of a rejected one. `isInitialized()` and `isApproovEnabled()` are replaced by `isApproovServiceEnabled()` and `isApproovProtectionEnabled()`.
+* `setInstallAttrsInToken` is renamed `setInstallAttributes`. `setUseApproovStatusIfNoToken`, `setProceedOnNetworkFail` and `prefetch` are removed; install `ApproovServiceMutator.ALWAYS_PROCEED` to proceed on network failures, and the SDK manages prefetching.
+* The methods that call the SDK throw `ApproovException` (`<method>: Approov protection not enabled`) before initialization and in bypass mode, and `getOkHttpClient()` may be called before initialization.
 
 4.0.0 will make `ALWAYS_PROCEED` the default and message signing compulsory, so your backend becomes the only place that rejects requests without a valid token. Read the [changelog](CHANGELOG.md) before upgrading and test app and backend together.
 

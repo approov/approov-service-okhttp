@@ -19,16 +19,16 @@ Whatever the attestation outcome, the TLS connection to each domain you have add
 
 For a request to a protected API domain, the `ApproovService` interceptor fetches an Approov token and applies the decisions of the installed `ApproovServiceMutator` (see [Service mutators](#service-mutators)). Three standard decision sets are provided:
 
-* `ApproovServiceMutator.CLOSE_FAILURE` keeps the 3.5.x decisions exactly. A failed attestation fails the request in the app with the same `ApproovException` types as 3.5.x, so 3.8.0 changes nothing an existing app catches.
+* `ApproovServiceMutator.CLOSE_FAILURE` keeps the 3.5.x token decisions. A failed attestation fails the request in the app with the same `ApproovException` types as 3.5.x. One decision changed: a secure string substitution now mirrors the token decision, so a `REJECTED` or `NO_APPROOV_SERVICE` secure string leaves the placeholder and the request proceeds, where 3.5.x threw.
 * `ApproovServiceMutator.ALWAYS_PROCEED` never fails a request: whatever the outcome the request is sent, and the backend, which is the enforcement point, decides.
-* `ApproovServiceMutator.DEFAULT` is what `initialize` installs and `setServiceMutator(null)` reinstates. **In 3.8.0 it is `CLOSE_FAILURE`. In 4.0.0 it becomes `ALWAYS_PROCEED`**, a breaking change kept for the major release. Install one of the two explicitly if you want your decisions to stay the same across 4.0.0.
+* `ApproovServiceMutator.DEFAULT` is the out-of-the-box mutator, which `setServiceMutator(null)` reinstates; `initialize` keeps whichever mutator is installed. **In 3.8.0 it is `CLOSE_FAILURE`. In 4.0.0 it becomes `ALWAYS_PROCEED`**, a breaking change kept for the major release. Install one of the two explicitly if you want your decisions to stay the same across 4.0.0.
 
 | Approov fetch status | `CLOSE_FAILURE` (3.8.0 default) | `ALWAYS_PROCEED` |
 | :--- | :--- | :--- |
 | `SUCCESS` | proceeds with the token, `Approov-Status: success` | same |
 | `NO_APPROOV_SERVICE` | proceeds with an **empty** token header, `Approov-Status: no_approov_service` | same |
 | `UNKNOWN_URL`, `UNPROTECTED_URL` | proceeds untouched, no Approov headers | same |
-| `NO_NETWORK`, `POOR_NETWORK`, `UNTRUSTED_NETWORK` | fails with `ApproovNetworkException` (retryable); proceeds like `NO_APPROOV_SERVICE` if the deprecated `setProceedOnNetworkFail(true)` is set | proceeds with an empty token header and the status, lowercased |
+| `NO_NETWORK`, `POOR_NETWORK`, `UNTRUSTED_NETWORK` | fails with `ApproovNetworkException` (retryable); `setProceedOnNetworkFail` is removed in 3.8.0, install `ALWAYS_PROCEED` or your own mutator to proceed | proceeds with an empty token header and the status, lowercased |
 | any other status (`REJECTED`, `INTERNAL_ERROR`, ...) | fails with `ApproovFetchStatusException` | proceeds with an empty token header and the status, lowercased |
 
 Secure string substitutions (see [Secure strings](#secure-strings)):
@@ -37,7 +37,7 @@ Secure string substitutions (see [Secure strings](#secure-strings)):
 | :--- | :--- | :--- |
 | `SUCCESS` | the secret is substituted | same |
 | `UNKNOWN_KEY` (the value is not a secure string key) | the value is left unchanged and the request proceeds | same |
-| `REJECTED` | fails with `ApproovRejectionException` | the placeholder is left in place and the request proceeds |
+| `REJECTED`, `NO_APPROOV_SERVICE` | the placeholder is left in place and the request proceeds (3.5.x threw); the backend sees the placeholder | same |
 | `NO_NETWORK`, `POOR_NETWORK`, `UNTRUSTED_NETWORK` | fails with `ApproovNetworkException` | the placeholder is left in place and the request proceeds |
 | any other status | fails with `ApproovFetchStatusException` | the placeholder is left in place and the request proceeds |
 
@@ -74,7 +74,7 @@ ApproovService.enableMessageSigning()
 
 From then on every request carrying an Approov token header is signed with **both** the install signature (`ecdsa-p256-sha256`, per app installation key held in the device secure hardware, dictionary member `install`) and the account signature (`hmac-sha256`, shared account key delivered on attestation, member `account`). They are emitted as two members of the same `Signature` and `Signature-Input` headers over the same covered components, so that a device without secure hardware still yields a verifiable signature; the backend chooses which it verifies. If one signature cannot be produced the request proceeds with the other, or unsigned. A request sent with an empty token header (it proceeded without a token) is signed too, so the backend can check that the reported status came from a genuine installation. See [Installation Message Signing](https://approov.io/docs/latest/approov-usage-documentation/#installation-message-signing) and [Account Message Signing](https://approov.io/docs/latest/approov-usage-documentation/#account-message-signing). **From 4.0.0 signing is on and compulsory.** Make sure your backend accepts signed requests before you switch it on, and before you upgrade to 4.0.0.
 
-Signing runs last, after the mutator's decisions, the secure string substitutions and the mutator's `handleInterceptorProcessedRequest` callback, so the signature covers what is sent. It works the same under `DEFAULT`, `CLOSE_FAILURE`, `ALWAYS_PROCEED` and any custom mutator: installing a mutator never switches signing on or off. A redirect within a protected domain, an authenticator retry and a stale protection refresh are signed afresh. `initialize` switches signing off again and drops any host factories, so call `enableMessageSigning` after it.
+Signing runs last, after the mutator's decisions, the secure string substitutions and the mutator's `handleInterceptorProcessedRequest` callback, so the signature covers what is sent. It works the same under `DEFAULT`, `CLOSE_FAILURE`, `ALWAYS_PROCEED` and any custom mutator: installing a mutator never switches signing on or off. A redirect within a protected domain, an authenticator retry and a stale protection refresh are signed afresh. `initialize` leaves the switch and any host factories as they are, so `enableMessageSigning` may be called before or after it.
 
 The default signature covers the request method and target URI, the `Approov-Token` header, the `Approov-TraceID` and `Approov-Status` headers when present, the `Authorization`, `Content-Length` and `Content-Type` headers when present, a SHA-256 `Content-Digest` of the body when one can be computed, a `created` timestamp and a 15 second `expires`.
 
@@ -128,7 +128,7 @@ The string passed to `initialize` (the CLI and the SDK call it the SDK config st
 
 ## Bypass initialization
 
-Initializing with an empty string instead of the Approov account ID keeps the package initialized but returns plain `OkHttpClient` instances with no Approov processing (no token, signing, secure strings or Approov connection validation). This is a bootstrap or fallback state, for example while the account ID is fetched remotely, or as the guard in the README example against an account ID that does not reach the app intact. A later `initialize` with the account ID enables Approov at runtime: call it, reapply any custom settings, then obtain a new client with `getOkHttpClient()`; clients obtained in bypass mode stay unprotected. Reinitializing from one account ID to a different one is rejected by the SDK. See [initialize in the reference](REFERENCE.md#initialize).
+Initializing with an empty string instead of the Approov account ID enables the package in bypass mode (`isApproovServiceEnabled()` is `true`, `isApproovProtectionEnabled()` is `false`): requests through the `OkHttpClient` go out with no Approov processing (no token, signing, secure strings or Approov connection validation, only OS trust), and the methods that call the SDK throw `ApproovException` without calling it. The same applies to a request made before any `initialize`, which is neither failed nor held. This is a bootstrap or fallback state, for example while the account ID is fetched remotely, or as the guard in the README example against an account ID that does not reach the app intact. A later `initialize` with the account ID enables Approov at runtime when the SDK accepts it. Configuration set before it is kept, and clients already obtained from `getOkHttpClient()` protect their requests from then on. An empty string after protection is enabled is ignored. Reinitializing from one account ID to a different one is rejected by the SDK, whose exception reaches the caller with the package state unchanged. See [initialize in the reference](REFERENCE.md#initialize).
 
 ```java
 ApproovService.initialize(context, "");
