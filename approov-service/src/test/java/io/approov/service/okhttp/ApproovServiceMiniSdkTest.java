@@ -51,12 +51,15 @@ public class ApproovServiceMiniSdkTest {
     public void setUp() {
         context = ApplicationProvider.getApplicationContext();
         AttesterProxyController.reset();
+        // initialize never resets configuration in 3.8.0 (SPECIFICATION 5.7(b)), so
+        // each test starts from a clean layer state
+        ApproovService.reset();
         ApproovService.initialize(context, validInitialConfig, "reinit-okhttp-tests");
     }
  
     @After
     public void tearDown() {
-        ApproovService.setServiceMutator(ApproovServiceMutator.DEFAULT);
+        ApproovService.reset();
         AttesterProxyController.reset();
     }
 
@@ -1273,12 +1276,12 @@ public class ApproovServiceMiniSdkTest {
     }
 
     /**
-     * SPECIFICATION 3.1: a host factory replaces the default factory for its host
-     * (matched without regard to case), removing it reinstates the default, and
-     * initialize() switches signing off and drops the host factories.
+     * SPECIFICATION 3.1, 5.7(b): a host factory replaces the default factory for its
+     * host (matched without regard to case), removing it reinstates the default,
+     * and initialize() keeps the signing switch and the host factories.
      */
     @Test
-    public void testHostFactoryAppliesAndInitializeResetsSigning() throws Exception {
+    public void testHostFactoryAppliesAndInitializeKeepsSigning() throws Exception {
         reinitializeServiceWithTargetHost("");
         ApproovDefaultMessageSigning.SignatureParametersFactory accountOnly =
             ApproovDefaultMessageSigning.generateDefaultSignatureParametersFactory().setUseAccountMessageSigning();
@@ -1293,14 +1296,18 @@ public class ApproovServiceMiniSdkTest {
         ApproovService.putMessageSigningHostFactory(getTargetHost(), null);
         assertBothSignatures(send(ApproovService.getOkHttpClient(), request));
 
-        // initialize switches signing off and drops the host factories
+        // initialize keeps the signing switch and the host factories
         ApproovService.putMessageSigningHostFactory(getTargetHost(), accountOnly);
         ApproovService.initialize(context, validInitialConfig, "reinit");
-        assertFalse(ApproovService.isMessageSigningEnabled());
+        assertTrue(ApproovService.isMessageSigningEnabled());
         reply = send(ApproovService.getOkHttpClient(), request);
         assertNotNull(getHeader(reply, "Approov-Token"));
-        assertNull(getHeader(reply, "Signature"));
+        assertTrue(getHeader(reply, "Signature"), getHeader(reply, "Signature").startsWith("account=:"));
         // null selects the default factory
+        ApproovService.putMessageSigningHostFactory(getTargetHost(), null);
+        ApproovService.disableMessageSigning();
+        reply = send(ApproovService.getOkHttpClient(), request);
+        assertNull(getHeader(reply, "Signature"));
         ApproovService.enableMessageSigning(null);
         assertBothSignatures(send(ApproovService.getOkHttpClient(), request));
     }

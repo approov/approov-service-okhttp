@@ -87,11 +87,12 @@ public class ApproovService {
     // the Approov token lifetime and the default message signature expiry (15s)
     private static final long DEFAULT_STALE_PROTECTION_REFRESH_MS = 3000;
 
-    // true if the Approov SDK initialized okay
-    private static boolean isInitialized = false;
+    // true once any initialize has succeeded, bypass mode (an empty account ID)
+    // included: the layer is processing requests
+    private static boolean approovServiceEnabled = false;
 
-    // the Approov account ID (SDK config string) used for initialization, or empty in bypass mode
-    private static String configString;
+    // true once the Approov SDK is initialized and Approov protection is active
+    private static boolean approovProtectionEnabled = false;
 
     // the Attestation Response Code (ARC) from the most recent token fetch result
     // seen by this layer, or empty if none or if ARC is not enabled for the account
@@ -187,76 +188,114 @@ public class ApproovService {
     }
 
     /**
-     * Initializes the ApproovService with an account configuration and comment.
+     * Initializes the ApproovService with an Approov account ID and comment. Every
+     * caller in the process (for example native code and a React Native module)
+     * may call this; all of them drive the same service state.
+     *
+     * A non-empty account ID is always forwarded to the Approov SDK with the
+     * comment unchanged, and the SDK decides: the first initialization succeeds, a
+     * repeat with the same account ID and comment is reported by the SDK as
+     * already initialized and returns at once, and anything else the SDK rejects
+     * (a different account ID or comment, or an account ID that did not reach the
+     * app intact) is thrown unchanged to the caller with the service state
+     * untouched. An empty account ID enables the service in bypass mode, without
+     * Approov protection; it is ignored once protection is enabled. Initialization
+     * never resets any configuration: headers, binding, substitutions, exclusions,
+     * the mutator, message signing, the OkHttp builders and the other settings
+     * keep the values set before or after it. It changes only what
+     * isApproovServiceEnabled() and isApproovProtectionEnabled() report.
      *
      * @param context the Application context
      * @param config  your Approov account ID (the SDK config string from the
      *                onboarding email or "approov sdk -getConfigString"), or empty
      *                for bypass mode with no SDK initialization
-     * @param comment the comment string, or null for no comment
+     * @param comment the comment passed to the SDK unchanged, or null for no
+     *                comment (null and "" are different comments to the SDK)
+     * @throws IllegalArgumentException if the context or account ID is null, or
+     *                                  the SDK rejects the account ID
+     * @throws IllegalStateException    if the SDK is already initialized with a
+     *                                  different account ID or comment
      */
-    public static synchronized void initialize(Context context, String config, String comment) {
-        if (config == null)
-            throw new IllegalArgumentException("config must not be null; pass \"\" for bypass mode");
-
-        // If we are already initialized with a valid config, ignore any subsequent
-        // empty config initialization
-        if (isApproovProtectionEnabled() && config.isEmpty()) {
-            Log.d(TAG, "ApproovService already initialized with a valid config; ignoring empty configuration");
-            return;
-        }
-
-        // Initialize the platform SDK if not in bypass mode (empty config).
-        // State is only modified after the SDK confirms success, preserving the current
-        // operating mode (protected or bypass) if the call fails.
-        if (!config.isEmpty()) {
-            try {
-                boolean sdkInitialized = ApproovService.sdk().initialize(context.getApplicationContext(), config, "auto", comment);
-                if (!sdkInitialized) {
-                    Log.d(TAG, "Approov SDK already initialized");
-                }
-            } catch (IllegalArgumentException e) {
-                Log.e(TAG, "Approov initialization failed: " + e.getMessage());
-                throw e; // service-layer state NOT modified — prior operating mode preserved
-            } catch (IllegalStateException e) {
-                Log.e(TAG, "Approov initialization failed: " + e.getMessage());
-                throw e; // service-layer state NOT modified — prior operating mode preserved
-            }
-        }
-        // SDK succeeded (or bypass) — now reset and commit new service-layer state.
-        isInitialized = false;
-        okHttpBuilders = new HashMap<>();
-        okHttpBuilders.put(DEFAULT_BUILDER_NAME, new OkHttpClient.Builder());
-        okHttpClients = new HashMap<>();
-        approovTokenHeader = APPROOV_TOKEN_HEADER;
-        approovTraceIDHeader = APPROOV_TRACE_ID_HEADER;
-        approovStatusHeader = APPROOV_STATUS_HEADER;
-        approovTokenPrefix = APPROOV_TOKEN_PREFIX;
-        bindingHeader = null;
-        staleProtectionRefreshMS = DEFAULT_STALE_PROTECTION_REFRESH_MS;
-        serviceMutator = ApproovServiceMutator.DEFAULT;
-        messageSigning = new ApproovDefaultMessageSigning();
-        messageSigningEnabled = false;
-        substitutionHeaders = new HashMap<>();
-        substitutionQueryParams = new HashMap<>();
-        exclusionURLRegexs = new HashMap<>();
-        isInitialized = true;
-        configString = config;
-        lastARC = "";
-        if (isApproovProtectionEnabled()) {
-            // pinners built while protection was not enabled hold no pins
+    public static void initialize(Context context, String config, String comment) {
+        // the pins are rebuilt after the ApproovService monitor is released, keeping
+        // the lock order ApproovService then pinning interceptor. No prefetch is
+        // started: the SDK manages prefetching (SPECIFICATION 5.2)
+        if (initializeLocked(context, config, comment))
             rebuildPins();
-            ApproovService.sdk().setUserProperty("approov-service-okhttp/" + BuildConfig.APPROOV_SERVICE_VERSION);
-        }
     }
 
     /**
-     * Initializes the ApproovService with an account configuration
+     * Performs the state changes of initialize() under the ApproovService monitor.
+     * Any exception from the SDK propagates before any state is changed.
+     *
+     * @return true if Approov protection was newly enabled, or the SDK performed a
+     *         new initialization, so the pins must be rebuilt
+     */
+    private static synchronized boolean initializeLocked(Context context, String config, String comment) {
+        if (context == null)
+            throw new IllegalArgumentException("ApproovService.initialize requires a non-null context");
+        if (config == null)
+            throw new IllegalArgumentException("config must not be null; pass \"\" for bypass mode");
+
+        if (config.isEmpty()) {
+            if (approovProtectionEnabled) {
+                // an empty account ID never downgrades an active Approov protection and
+                // is not forwarded to the SDK
+                Log.d(TAG, "Approov protection already enabled; ignoring initialization with an empty account ID");
+            } else {
+                Log.i(TAG, "ApproovService enabled in bypass mode (empty account ID): Approov protection is not active");
+                approovServiceEnabled = true;
+            }
+            return false;
+        }
+
+        // forward every non-empty account ID, with the comment exactly as given; the
+        // SDK is the only judge of a repeat call and any exception it throws reaches
+        // the caller with the service state untouched
+        boolean newlyInitialized;
+        try {
+            newlyInitialized = sdk().initialize(context.getApplicationContext(), config, "auto", comment);
+        } catch (RuntimeException e) {
+            Log.e(TAG, "Approov SDK initialization failed: " + e.getMessage());
+            throw e;
+        }
+        boolean protectionWasEnabled = approovProtectionEnabled;
+        approovServiceEnabled = true;
+        approovProtectionEnabled = true;
+        if (newlyInitialized)
+            Log.i(TAG, "Approov SDK initialized: Approov protection enabled");
+        else
+            Log.d(TAG, "Approov SDK already initialized with the same account ID and comment");
+        if (!protectionWasEnabled) {
+            try {
+                sdk().setUserProperty("approov-service-okhttp/" + BuildConfig.APPROOV_SERVICE_VERSION);
+            } catch (RuntimeException e) {
+                // the property is diagnostic only and must not fail a successful initialization
+                Log.e(TAG, "Approov user property not set: " + e.getMessage());
+            }
+        }
+
+        // A repeat that the SDK reports as already initialized (false) while protection
+        // is already enabled changed nothing, so the pins are not rebuilt. They are
+        // rebuilt when this layer first enables protection (a pinner built before holds
+        // no pins, including when another caller initialized the SDK first) and
+        // whenever the SDK reports a new initialization (true), since a
+        // re-initialization may carry new options.
+        return newlyInitialized || !protectionWasEnabled;
+    }
+
+    /**
+     * Initializes the ApproovService with an Approov account ID and no comment (a
+     * null comment is passed to the SDK). See initialize(Context, String, String).
      *
      * @param context the Application context
      * @param config  your Approov account ID (the SDK config string from the
      *                onboarding email or "approov sdk -getConfigString"), or empty
      *                for bypass mode with no SDK initialization
+     * @throws IllegalArgumentException if the context or account ID is null, or
+     *                                  the SDK rejects the account ID
+     * @throws IllegalStateException    if the SDK is already initialized with a
+     *                                  different account ID or comment
      */
     public static void initialize(Context context, String config) {
         // default uses null comment
@@ -272,7 +311,7 @@ public class ApproovService {
      * @return true if the service has been enabled by a successful initialize
      */
     public static synchronized boolean isApproovServiceEnabled() {
-        return isInitialized;
+        return approovServiceEnabled;
     }
 
     /**
@@ -285,7 +324,7 @@ public class ApproovService {
      * @return true if the Approov SDK is initialized and requests are protected
      */
     public static synchronized boolean isApproovProtectionEnabled() {
-        return isInitialized && (configString != null) && !configString.isEmpty();
+        return approovProtectionEnabled;
     }
 
     /**
@@ -294,8 +333,8 @@ public class ApproovService {
      */
     @VisibleForTesting
     static synchronized void reset() {
-        isInitialized = false;
-        configString = null;
+        approovServiceEnabled = false;
+        approovProtectionEnabled = false;
         lastARC = "";
         pinningInterceptor = null;
         okHttpBuilders = new HashMap<>();
@@ -337,8 +376,7 @@ public class ApproovService {
      * protection is reapplied. Signing is independent of the service mutator: it
      * works the same under ApproovServiceMutator.DEFAULT, CLOSE_FAILURE,
      * ALWAYS_PROCEED and any custom mutator, and setServiceMutator never switches
-     * it on or off. initialize() switches it off again and drops any host
-     * factories.
+     * it on or off. initialize() leaves it, and any host factories, as they are.
      *
      * @param defaultFactory the signature parameters factory for every host
      *                       without a factory of its own (see
@@ -376,7 +414,7 @@ public class ApproovService {
     /**
      * Signs requests to one host with the given signature parameters factory
      * instead of the default factory passed to enableMessageSigning. It applies
-     * while message signing is enabled and is kept until initialize().
+     * while message signing is enabled; initialize() keeps it.
      *
      * @param hostName the host name, matched without regard to case and without
      *                 any port
@@ -752,24 +790,22 @@ public class ApproovService {
      *                                  token binding
      */
     public static synchronized void addSubstitutionHeader(String header, String requiredPrefix) {
-        if (isInitialized) {
-            Log.d(TAG, "addSubstitutionHeader " + header + ", " + requiredPrefix);
-            if ((header != null) && (bindingHeader != null) && header.equalsIgnoreCase(bindingHeader)) {
-                throw new IllegalArgumentException("Header " + header +
-                        " cannot be used for both token binding and secure string substitution");
-            }
-
-            // HTTP header names are case-insensitive. Remove any logically equivalent
-            // entry first so that the map contains only one entry and preserves the
-            // casing from the latest call.
-            String existingKey = findSubstitutionHeaderKey(header);
-            if (existingKey != null)
-                substitutionHeaders.remove(existingKey);
-            if (requiredPrefix == null)
-                substitutionHeaders.put(header, "");
-            else
-                substitutionHeaders.put(header, requiredPrefix);
+        Log.d(TAG, "addSubstitutionHeader " + header + ", " + requiredPrefix);
+        if ((header != null) && (bindingHeader != null) && header.equalsIgnoreCase(bindingHeader)) {
+            throw new IllegalArgumentException("Header " + header +
+                    " cannot be used for both token binding and secure string substitution");
         }
+
+        // HTTP header names are case-insensitive. Remove any logically equivalent
+        // entry first so that the map contains only one entry and preserves the
+        // casing from the latest call.
+        String existingKey = findSubstitutionHeaderKey(header);
+        if (existingKey != null)
+            substitutionHeaders.remove(existingKey);
+        if (requiredPrefix == null)
+            substitutionHeaders.put(header, "");
+        else
+            substitutionHeaders.put(header, requiredPrefix);
     }
 
     /**
@@ -778,12 +814,10 @@ public class ApproovService {
      * @param header is the header to be removed for substitution
      */
     public static synchronized void removeSubstitutionHeader(String header) {
-        if (isInitialized) {
-            Log.d(TAG, "removeSubstitutionHeader " + header);
-            String existingKey = findSubstitutionHeaderKey(header);
-            if (existingKey != null)
-                substitutionHeaders.remove(existingKey);
-        }
+        Log.d(TAG, "removeSubstitutionHeader " + header);
+        String existingKey = findSubstitutionHeaderKey(header);
+        if (existingKey != null)
+            substitutionHeaders.remove(existingKey);
     }
 
     /**
@@ -810,9 +844,6 @@ public class ApproovService {
      *         required prefix
      */
     public static synchronized Map<String, String> getSubstitutionHeaders() {
-        if (!isInitialized) {
-            throw new IllegalStateException("ApproovService is not initialized");
-        }
         return new HashMap<>(substitutionHeaders);
     }
 
@@ -832,14 +863,12 @@ public class ApproovService {
      * @param key is the query parameter key name to be added for substitution
      */
     public static synchronized void addSubstitutionQueryParam(String key) {
-        if (isInitialized) {
-            Log.d(TAG, "addSubstitutionQueryParam " + key);
-            try {
-                Pattern pattern = Pattern.compile("[\\?&]" + key + "=([^&;]+)");
-                substitutionQueryParams.put(key, pattern);
-            } catch (PatternSyntaxException e) {
-                Log.e(TAG, "addSubstitutionQueryParam " + key + " error: " + e.getMessage());
-            }
+        Log.d(TAG, "addSubstitutionQueryParam " + key);
+        try {
+            Pattern pattern = Pattern.compile("[\\?&]" + key + "=([^&;]+)");
+            substitutionQueryParams.put(key, pattern);
+        } catch (PatternSyntaxException e) {
+            Log.e(TAG, "addSubstitutionQueryParam " + key + " error: " + e.getMessage());
         }
     }
 
@@ -850,10 +879,8 @@ public class ApproovService {
      * @param key is the query parameter key name to be removed for substitution
      */
     public static synchronized void removeSubstitutionQueryParam(String key) {
-        if (isInitialized) {
-            Log.d(TAG, "removeSubstitutionQueryParam " + key);
-            substitutionQueryParams.remove(key);
-        }
+        Log.d(TAG, "removeSubstitutionQueryParam " + key);
+        substitutionQueryParams.remove(key);
     }
 
     /**
@@ -863,9 +890,6 @@ public class ApproovService {
      *         Pattern
      */
     public static synchronized Map<String, Pattern> getSubstitutionQueryParams() {
-        if (!isInitialized) {
-            throw new IllegalStateException("ApproovService is not initialized");
-        }
         return new HashMap<>(substitutionQueryParams);
     }
 
@@ -895,14 +919,12 @@ public class ApproovService {
      *                 to exclude them
      */
     public static synchronized void addExclusionURLRegex(String urlRegex) {
-        if (isInitialized) {
-            try {
-                Pattern pattern = Pattern.compile(urlRegex);
-                exclusionURLRegexs.put(urlRegex, pattern);
-                Log.d(TAG, "addExclusionURLRegex " + urlRegex);
-            } catch (PatternSyntaxException e) {
-                Log.e(TAG, "addExclusionURLRegex " + urlRegex + " error: " + e.getMessage());
-            }
+        try {
+            Pattern pattern = Pattern.compile(urlRegex);
+            exclusionURLRegexs.put(urlRegex, pattern);
+            Log.d(TAG, "addExclusionURLRegex " + urlRegex);
+        } catch (PatternSyntaxException e) {
+            Log.e(TAG, "addExclusionURLRegex " + urlRegex + " error: " + e.getMessage());
         }
     }
 
@@ -914,10 +936,8 @@ public class ApproovService {
      *                 to exclude them
      */
     public static synchronized void removeExclusionURLRegex(String urlRegex) {
-        if (isInitialized) {
-            Log.d(TAG, "removeExclusionURLRegex " + urlRegex);
-            exclusionURLRegexs.remove(urlRegex);
-        }
+        Log.d(TAG, "removeExclusionURLRegex " + urlRegex);
+        exclusionURLRegexs.remove(urlRegex);
     }
 
     /**
@@ -927,9 +947,6 @@ public class ApproovService {
      *         Patterns
      */
     public static synchronized Map<String, Pattern> getExclusionURLRegexs() {
-        if (!isInitialized) {
-            throw new IllegalStateException("ApproovService is not initialized");
-        }
         return new HashMap<>(exclusionURLRegexs);
     }
 
@@ -1336,10 +1353,14 @@ public class ApproovService {
     static void rebuildPins() {
         ApproovPinningInterceptor interceptor;
         synchronized (ApproovService.class) {
+            if (pinningInterceptor == null) {
+                // a new interceptor builds the current pins as it is constructed
+                getPinningInterceptor();
+                return;
+            }
             interceptor = pinningInterceptor;
         }
-        if (interceptor != null)
-            interceptor.buildPins();
+        interceptor.buildPins();
     }
 
     /**
@@ -1361,9 +1382,7 @@ public class ApproovService {
      */
     @VisibleForTesting
     static synchronized CertificatePinner getCertificatePinner() {
-        if (pinningInterceptor != null)
-            return pinningInterceptor.getCertificatePinner();
-        return new CertificatePinner.Builder().build();
+        return getPinningInterceptor().getCertificatePinner();
     }
 
     /**

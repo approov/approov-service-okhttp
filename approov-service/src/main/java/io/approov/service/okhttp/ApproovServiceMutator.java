@@ -52,7 +52,7 @@ import java.util.regex.Matcher;
  *   Approov token header, a failed secure string substitution leaves its
  *   placeholder in place, and the backend, which is the enforcement point,
  *   decides.
- * - {@link #DEFAULT}: the mutator installed by ApproovService.initialize() and
+ * - {@link #DEFAULT}: the mutator in force until the app installs its own, and
  *   reinstated by ApproovService.setServiceMutator(null). It is CLOSE_FAILURE in
  *   3.8.0 and becomes ALWAYS_PROCEED in 4.0.0, a breaking change kept for the
  *   major release; an app that wants a decision set to stay fixed across 4.0.0
@@ -148,8 +148,8 @@ public interface ApproovServiceMutator {
     };
 
     /**
-     * The out-of-the-box decisions, installed by ApproovService.initialize() and
-     * reinstated by ApproovService.setServiceMutator(null): {@link #CLOSE_FAILURE}
+     * The out-of-the-box decisions, in force until the app installs its own mutator
+     * and reinstated by ApproovService.setServiceMutator(null): {@link #CLOSE_FAILURE}
      * in 3.8.0, {@link #ALWAYS_PROCEED} from 4.0.0. Name one of those explicitly
      * for decisions that stay fixed across 4.0.0.
      */

@@ -49,26 +49,16 @@ public class GatingTest {
 
     @Test
     public void testGetMethodsBeforeInitialization() {
-        try {
-            ApproovService.getSubstitutionHeaders();
-            fail("Expected IllegalStateException for getSubstitutionHeaders");
-        } catch (IllegalStateException e) {
-            assertEquals("ApproovService is not initialized", e.getMessage());
-        }
-
-        try {
-            ApproovService.getSubstitutionQueryParams();
-            fail("Expected IllegalStateException for getSubstitutionQueryParams");
-        } catch (IllegalStateException e) {
-            assertEquals("ApproovService is not initialized", e.getMessage());
-        }
-
-        try {
-            ApproovService.getExclusionURLRegexs();
-            fail("Expected IllegalStateException for getExclusionURLRegexs");
-        } catch (IllegalStateException e) {
-            assertEquals("ApproovService is not initialized", e.getMessage());
-        }
+        // SPECIFICATION 5.7(b): configuration may be read and set before initialize
+        assertTrue(ApproovService.getSubstitutionHeaders().isEmpty());
+        assertTrue(ApproovService.getSubstitutionQueryParams().isEmpty());
+        assertTrue(ApproovService.getExclusionURLRegexs().isEmpty());
+        ApproovService.addSubstitutionHeader("Api-Key", null);
+        ApproovService.addSubstitutionQueryParam("api_key");
+        ApproovService.addExclusionURLRegex("^https://excluded\\.example\\.com/");
+        assertEquals(1, ApproovService.getSubstitutionHeaders().size());
+        assertEquals(1, ApproovService.getSubstitutionQueryParams().size());
+        assertEquals(1, ApproovService.getExclusionURLRegexs().size());
     }
 }
 

@@ -96,7 +96,6 @@ public class StrictBypassPinning380Test {
     public void connectsOnOsTrustInBypassModeWithoutReadingPins() throws Exception {
         ApproovService.initialize(fixture.context, "");
         assertFalse(ApproovService.isApproovProtectionEnabled());
-        ApproovService.setOkHttpClientBuilder(fixture.trustingBuilder());
 
         sendAndExpectDelivered(ApproovService.getOkHttpClient());
 
