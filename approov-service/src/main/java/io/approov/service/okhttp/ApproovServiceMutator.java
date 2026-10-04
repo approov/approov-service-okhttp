@@ -71,7 +71,11 @@ import java.util.regex.Matcher;
  * javax.net.ssl.SSLException), not an Approov specific type: the abort is the
  * app's own policy and must surface to the app's error handling and support as
  * an ordinary network failure. The interceptor hooks therefore declare
- * IOException. The aborts of CLOSE_FAILURE keep the 3.5.x Approov exception types
+ * IOException, and an IOException a hook throws reaches the app unchanged.
+ * Anything else a hook throws (a programming error such as a null pointer, or a
+ * deliberate RuntimeException) is treated as a failed request, never as a crash:
+ * the layer converts it to an ApproovException with the original as its cause and
+ * logs it at error level naming the hook (SPECIFICATION 1.6.1). The aborts of CLOSE_FAILURE keep the 3.5.x Approov exception types
  * (subclasses of IOException) so that 3.8.0 does not change what an existing app
  * catches. The direct fetch APIs (fetchToken, fetchSecureString, fetchCustomJWT,
  * precheck) return a value to the caller and continue to report failures with

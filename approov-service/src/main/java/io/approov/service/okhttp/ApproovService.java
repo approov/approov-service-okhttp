@@ -194,6 +194,65 @@ public class ApproovService {
     }
 
     /**
+     * A call into the installed service mutator.
+     */
+    interface MutatorHook<T> {
+        T call() throws IOException;
+    }
+
+    /**
+     * Calls a hook of the installed service mutator on the request path. An
+     * IOException the hook throws is the app's own abort and passes through
+     * unchanged (SPECIFICATION 1.6). Any RuntimeException, a programming error such
+     * as a null pointer or a deliberate runtime exception, is converted to an
+     * ApproovException with the original as its cause and logged at error level
+     * naming the hook, so that the request fails through OkHttp's normal error
+     * channel instead of being rethrown on the dispatcher thread for an enqueued
+     * call, which would terminate the app (SPECIFICATION 1.6.1).
+     *
+     * @param hook the name of the hook, for the log and the exception message
+     * @param call the call into the mutator
+     * @return what the hook returned
+     * @throws IOException if the hook throws one, or throws a RuntimeException
+     */
+    static <T> T callMutator(String hook, MutatorHook<T> call) throws IOException {
+        try {
+            return call.call();
+        } catch (RuntimeException e) {
+            throw mutatorFailure(hook, e);
+        }
+    }
+
+    /**
+     * Converts a RuntimeException thrown by a hook of the installed service mutator
+     * into an ApproovException with the original as its cause, logged at error level
+     * naming the hook (SPECIFICATION 1.6.1).
+     *
+     * @param hook the name of the hook
+     * @param e    the exception the hook threw
+     * @return the exception to throw
+     */
+    static ApproovException mutatorFailure(String hook, RuntimeException e) {
+        Log.e(TAG, "ApproovServiceMutator." + hook + " threw " + e);
+        return new ApproovException("ApproovServiceMutator." + hook + " failed: " + e, e);
+    }
+
+    /**
+     * Describes a service mutator for a log message without letting an exception
+     * from its toString escape.
+     *
+     * @param mutator the mutator
+     * @return its description
+     */
+    static String describe(ApproovServiceMutator mutator) {
+        try {
+            return String.valueOf(mutator);
+        } catch (RuntimeException e) {
+            return mutator.getClass().getName();
+        }
+    }
+
+    /**
      * Installs the SDK boundary, for tests only.
      *
      * @param facade the SDK facade to use
@@ -810,7 +869,7 @@ public class ApproovService {
         if (mutator == null) {
             mutator = ApproovServiceMutator.DEFAULT;
         }
-        Log.d(TAG, "Applied ApproovServiceMutator:" + mutator.toString());
+        Log.d(TAG, "Applied ApproovServiceMutator:" + describe(mutator));
         serviceMutator = mutator;
     }
 
@@ -1041,7 +1100,11 @@ public class ApproovService {
         }
 
         // process the returned Approov status using decision maker
-        getServiceMutator().handlePrecheckResult(approovResults);
+        try {
+            getServiceMutator().handlePrecheckResult(approovResults);
+        } catch (RuntimeException e) {
+            throw mutatorFailure("handlePrecheckResult", e);
+        }
     }
 
     /**
@@ -1129,7 +1192,11 @@ public class ApproovService {
         }
 
         // process the status using decision maker
-        getServiceMutator().handleFetchTokenResult(approovResults);
+        try {
+            getServiceMutator().handleFetchTokenResult(approovResults);
+        } catch (RuntimeException e) {
+            throw mutatorFailure("handleFetchTokenResult", e);
+        }
         return approovResults.getToken();
     }
 
@@ -1284,7 +1351,11 @@ public class ApproovService {
         }
 
         // process the returned Approov status using decision maker
-        getServiceMutator().handleFetchSecureStringResult(approovResults, type, key);
+        try {
+            getServiceMutator().handleFetchSecureStringResult(approovResults, type, key);
+        } catch (RuntimeException e) {
+            throw mutatorFailure("handleFetchSecureStringResult", e);
+        }
         return approovResults.getSecureString();
     }
 
@@ -1322,7 +1393,11 @@ public class ApproovService {
         }
 
         // process the returned Approov status using decision maker
-        getServiceMutator().handleFetchCustomJWTResult(approovResults);
+        try {
+            getServiceMutator().handleFetchCustomJWTResult(approovResults);
+        } catch (RuntimeException e) {
+            throw mutatorFailure("handleFetchCustomJWTResult", e);
+        }
         return approovResults.getToken();
     }
 
@@ -1602,7 +1677,9 @@ class ApproovTokenInterceptor implements Interceptor {
     static Request applyProtection(Request request, ApproovServiceMutator mutator,
             ApproovDefaultMessageSigning signing, boolean invokeProcessed) throws IOException {
         // first check if we are to proceed with any Approov processing
-        if (!mutator.handleInterceptorShouldProcessRequest(request)) {
+        Request unprotected = request;
+        if (!ApproovService.callMutator("handleInterceptorShouldProcessRequest",
+                () -> mutator.handleInterceptorShouldProcessRequest(unprotected))) {
             // we are not to proceed with any Approov processing so just continue
             return request;
         }
@@ -1633,7 +1710,9 @@ class ApproovTokenInterceptor implements Interceptor {
         String setTraceIDHeaderValue = null;
         String setStatusHeaderKey = null;
         String setStatusHeaderValue = null;
-        if (mutator.handleInterceptorFetchTokenResult(approovResults, url.toString())) {
+        Approov.TokenFetchResult tokenResults = approovResults;
+        if (ApproovService.callMutator("handleInterceptorFetchTokenResult",
+                () -> mutator.handleInterceptorFetchTokenResult(tokenResults, url.toString()))) {
             // the request is Approov processed so add the token header (empty if no
             // token was obtained, as evidence that Approov processing occurred) and
             // report the fetch status on the status header; the token header name and
@@ -1680,7 +1759,9 @@ class ApproovTokenInterceptor implements Interceptor {
                 Log.d(TAG, "Substituting header: " + header + ", " + approovResults.getStatus().toString());
                 // a failed substitution leaves the placeholder value in the header and the
                 // request proceeds: the backend sees the placeholder and decides
-                if (mutator.handleInterceptorHeaderSubstitutionResult(approovResults, header)) {
+                Approov.TokenFetchResult headerResults = approovResults;
+                if (ApproovService.callMutator("handleInterceptorHeaderSubstitutionResult",
+                        () -> mutator.handleInterceptorHeaderSubstitutionResult(headerResults, header))) {
                     String secureString = approovResults.getSecureString();
                     if (secureString == null) {
                         // a decision to substitute with no value (a custom mutator accepting
@@ -1714,7 +1795,9 @@ class ApproovTokenInterceptor implements Interceptor {
                 approovResults = fetchForRequest("Query parameter substitution for " + queryKey, () ->
                         ApproovService.sdk().fetchSecureStringAndWait(queryValue, null));
                 Log.d(TAG, "Substituting query parameter: " + queryKey + ", " + approovResults.getStatus().toString());
-                if (mutator.handleInterceptorQueryParamSubstitutionResult(approovResults, queryKey)) {
+                Approov.TokenFetchResult queryResults = approovResults;
+                if (ApproovService.callMutator("handleInterceptorQueryParamSubstitutionResult",
+                        () -> mutator.handleInterceptorQueryParamSubstitutionResult(queryResults, queryKey))) {
                     String secureString = approovResults.getSecureString();
                     if (secureString == null) {
                         // a decision to substitute with no value leaves the placeholder
@@ -1793,10 +1876,20 @@ class ApproovTokenInterceptor implements Interceptor {
         // call the processed request callback, unless protection is being reapplied
         // under a mutator whose callback is not safe to invoke again
         Request processedRequest = request;
-        if (invokeProcessed)
-            processedRequest = mutator.handleInterceptorProcessedRequest(request, changes);
-        else
-            Log.d(TAG, "Protection reapplied without the processed request callback of " + mutator);
+        if (invokeProcessed) {
+            Request mutated = request;
+            processedRequest = ApproovService.callMutator("handleInterceptorProcessedRequest",
+                    () -> mutator.handleInterceptorProcessedRequest(mutated, changes));
+            if (processedRequest == null) {
+                // a programming error in the app's callback, treated like a runtime
+                // exception from it (SPECIFICATION 1.6.1)
+                Log.e(TAG, "ApproovServiceMutator.handleInterceptorProcessedRequest returned null");
+                throw new ApproovException("ApproovServiceMutator.handleInterceptorProcessedRequest returned null");
+            }
+        } else {
+            Log.d(TAG, "Protection reapplied without the processed request callback of "
+                    + ApproovService.describe(mutator));
+        }
 
         // message signing runs last, over the final token, status, trace and
         // substituted values and whatever the processed request callback changed,
@@ -1988,7 +2081,9 @@ class ApproovFreshnessInterceptor implements Interceptor {
             // headers stripped (they must not leak to the new destination) but its
             // processed request callback is not invoked again
             mutator = ApproovService.getServiceMutator();
-            invokeProcessed = mutator.supportsProtectionRefresh();
+            ApproovServiceMutator rebuiltMutator = mutator;
+            invokeProcessed = ApproovService.callMutator("supportsProtectionRefresh",
+                    rebuiltMutator::supportsProtectionRefresh);
         } else {
             // measure how long the request has been held since the protection was
             // applied, using a clock that advances during device sleep, and proceed
@@ -2003,8 +2098,9 @@ class ApproovFreshnessInterceptor implements Interceptor {
             // a refresh reinvokes the mutator's processed request callback so it is
             // only performed if the mutator declares that this is safe
             mutator = ApproovService.getServiceMutator();
-            if (!mutator.supportsProtectionRefresh()) {
-                Log.d(TAG, "Request held for " + heldMS + "ms but " + mutator +
+            ApproovServiceMutator staleMutator = mutator;
+            if (!ApproovService.callMutator("supportsProtectionRefresh", staleMutator::supportsProtectionRefresh)) {
+                Log.d(TAG, "Request held for " + heldMS + "ms but " + ApproovService.describe(mutator) +
                         " does not support protection refresh");
                 return chain.proceed(request);
             }
@@ -2158,7 +2254,9 @@ class ApproovPinningInterceptor implements Interceptor {
             return chain.proceed(request);
 
         // first check if we are to proceed with any pinning processing
-        if (!ApproovService.getServiceMutator().handlePinningShouldProcessRequest(request)) {
+        ApproovServiceMutator mutator = ApproovService.getServiceMutator();
+        if (!ApproovService.callMutator("handlePinningShouldProcessRequest",
+                () -> mutator.handlePinningShouldProcessRequest(request))) {
             // we are not to proceed with any pinning processing so just continue
             return chain.proceed(request);
         }

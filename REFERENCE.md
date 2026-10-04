@@ -697,7 +697,7 @@ The following classes complete the public surface of the package. A standard int
 
 ## ApproovServiceMutator
 
-Interface with default methods, installed with `setServiceMutator`. The interceptor defaults are the `CLOSE_FAILURE` decisions (the 3.5.x ones). Every interceptor hook declares `IOException` so that an implementation opting in to aborting a request can throw a standard network stack exception.
+Interface with default methods, installed with `setServiceMutator`. The interceptor defaults are the `CLOSE_FAILURE` decisions (the 3.5.x ones). Every interceptor hook declares `IOException` so that an implementation opting in to aborting a request can throw a standard network stack exception; a mutator aborts a request by throwing an `IOException`, which reaches the app unchanged. Anything else a hook throws (a `NullPointerException` or other programming error, or a deliberate `RuntimeException`) is treated as a failed request, never as a crash: the request fails with an `ApproovException` whose cause is the original exception, the hook is named in its message and in an error-level log, `execute()` throws it and an enqueued call receives it in `onFailure` (SPECIFICATION 1.6.1). OkHttp would otherwise rethrow it on its dispatcher thread for an enqueued call, terminating the app. A `handleInterceptorProcessedRequest` that returns `null` fails the request the same way. A `RuntimeException` from the direct method hooks (`handleFetchTokenResult`, `handleFetchSecureStringResult`, `handleFetchCustomJWTResult`, `handlePrecheckResult`) is thrown by the direct method as an `ApproovException` with the original as its cause.
 
 | Method | Default decision |
 | :--- | :--- |
