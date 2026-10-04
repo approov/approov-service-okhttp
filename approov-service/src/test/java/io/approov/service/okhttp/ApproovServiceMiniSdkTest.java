@@ -2115,7 +2115,7 @@ public class ApproovServiceMiniSdkTest {
         reinitializeServiceWithTargetHost("");
         ApproovDefaultMessageSigning.SignatureParametersFactory factory = new ApproovDefaultMessageSigning.SignatureParametersFactory() {
             @Override
-            protected io.approov.util.okhttp.sig.SignatureParameters buildSignatureParameters(ApproovDefaultMessageSigning.OkHttpComponentProvider provider, ApproovRequestMutations changes) {
+            protected io.approov.util.okhttp.sig.SignatureParameters buildSignatureParameters(ApproovDefaultMessageSigning.OkHttpComponentProvider provider, ApproovRequestMutations changes) throws ApproovDefaultMessageSigning.RequiredBodyDigestException {
                 io.approov.util.okhttp.sig.SignatureParameters params = super.buildSignatureParameters(provider, changes);
                 params.setAlg(ApproovDefaultMessageSigning.ALG_HS256);
                 params.setDebugMode(true);

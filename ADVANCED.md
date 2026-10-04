@@ -47,7 +47,7 @@ To opt in to always proceeding in 3.8.0:
 ApproovService.setServiceMutator(ApproovServiceMutator.ALWAYS_PROCEED)
 ```
 
-A request that fails under `CLOSE_FAILURE` never reaches the network. All the exceptions above are `ApproovException`s, and so `IOException`s, delivered by `execute()` or to `Callback.onFailure`. The other exceptions an app sees from the request path, under either mutator, are its own configuration errors (a body digest configured as required that cannot be generated, or an unsupported signature algorithm), TLS connections to its API domains that do not validate against the Managed Trust Roots or the certificate public keys configured for the domain, which fail with `javax.net.ssl.SSLPeerUnverifiedException` like any OkHttp certificate check, and aborts the app itself opted in to through a [service mutator](#service-mutators).
+A request that fails under `CLOSE_FAILURE` never reaches the network. All the exceptions above are `ApproovException`s, and so `IOException`s, delivered by `execute()` or to `Callback.onFailure`. The other exceptions an app sees from the request path, under either mutator, are its own configuration errors (a body digest configured as required that cannot be generated, or an unsupported signature algorithm, both failing with an `ApproovException`), TLS connections to its API domains that do not validate against the Managed Trust Roots or the certificate public keys configured for the domain, which fail with `javax.net.ssl.SSLPeerUnverifiedException` like any OkHttp certificate check, and aborts the app itself opted in to through a [service mutator](#service-mutators).
 
 The direct methods (`fetchToken`, `fetchSecureString`, `fetchCustomJWT`, `precheck`) return a value to the caller and therefore report failures by throwing an `ApproovException` whichever mutator is installed; see the [reference](REFERENCE.md).
 
@@ -97,7 +97,9 @@ val factory = ApproovDefaultMessageSigning.generateDefaultSignatureParametersFac
     .setExpiresLifetime(60)                 // default 15s
     .addOptionalHeaders("X-Request-Id")     // covered when present
     .setBodyDigestConfig(ApproovDefaultMessageSigning.DIGEST_SHA256, true) // digest required: a body that
-                                            // cannot be digested fails the request (a configuration error)
+                                            // cannot be digested fails the request with
+                                            // RequiredBodyDigestException, an IOException
+                                            // (a configuration error)
 
 // a factory is shared by every request it applies to, so use a separate
 // instance for a host that needs different settings

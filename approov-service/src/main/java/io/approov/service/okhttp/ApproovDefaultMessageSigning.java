@@ -190,9 +190,9 @@ public class ApproovDefaultMessageSigning {
      *         unchanged if it is not signed
      * @throws RequiredBodyDigestException if a body digest configured as required
      *                                     cannot be generated
-     * @throws IllegalStateException       if a signature algorithm is unsupported
+     * @throws ApproovException            if a signature algorithm is unsupported
      */
-    Request sign(Request request, ApproovRequestMutations changes) {
+    Request sign(Request request, ApproovRequestMutations changes) throws ApproovException {
         if (changes == null || changes.getTokenHeaderKey() == null) {
             // the request doesn't have an Approov token header, so we don't need to sign it
             return request;
@@ -203,9 +203,9 @@ public class ApproovDefaultMessageSigning {
             // no factory applies to this host so the request is not signed
             return request;
         }
-        // Build the signature parameters. This fails CLOSED (the IllegalStateException is rethrown)
-        // only when a body digest configured as required cannot be generated — that must abort the
-        // request. Any other failure here (including from a custom SignatureParametersFactory) fails
+        // Build the signature parameters. This fails CLOSED (the RequiredBodyDigestException, an
+        // IOException, is rethrown) only when a body digest configured as required cannot be
+        // generated, which must abort the request. Any other failure here (including from a custom SignatureParametersFactory) fails
         // OPEN: we log at error and proceed unsigned, because the backend is the enforcement point.
         SignatureParameters params;
         try {
@@ -236,8 +236,10 @@ public class ApproovDefaultMessageSigning {
         for (String alg : algs) {
             // an unsupported algorithm is an integrator configuration error and the
             // only signing condition, besides a required body digest, that fails closed
+            // (SPECIFICATION 1.7(a)); like every failure on the request path it is an
+            // IOException, so an enqueued call reports it to onFailure
             if (!ALG_ES256.equals(alg) && !ALG_HS256.equals(alg))
-                throw new IllegalStateException("Unsupported algorithm identifier: " + alg);
+                throw new ApproovException("Unsupported algorithm identifier: " + alg);
         }
 
         // Generate a signature per algorithm over the same covered components. Each
@@ -728,10 +730,11 @@ public class ApproovDefaultMessageSigning {
          * @param provider The component provider for the request.
          * @param changes  The request mutations to apply.
          * @return The generated {@link SignatureParameters}.
-         * @throws IllegalStateException If required parameters cannot be generated.
+         * @throws RequiredBodyDigestException If a body digest configured as required
+         *                                     cannot be generated.
          */
         protected SignatureParameters buildSignatureParameters(OkHttpComponentProvider provider,
-                ApproovRequestMutations changes) {
+                ApproovRequestMutations changes) throws RequiredBodyDigestException {
             // the algorithm is left unset so that one signature per configured
             // algorithm (see getAlgs) is produced over these same parameters; a
             // subclass may set an explicit algorithm to produce that single signature
@@ -771,12 +774,17 @@ public class ApproovDefaultMessageSigning {
     /**
      * Thrown when a body digest configured as <em>required</em> cannot be generated.
      * This is the only signature-build condition that must fail CLOSED (abort the
-     * request). Every other build failure — including an {@link IllegalStateException}
-     * raised by a custom {@link SignatureParametersFactory} for an unrelated reason —
-     * fails OPEN (the request proceeds unsigned), because the backend is the
-     * enforcement point for message signatures.
+     * request, SPECIFICATION 1.7(a)). Every other build failure, including an
+     * {@link IllegalStateException} raised by a custom {@link SignatureParametersFactory}
+     * for an unrelated reason, fails OPEN (the request proceeds unsigned), because the
+     * backend is the enforcement point for message signatures.
+     * <p>
+     * It is an {@link ApproovException} and so an {@link java.io.IOException}: a
+     * synchronous call throws it and an enqueued call receives it in onFailure. Up to
+     * 3.5.x it was an IllegalStateException, which OkHttp rethrew on its dispatcher
+     * thread for an enqueued call, terminating the app.
      */
-    public static class RequiredBodyDigestException extends IllegalStateException {
+    public static class RequiredBodyDigestException extends ApproovException {
         public RequiredBodyDigestException(String message) {
             super(message);
         }
