@@ -116,6 +116,8 @@ dependencies {
     testImplementation 'org.json:json:20231013'
     // self-signed TLS material for the pin check tests
     testImplementation 'com.squareup.okhttp3:okhttp-tls:4.12.0'
+    // local HTTPS server for the request-before-initialize and bypass pinning tests
+    testImplementation 'com.squareup.okhttp3:mockwebserver:4.12.0'
     testImplementation 'androidx.test:core:1.6.1'
 }
 

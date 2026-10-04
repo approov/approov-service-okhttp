@@ -28,12 +28,10 @@ public class GatingTest {
 
     @Test
     public void testGetOkHttpClientBeforeInitialization() {
-        try {
-            ApproovService.getOkHttpClient();
-            fail("Expected IllegalStateException but none was thrown");
-        } catch (IllegalStateException e) {
-            assertEquals("getOkHttpClient: SDK not initialized", e.getMessage());
-        }
+        // SPECIFICATION 5.7(f): the client is available before initialize and its
+        // requests go out without Approov processing until protection is enabled
+        assertNotNull(ApproovService.getOkHttpClient());
+        assertSame(ApproovService.getOkHttpClient(), ApproovService.getOkHttpClient());
     }
 
     @Test

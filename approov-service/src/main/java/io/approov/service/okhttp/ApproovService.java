@@ -97,28 +97,29 @@ public class ApproovService {
     // seen by this layer, or empty if none or if ARC is not enabled for the account
     private static String lastARC = "";
 
-    // the Approov pinning interceptor to be used for all requests
+    // the Approov pinning interceptor shared by every client, created on first use;
+    // it applies no pins while Approov protection is not enabled
     private static ApproovPinningInterceptor pinningInterceptor = null;
 
     // builders to be used for new OkHttp clients where each can be named
-    private static Map<String, OkHttpClient.Builder> okHttpBuilders = null;
+    private static Map<String, OkHttpClient.Builder> okHttpBuilders = new HashMap<>();
 
     // cached OkHttpClients to use for each of the named builders
-    private static Map<String, OkHttpClient> okHttpClients = null;
+    private static Map<String, OkHttpClient> okHttpClients = new HashMap<>();
 
     // header to be used to send Approov tokens
-    private static String approovTokenHeader = null;
+    private static String approovTokenHeader = APPROOV_TOKEN_HEADER;
 
     // header used to send any optional Approov TraceID debug value provided by the
     // SDK
-    private static String approovTraceIDHeader = null;
+    private static String approovTraceIDHeader = APPROOV_TRACE_ID_HEADER;
 
     // header used to report the Approov fetch status to the backend, or null if
     // disabled
-    private static String approovStatusHeader = null;
+    private static String approovStatusHeader = APPROOV_STATUS_HEADER;
 
     // any prefix String to be added before the transmitted Approov token
-    private static String approovTokenPrefix = null;
+    private static String approovTokenPrefix = APPROOV_TOKEN_PREFIX;
 
     // any header to be used for binding in Approov tokens or null if not set
     private static String bindingHeader = null;
@@ -144,15 +145,15 @@ public class ApproovService {
     // map of headers that should have their values substituted for secure strings,
     // mapped to their
     // required prefixes
-    private static Map<String, String> substitutionHeaders = null;
+    private static Map<String, String> substitutionHeaders = new HashMap<>();
 
     // set of query parameters that may be substituted, specified by the key name
     // and mapped to the compiled Pattern
-    private static Map<String, Pattern> substitutionQueryParams = null;
+    private static Map<String, Pattern> substitutionQueryParams = new HashMap<>();
 
     // set of URL regexs that should be excluded from any Approov protection, mapped
     // to the compiled Pattern
-    private static Map<String, Pattern> exclusionURLRegexs = null;
+    private static Map<String, Pattern> exclusionURLRegexs = new HashMap<>();
 
     // thin injectable boundary around the static Approov SDK API; package-private
     // so that tests can record the calls the layer makes, the public API is unchanged
@@ -243,10 +244,9 @@ public class ApproovService {
         configString = config;
         lastARC = "";
         if (isApproovProtectionEnabled()) {
-            pinningInterceptor = new ApproovPinningInterceptor();
+            // pinners built while protection was not enabled hold no pins
+            rebuildPins();
             ApproovService.sdk().setUserProperty("approov-service-okhttp/" + BuildConfig.APPROOV_SERVICE_VERSION);
-        } else {
-            pinningInterceptor = null;
         }
     }
 
@@ -298,20 +298,20 @@ public class ApproovService {
         configString = null;
         lastARC = "";
         pinningInterceptor = null;
-        okHttpBuilders = null;
-        okHttpClients = null;
-        approovTokenHeader = null;
-        approovTraceIDHeader = null;
-        approovStatusHeader = null;
+        okHttpBuilders = new HashMap<>();
+        okHttpClients = new HashMap<>();
+        approovTokenHeader = APPROOV_TOKEN_HEADER;
+        approovTraceIDHeader = APPROOV_TRACE_ID_HEADER;
+        approovStatusHeader = APPROOV_STATUS_HEADER;
         approovTokenPrefix = APPROOV_TOKEN_PREFIX;
         bindingHeader = null;
         staleProtectionRefreshMS = DEFAULT_STALE_PROTECTION_REFRESH_MS;
         serviceMutator = ApproovServiceMutator.DEFAULT;
         messageSigning = new ApproovDefaultMessageSigning();
         messageSigningEnabled = false;
-        substitutionHeaders = null;
-        substitutionQueryParams = null;
-        exclusionURLRegexs = null;
+        substitutionHeaders = new HashMap<>();
+        substitutionQueryParams = new HashMap<>();
+        exclusionURLRegexs = new HashMap<>();
         sdkFacade = new DefaultApproovSdkFacade();
     }
 
@@ -1329,11 +1329,29 @@ public class ApproovService {
 
     /**
      * Rebuilds the pins in the pinning interceptor after a dynamic configuration
-     * change.
+     * change or when Approov protection is enabled. The ApproovService monitor is
+     * not held while the pins are built, so the lock order is always
+     * ApproovService then interceptor, never the reverse.
      */
-    static synchronized void rebuildPins() {
-        if (pinningInterceptor != null)
-            pinningInterceptor.buildPins();
+    static void rebuildPins() {
+        ApproovPinningInterceptor interceptor;
+        synchronized (ApproovService.class) {
+            interceptor = pinningInterceptor;
+        }
+        if (interceptor != null)
+            interceptor.buildPins();
+    }
+
+    /**
+     * Gets the pinning interceptor shared by every client, creating it on first
+     * use. It applies no pins while Approov protection is not enabled.
+     *
+     * @return the shared pinning interceptor
+     */
+    private static synchronized ApproovPinningInterceptor getPinningInterceptor() {
+        if (pinningInterceptor == null)
+            pinningInterceptor = new ApproovPinningInterceptor();
+        return pinningInterceptor;
     }
 
     /**
@@ -1395,10 +1413,6 @@ public class ApproovService {
      * @return OkHttpClient to be used with Approov
      */
     public static synchronized OkHttpClient getOkHttpClient(String builderName) {
-        if (!isInitialized) {
-            Log.e(TAG, "getOkHttpClient: SDK not initialized");
-            throw new IllegalStateException("getOkHttpClient: SDK not initialized");
-        }
         OkHttpClient okHttpClient = okHttpClients.get(builderName);
         if (okHttpClient == null) {
             // get the builder and warn if none was available
@@ -1407,41 +1421,43 @@ public class ApproovService {
                 Log.d(TAG, "No builder available for " + builderName);
                 okHttpBuilder = new OkHttpClient.Builder();
             }
-            // build a new OkHttpClient on demand
-            if (isApproovProtectionEnabled()) {
-                // remove any existing ApproovTokenInterceptor from the builder
-                List<Interceptor> interceptors = okHttpBuilder.interceptors();
-                Iterator<Interceptor> iter = interceptors.iterator();
-                while (iter.hasNext()) {
-                    Interceptor interceptor = iter.next();
-                    if (interceptor instanceof ApproovTokenInterceptor)
-                        iter.remove();
-                }
 
-                // remove any existing ApproovFreshnessInterceptor or
-                // ApproovPinningInterceptor from the builder
-                interceptors = okHttpBuilder.networkInterceptors();
-                iter = interceptors.iterator();
-                while (iter.hasNext()) {
-                    Interceptor interceptor = iter.next();
-                    if ((interceptor instanceof ApproovFreshnessInterceptor) ||
-                            (interceptor instanceof ApproovPinningInterceptor))
-                        iter.remove();
-                }
-
-                // build the OkHttpClient with the interceptors
-                Log.d(TAG, "Building new Approov OkHttpClient for " + builderName);
-                ApproovTokenInterceptor tokenInterceptor = new ApproovTokenInterceptor();
-                okHttpClient = okHttpBuilder
-                        .addInterceptor(tokenInterceptor)
-                        .addNetworkInterceptor(new ApproovFreshnessInterceptor())
-                        .addNetworkInterceptor(pinningInterceptor).build();
-            } else {
-                // if the ApproovService was not initialized or Approov is bypassed, build a
-                // plain client
-                Log.d(TAG, "Building plain OkHttpClient for " + builderName);
-                okHttpClient = okHttpBuilder.build();
+            // remove any existing ApproovTokenInterceptor from the builder
+            List<Interceptor> interceptors = okHttpBuilder.interceptors();
+            Iterator<Interceptor> iter = interceptors.iterator();
+            while (iter.hasNext()) {
+                Interceptor interceptor = iter.next();
+                if (interceptor instanceof ApproovTokenInterceptor)
+                    iter.remove();
             }
+
+            // remove any existing ApproovFreshnessInterceptor or
+            // ApproovPinningInterceptor from the builder
+            interceptors = okHttpBuilder.networkInterceptors();
+            iter = interceptors.iterator();
+            while (iter.hasNext()) {
+                Interceptor interceptor = iter.next();
+                if ((interceptor instanceof ApproovFreshnessInterceptor) ||
+                        (interceptor instanceof ApproovPinningInterceptor))
+                    iter.remove();
+            }
+
+            // The Approov interceptors are always attached, even before initialize()
+            // and in bypass mode. Each decides per request: while Approov protection is
+            // not enabled a request goes out with no Approov processing and no Approov
+            // pinning, only OS trust (SPECIFICATION 5.7(f)), and once initialize()
+            // enables protection the same client protects its requests, so a client
+            // obtained early is never cached unprotected.
+            if (!isApproovServiceEnabled())
+                Log.w(TAG, "Building Approov OkHttpClient for " + builderName + " before ApproovService "
+                        + "initialization; requests proceed without Approov protection until it is initialized");
+            else
+                Log.d(TAG, "Building new Approov OkHttpClient for " + builderName);
+            okHttpClient = okHttpBuilder
+                    .addInterceptor(new ApproovTokenInterceptor())
+                    .addNetworkInterceptor(new ApproovFreshnessInterceptor())
+                    .addNetworkInterceptor(getPinningInterceptor()).build();
+
             // cache the client for future usages
             okHttpClients.put(builderName, okHttpClient);
         }
@@ -1483,6 +1499,12 @@ class ApproovTokenInterceptor implements Interceptor {
 
     @Override
     public Response intercept(Chain chain) throws IOException {
+        // before initialize() and in bypass mode a request goes out with no Approov
+        // processing at all: it is neither held nor failed, and the SDK is not called
+        // (SPECIFICATION 5.7(f))
+        if (!ApproovService.isApproovProtectionEnabled())
+            return chain.proceed(chain.request());
+
         // cache the mutator for the duration of the interceptor to make sure
         // it is not changed mid-flight
         ApproovServiceMutator mutator = ApproovService.getServiceMutator();
@@ -1889,8 +1911,25 @@ class ApproovPinningInterceptor implements Interceptor {
      * configuration changes and we need to update the pinning information; the
      * next connection check uses the new pins.
      */
-    synchronized public void buildPins() {
+    public void buildPins() {
+        // read before this interceptor's monitor is taken: the lock order is always
+        // ApproovService then interceptor, never the reverse
+        boolean protectionEnabled = ApproovService.isApproovProtectionEnabled();
+        synchronized (this) {
+            buildPinsLocked(protectionEnabled);
+        }
+    }
+
+    private void buildPinsLocked(boolean protectionEnabled) {
         CertificatePinner.Builder pinBuilder = new CertificatePinner.Builder();
+        if (!protectionEnabled) {
+            // before initialize() and in bypass mode the layer applies no Approov pinning
+            // and does not ask the SDK for pins, even if another caller initialized the
+            // SDK and it holds pins (SPECIFICATION 5.7(f)); initialize() rebuilds the
+            // pins once protection is enabled
+            certificatePinner = pinBuilder.build();
+            return;
+        }
         Map<String, List<String>> allPins = ApproovService.sdk().getPins("public-key-sha256");
         for (Map.Entry<String, List<String>> entry : allPins.entrySet()) {
             String domain = entry.getKey();
@@ -1924,6 +1963,13 @@ class ApproovPinningInterceptor implements Interceptor {
     @Override
     public Response intercept(Chain chain) throws IOException {
         Request request = chain.request();
+
+        // before initialize() and in bypass mode the layer applies no Approov pinning
+        // at all: only OS trust applies, and the SDK is not asked for pins
+        // (SPECIFICATION 5.7(f))
+        if (!ApproovService.isApproovProtectionEnabled())
+            return chain.proceed(request);
+
         // first check if we are to proceed with any pinning processing
         if (!ApproovService.getServiceMutator().handlePinningShouldProcessRequest(request)) {
             // we are not to proceed with any pinning processing so just continue
