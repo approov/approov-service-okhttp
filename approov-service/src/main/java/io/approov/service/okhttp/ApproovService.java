@@ -1631,10 +1631,18 @@ class ApproovTokenInterceptor implements Interceptor {
                 // a failed substitution leaves the placeholder value in the header and the
                 // request proceeds: the backend sees the placeholder and decides
                 if (mutator.handleInterceptorHeaderSubstitutionResult(approovResults, header)) {
-                    aChange = true;
-                    setSubstitutionHeaders.put(header, prefix + approovResults.getSecureString());
-                    // every field of the name, in order, so that all can be restored
-                    originalHeaderValues.put(header, new ArrayList<>(request.headers(header)));
+                    String secureString = approovResults.getSecureString();
+                    if (secureString == null) {
+                        // a decision to substitute with no value (a custom mutator accepting
+                        // a non-SUCCESS result) leaves the placeholder, never "null"
+                        Log.d(TAG, "No secure string to substitute, placeholder left in header: " + header
+                                + ", " + approovResults.getStatus().toString());
+                    } else {
+                        aChange = true;
+                        setSubstitutionHeaders.put(header, prefix + secureString);
+                        // every field of the name, in order, so that all can be restored
+                        originalHeaderValues.put(header, new ArrayList<>(request.headers(header)));
+                    }
                 }
             }
         }
@@ -1657,11 +1665,18 @@ class ApproovTokenInterceptor implements Interceptor {
                 ApproovService.recordLastARC(approovResults);
                 Log.d(TAG, "Substituting query parameter: " + queryKey + ", " + approovResults.getStatus().toString());
                 if (mutator.handleInterceptorQueryParamSubstitutionResult(approovResults, queryKey)) {
-                    // substitute the query parameter
-                    aChange = true;
-                    queryKeys.add(queryKey);
-                    replacementURL = new StringBuilder(replacementURL).replace(matcher.start(1),
-                            matcher.end(1), approovResults.getSecureString()).toString();
+                    String secureString = approovResults.getSecureString();
+                    if (secureString == null) {
+                        // a decision to substitute with no value leaves the placeholder
+                        Log.d(TAG, "No secure string to substitute, placeholder left in query parameter: "
+                                + queryKey + ", " + approovResults.getStatus().toString());
+                    } else {
+                        // substitute the query parameter
+                        aChange = true;
+                        queryKeys.add(queryKey);
+                        replacementURL = new StringBuilder(replacementURL).replace(matcher.start(1),
+                                matcher.end(1), secureString).toString();
+                    }
                 }
             }
         }

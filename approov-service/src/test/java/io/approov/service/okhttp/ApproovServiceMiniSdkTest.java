@@ -520,6 +520,87 @@ public class ApproovServiceMiniSdkTest {
     }
 
     /**
+     * TR 3: a custom mutator may decide to substitute for a non-SUCCESS secure
+     * string result, which carries no secure string. A substitute decision with no
+     * value leaves the header placeholder untouched (never the literal "null"
+     * after the prefix) and the request proceeds, as in approov-service-android.
+     */
+    @Test
+    public void testHeaderSubstituteDecisionWithNoValueKeepsPlaceholder() throws Exception {
+        String targetHost = getTargetHost();
+        reinitializeService(scenarioJson(uniqueCaseName("subst-header-no-value"),
+            "\"protectedDomains\": [\"" + targetHost + "\"]," +
+            "\"initialSecureStrings\": {\"header-key\": \"header-secret\"}"
+        ));
+        AtomicInteger decisions = new AtomicInteger();
+        ApproovService.setServiceMutator(new ApproovServiceMutator() {
+            @Override
+            public boolean handleInterceptorHeaderSubstitutionResult(Approov.TokenFetchResult approovResults,
+                    String header) {
+                assertEquals(Approov.TokenFetchStatus.REJECTED, approovResults.getStatus());
+                assertNull(approovResults.getSecureString());
+                decisions.incrementAndGet();
+                return true;
+            }
+        });
+        ApproovService.addSubstitutionHeader("Api-Key", "Key ");
+        setDirective("{\"operation\": \"fetchSecureString\", \"response\": {\"status\": \"REJECTED\"}}");
+
+        OkHttpClient client = ApproovService.getOkHttpClient();
+        Request request = new Request.Builder().url(getTargetURL())
+            .header("Api-Key", "Key header-key").get().build();
+        try (Response response = client.newCall(request).execute()) {
+            assertEquals(200, response.code());
+            JSONObject reply = new JSONObject(response.body().string());
+            assertEquals("Key header-key", getHeader(reply, "Api-Key"));
+            String token = getHeader(reply, "Approov-Token");
+            assertNotNull(token);
+            assertFalse(token.isEmpty());
+        }
+        assertEquals(1, decisions.get());
+    }
+
+    /**
+     * TR 3: a substitute decision for a query parameter with no secure string
+     * leaves the placeholder in the URL and the request proceeds, rather than
+     * throwing a NullPointerException out of the interceptor.
+     */
+    @Test
+    public void testQuerySubstituteDecisionWithNoValueKeepsPlaceholder() throws Exception {
+        String targetHost = getTargetHost();
+        reinitializeService(scenarioJson(uniqueCaseName("subst-query-no-value"),
+            "\"protectedDomains\": [\"" + targetHost + "\"]," +
+            "\"initialSecureStrings\": {\"query-key\": \"query-secret\"}"
+        ));
+        AtomicInteger decisions = new AtomicInteger();
+        ApproovService.setServiceMutator(new ApproovServiceMutator() {
+            @Override
+            public boolean handleInterceptorQueryParamSubstitutionResult(Approov.TokenFetchResult approovResults,
+                    String queryKey) {
+                assertEquals(Approov.TokenFetchStatus.REJECTED, approovResults.getStatus());
+                assertNull(approovResults.getSecureString());
+                decisions.incrementAndGet();
+                return true;
+            }
+        });
+        ApproovService.addSubstitutionQueryParam("api_key");
+        setDirective("{\"operation\": \"fetchSecureString\", \"response\": {\"status\": \"REJECTED\"}}");
+
+        OkHttpClient client = ApproovService.getOkHttpClient();
+        Request request = new Request.Builder().url(getTargetURL() + "?api_key=query-key").get().build();
+        try (Response response = client.newCall(request).execute()) {
+            assertEquals(200, response.code());
+            JSONObject reply = new JSONObject(response.body().string());
+            assertTrue(reply.getString("url").contains("api_key=query-key"));
+            assertFalse(reply.getString("url").contains("api_key=null"));
+            String token = getHeader(reply, "Approov-Token");
+            assertNotNull(token);
+            assertFalse(token.isEmpty());
+        }
+        assertEquals(1, decisions.get());
+    }
+
+    /**
      * 3.8.0 §3/§4: a request sent with an empty Approov-Token (token fetch failed)
      * is still signed by the default mutator, with both the empty token header and
      * the status header covered. An empty header value is a legal covered component

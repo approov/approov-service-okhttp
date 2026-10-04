@@ -174,7 +174,7 @@ An `ApproovServiceMutator` centralizes app-specific policy without forking the p
 | :--- | :--- |
 | `handleInterceptorShouldProcessRequest` | whether a request gets Approov processing at all (default: unless excluded) |
 | `handleInterceptorFetchTokenResult` | given the token fetch result, `true` to add the token header (empty if there is no token), `false` to send the request with no Approov headers, or throw a standard network stack exception to abort the request |
-| `handleInterceptorHeaderSubstitutionResult`, `handleInterceptorQueryParamSubstitutionResult` | whether to apply a secure string substitution |
+| `handleInterceptorHeaderSubstitutionResult`, `handleInterceptorQueryParamSubstitutionResult` | whether to apply a secure string substitution; `true` for a result that carries no secure string (any status but `SUCCESS`) leaves the placeholder and the request proceeds |
 | `handleInterceptorProcessedRequest` | final changes to the processed request; message signing, when enabled, runs after it and covers its changes |
 | `supportsProtectionRefresh` | whether the processed request callback may run again on a stale request (see below) |
 | `handlePinningShouldProcessRequest` | whether Approov connection validation (Managed Trust Roots or configured public keys) applies to a request |
