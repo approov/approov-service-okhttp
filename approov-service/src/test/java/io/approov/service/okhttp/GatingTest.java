@@ -22,7 +22,7 @@ public class GatingTest {
             ApproovService.fetchCustomJWT("{\"test\": 1}");
             fail("Expected ApproovException but none was thrown");
         } catch (ApproovException e) {
-            assertEquals("fetchCustomJWT: SDK not initialized", e.getMessage());
+            assertEquals("fetchCustomJWT: Approov protection not enabled", e.getMessage());
         }
     }
 

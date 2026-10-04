@@ -449,13 +449,11 @@ public class ApproovService {
      * some way as part of the testing process.
      *
      * @param devKey is the development key to be used
-     * @throws ApproovException if there was a problem
+     * @throws ApproovException if there was a problem, or if Approov protection is
+     *                          not enabled (before initialization or in bypass mode)
      */
     public static synchronized void setDevKey(String devKey) throws ApproovException {
-        if (!isApproovProtectionEnabled()) {
-            Log.e(TAG, "setDevKey: SDK not initialized");
-            throw new ApproovException("setDevKey: SDK not initialized");
-        }
+        requireProtection("setDevKey");
         try {
             ApproovService.sdk().setDevKey(devKey);
             Log.d(TAG, "setDevKey");
@@ -463,6 +461,21 @@ public class ApproovService {
             throw new ApproovException(e);
         } catch (IllegalArgumentException e) {
             throw new ApproovException(e);
+        }
+    }
+
+    /**
+     * Guards a public method that consumes the Approov SDK: while Approov
+     * protection is not enabled (before initialize and in bypass mode) it throws
+     * without calling the SDK, even if another caller initialized the SDK.
+     *
+     * @param method the name of the public method, for the exception message
+     * @throws ApproovException if Approov protection is not enabled
+     */
+    private static void requireProtection(String method) throws ApproovException {
+        if (!isApproovProtectionEnabled()) {
+            Log.e(TAG, method + ": Approov protection not enabled");
+            throw new ApproovException(method + ": Approov protection not enabled");
         }
     }
 
@@ -965,13 +978,11 @@ public class ApproovService {
      * remains available for
      * backwards compatibility with retryable network failures.
      *
-     * @throws ApproovException if there was a problem
+     * @throws ApproovException if there was a problem, or if Approov protection is
+     *                          not enabled (before initialization or in bypass mode)
      */
     public static void precheck() throws ApproovException {
-        if (!isApproovProtectionEnabled()) {
-            Log.e(TAG, "precheck: SDK not initialized");
-            throw new ApproovException("precheck: SDK not initialized");
-        }
+        requireProtection("precheck");
         // try and fetch a non-existent secure string in order to check for a rejection
         Approov.TokenFetchResult approovResults;
         try {
@@ -996,13 +1007,11 @@ public class ApproovService {
      * changed by an uninstall and reinstall of the app.
      *
      * @return String of the device ID
-     * @throws ApproovException if there was a problem
+     * @throws ApproovException if there was a problem, or if Approov protection is
+     *                          not enabled (before initialization or in bypass mode)
      */
     public static String getDeviceID() throws ApproovException {
-        if (!isApproovProtectionEnabled()) {
-            Log.e(TAG, "getDeviceID: SDK not initialized");
-            throw new ApproovException("getDeviceID: SDK not initialized");
-        }
+        requireProtection("getDeviceID");
         try {
             String deviceID = ApproovService.sdk().getDeviceID();
             Log.d(TAG, "getDeviceID: " + deviceID);
@@ -1024,13 +1033,11 @@ public class ApproovService {
      * cloud service.
      *
      * @param data is the data to be hashed and set in the token
-     * @throws ApproovException if there was a problem
+     * @throws ApproovException if there was a problem, or if Approov protection is
+     *                          not enabled (before initialization or in bypass mode)
      */
     public static void setDataHashInToken(String data) throws ApproovException {
-        if (!isApproovProtectionEnabled()) {
-            Log.e(TAG, "setDataHashInToken: SDK not initialized");
-            throw new ApproovException("setDataHashInToken: SDK not initialized");
-        }
+        requireProtection("setDataHashInToken");
         try {
             ApproovService.sdk().setDataHashInToken(data);
             Log.d(TAG, "setDataHashInToken");
@@ -1059,13 +1066,11 @@ public class ApproovService {
      *
      * @param url is the full URL (including path) for the token fetch
      * @return String of the fetched token
-     * @throws ApproovException if there was a problem
+     * @throws ApproovException if there was a problem, or if Approov protection is
+     *                          not enabled (before initialization or in bypass mode)
      */
     public static String fetchToken(String url) throws ApproovException {
-        if (!isApproovProtectionEnabled()) {
-            Log.e(TAG, "fetchToken: SDK not initialized");
-            throw new ApproovException("fetchToken: SDK not initialized");
-        }
+        requireProtection("fetchToken");
         // fetch the Approov token
         Approov.TokenFetchResult approovResults;
         try {
@@ -1102,10 +1107,12 @@ public class ApproovService {
      *
      * @param message is the message whose content is to be signed
      * @return String of the base64 encoded message signature
-     * @throws ApproovException if there was a problem
+     * @throws ApproovException if there was a problem, or if Approov protection is
+     *                          not enabled (before initialization or in bypass mode)
      */
     @Deprecated
     public static String getMessageSignature(String message) throws ApproovException {
+        requireProtection("getMessageSignature");
         return getAccountMessageSignature(message);
     }
 
@@ -1126,13 +1133,11 @@ public class ApproovService {
      *
      * @param message is the message whose content is to be signed
      * @return String of the base64 encoded message signature
-     * @throws ApproovException if there was a problem
+     * @throws ApproovException if there was a problem, or if Approov protection is
+     *                          not enabled (before initialization or in bypass mode)
      */
     public static String getAccountMessageSignature(String message) throws ApproovException {
-        if (!isApproovProtectionEnabled()) {
-            Log.e(TAG, "getAccountMessageSignature: SDK not initialized");
-            throw new ApproovException("getAccountMessageSignature: SDK not initialized");
-        }
+        requireProtection("getAccountMessageSignature");
         try {
             String signature = ApproovService.sdk().getAccountMessageSignature(message);
             Log.d(TAG, "getAccountMessageSignature");
@@ -1167,13 +1172,11 @@ public class ApproovService {
      *
      * @param message is the message whose content is to be signed
      * @return String of the base64 encoded message signature in ASN.1 DER format
-     * @throws ApproovException if there was a problem
+     * @throws ApproovException if there was a problem, or if Approov protection is
+     *                          not enabled (before initialization or in bypass mode)
      */
     public static String getInstallMessageSignature(String message) throws ApproovException {
-        if (!isApproovProtectionEnabled()) {
-            Log.e(TAG, "getInstallMessageSignature: SDK not initialized");
-            throw new ApproovException("getInstallMessageSignature: SDK not initialized");
-        }
+        requireProtection("getInstallMessageSignature");
         try {
             String signature = ApproovService.sdk().getInstallMessageSignature(message);
             Log.d(TAG, "getInstallMessageSignature");
@@ -1214,13 +1217,11 @@ public class ApproovService {
      *               any existing value for the key.
      * @return secure string (should not be cached by your app) or null if it was
      *         not defined
-     * @throws ApproovException if there was a problem
+     * @throws ApproovException if there was a problem, or if Approov protection is
+     *                          not enabled (before initialization or in bypass mode)
      */
     public static String fetchSecureString(String key, String newDef) throws ApproovException {
-        if (!isApproovProtectionEnabled()) {
-            Log.e(TAG, "fetchSecureString: SDK not initialized");
-            throw new ApproovException("fetchSecureString: SDK not initialized");
-        }
+        requireProtection("fetchSecureString");
         // determine the type of operation as the values themselves cannot be logged
         String type = "lookup";
         if (newDef != null)
@@ -1258,13 +1259,11 @@ public class ApproovService {
      *
      * @param payload is the marshaled JSON object for the claims to be included
      * @return custom JWT string
-     * @throws ApproovException if there was a problem
+     * @throws ApproovException if there was a problem, or if Approov protection is
+     *                          not enabled (before initialization or in bypass mode)
      */
     public static String fetchCustomJWT(String payload) throws ApproovException {
-        if (!isApproovProtectionEnabled()) {
-            Log.e(TAG, "fetchCustomJWT: SDK not initialized");
-            throw new ApproovException("fetchCustomJWT: SDK not initialized");
-        }
+        requireProtection("fetchCustomJWT");
         // fetch the custom JWT catching any exceptions the SDK might throw
         Approov.TokenFetchResult approovResults;
         try {
@@ -1327,14 +1326,12 @@ public class ApproovService {
      * Approov.setInstallAttrsInToken.
      *
      * @param attrs is the signed JWT holding the new install attributes
-     * @throws ApproovException if the attrs parameter is invalid or the SDK is not
-     *                          initialized
+     * @throws ApproovException if the attrs parameter is invalid, or if Approov
+     *                          protection is not enabled (before initialization or
+     *                          in bypass mode)
      */
     public static void setInstallAttributes(String attrs) throws ApproovException {
-        if (!isApproovProtectionEnabled()) {
-            Log.e(TAG, "setInstallAttributes: SDK not initialized");
-            throw new ApproovException("setInstallAttributes: SDK not initialized");
-        }
+        requireProtection("setInstallAttributes");
         try {
             ApproovService.sdk().setInstallAttrsInToken(attrs);
             Log.d(TAG, "setInstallAttributes");
