@@ -18,10 +18,20 @@
 
 package io.approov.service.okhttp;
 
+import static org.junit.Assert.assertArrayEquals;
+import static org.junit.Assert.assertEquals;
 import static org.junit.Assert.assertFalse;
 import static org.junit.Assert.assertTrue;
 
+import androidx.test.core.app.ApplicationProvider;
+
+import com.criticalblue.minisdk.testing.AttesterProxyController;
+
+import org.junit.After;
 import org.junit.Test;
+import org.junit.runner.RunWith;
+import org.robolectric.RobolectricTestRunner;
+import org.robolectric.annotation.Config;
 
 import java.lang.reflect.Method;
 
@@ -30,7 +40,16 @@ import java.lang.reflect.Method;
  * TESTING_REQUIREMENTS 7 and 10): what is removed and what replaces it, with no
  * aliases. Mirrors approov-service-android's PublicSurface380Test.
  */
+@RunWith(RobolectricTestRunner.class)
+@Config(manifest = Config.NONE)
 public class PublicSurface380Test {
+    private static final String CONFIG = "#cb-ivol#mAxOF0ekJUOC36J5XWmVmVipOcUoEdMjhPSp2FVtyTo=";
+
+    @After
+    public void tearDown() {
+        ApproovService.reset();
+        AttesterProxyController.reset();
+    }
 
     static boolean hasPublicMethod(Class<?> type, String name) {
         for (Method method : type.getMethods()) {
@@ -55,5 +74,24 @@ public class PublicSurface380Test {
         // belongs to the mutator, ALWAYS_PROCEED or the app's own
         assertFalse(hasPublicMethod(ApproovService.class, "setProceedOnNetworkFail"));
         assertFalse(hasPublicMethod(ApproovService.class, "getProceedOnNetworkFail"));
+    }
+
+    @Test
+    public void setInstallAttributesReplacesSetInstallAttrsInToken() throws Exception {
+        // TESTING_REQUIREMENTS 7 (changed 2026-10-04): only the new name, no alias;
+        // it throws the checked ApproovException and still calls the SDK's
+        // Approov.setInstallAttrsInToken
+        assertFalse(hasPublicMethod(ApproovService.class, "setInstallAttrsInToken"));
+        Method method = ApproovService.class.getMethod("setInstallAttributes", String.class);
+        assertEquals(void.class, method.getReturnType());
+        assertArrayEquals(new Class<?>[] {ApproovException.class}, method.getExceptionTypes());
+
+        ApproovService.reset();
+        AttesterProxyController.reset();
+        RecordingSdkFacade sdk = RecordingSdkFacade.install();
+        ApproovService.initialize(ApplicationProvider.getApplicationContext(), CONFIG, "reinit-surface");
+        sdk.calls.clear();
+        method.invoke(null, "signed-jwt");
+        assertEquals(java.util.Collections.singletonList("setInstallAttrsInToken:signed-jwt"), sdk.snapshot());
     }
 }

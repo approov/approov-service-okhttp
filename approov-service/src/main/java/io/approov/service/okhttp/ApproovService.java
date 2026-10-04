@@ -1301,33 +1301,28 @@ public class ApproovService {
 
     /**
      * Sets an install attributes token to be sent to the server and associated with
-     * this particular
-     * app installation for future Approov token fetches. The token must be signed,
-     * within its
-     * expiry time and bound to the correct device ID for it to be accepted by the
-     * server.
-     * Calling this method ensures that the next call to fetch an Approov
-     * token will not use a cached version, so that this information can be
-     * transmitted to the server.
+     * this particular app installation for future Approov token fetches. The token
+     * must be signed, within its expiry time and bound to the correct device ID for
+     * it to be accepted by the server. Calling this method ensures that the next
+     * call to fetch an Approov token will not use a cached version, so that this
+     * information can be transmitted to the server. It replaces
+     * setInstallAttrsInToken, removed in 3.8.0, and passes the token to the SDK's
+     * Approov.setInstallAttrsInToken.
      *
      * @param attrs is the signed JWT holding the new install attributes
-     * @return void
      * @throws ApproovException if the attrs parameter is invalid or the SDK is not
      *                          initialized
      */
-    public static void setInstallAttrsInToken(String attrs) throws ApproovException {
+    public static void setInstallAttributes(String attrs) throws ApproovException {
         if (!isApproovProtectionEnabled()) {
-            Log.e(TAG, "setInstallAttrsInToken: SDK not initialized");
-            throw new ApproovException("setInstallAttrsInToken: SDK not initialized");
+            Log.e(TAG, "setInstallAttributes: SDK not initialized");
+            throw new ApproovException("setInstallAttributes: SDK not initialized");
         }
         try {
             ApproovService.sdk().setInstallAttrsInToken(attrs);
-            Log.d(TAG, "setInstallAttrsInToken");
-        } catch (IllegalArgumentException e) {
-            Log.e(TAG, "setInstallAttrsInToken failed with IllegalArgument: " + e.getMessage());
-            throw new ApproovException(e);
-        } catch (IllegalStateException e) {
-            Log.e(TAG, "setInstallAttrsInToken failed with IllegalState: " + e.getMessage());
+            Log.d(TAG, "setInstallAttributes");
+        } catch (IllegalArgumentException | IllegalStateException e) {
+            Log.e(TAG, "setInstallAttributes failed: " + e.getMessage());
             throw new ApproovException(e);
         }
     }
