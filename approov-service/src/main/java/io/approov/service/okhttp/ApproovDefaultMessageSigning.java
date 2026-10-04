@@ -23,7 +23,6 @@ import android.util.Log;
 import io.approov.util.okhttp.tink.subtle.EllipticCurves;
 
 import java.io.IOException;
-import java.net.URI;
 import java.nio.charset.StandardCharsets;
 import java.security.GeneralSecurityException;
 import java.security.MessageDigest;
@@ -175,7 +174,7 @@ public class ApproovDefaultMessageSigning {
      * @return the factory, or null if none applies
      */
     private SignatureParametersFactory factoryFor(OkHttpComponentProvider provider) {
-        SignatureParametersFactory factory = hostFactories.get(provider.getAuthority().toLowerCase(Locale.ROOT));
+        SignatureParametersFactory factory = hostFactories.get(provider.getHost().toLowerCase(Locale.ROOT));
         return (factory != null) ? factory : defaultFactory;
     }
 
@@ -786,13 +785,19 @@ public class ApproovDefaultMessageSigning {
     /**
      * OkHttpComponentProvider implements the ComponentProvider interface for
      * OkHttp3 requests.
+     *
+     * Every derived component comes from the request URL exactly as OkHttp sends
+     * it ({@link HttpUrl#toString()}, {@link HttpUrl#encodedPath()},
+     * {@link HttpUrl#encodedQuery()}), so that the backend reconstructs the same
+     * values from the request it receives (SPECIFICATION 3.3). The URL is never
+     * re-parsed with {@code java.net.URI} or {@link HttpUrl#uri()}, which re-encode
+     * characters such as {@code |} that OkHttp sends raw, and which reject some
+     * URLs OkHttp accepts.
      */
     public static final class OkHttpComponentProvider implements ComponentProvider {
         private Request request;
 
         private HttpUrl okURL;
-
-        private URI jURI;
 
         /**
          * Constructs an instance of {@code OkHttpComponentProvider}.
@@ -802,7 +807,6 @@ public class ApproovDefaultMessageSigning {
         OkHttpComponentProvider(Request request) {
             this.request = request;
             this.okURL = request.url();
-            this.jURI = okURL.uri();
         }
 
         public Request getRequest() {
@@ -812,7 +816,17 @@ public class ApproovDefaultMessageSigning {
         public void setRequest(Request request) {
             this.request = request;
             this.okURL = request.url();
-            this.jURI = okURL.uri();
+        }
+
+        /**
+         * Gets the host of the request, without any port, as OkHttp holds it
+         * (lowercase, IPv6 addresses without brackets). Used to select a host
+         * factory.
+         *
+         * @return the host
+         */
+        String getHost() {
+            return okURL.host();
         }
 
         @Override
@@ -820,9 +834,18 @@ public class ApproovDefaultMessageSigning {
             return request.method();
         }
 
+        /**
+         * Gets the authority (RFC 9421 section 2.2.3): the lowercase host, in
+         * brackets for an IPv6 address, followed by the port only when it is not
+         * the default port of the scheme.
+         */
         @Override
         public String getAuthority() {
-            return okURL.host();
+            String host = okURL.host();
+            String authority = (host.indexOf(':') >= 0) ? "[" + host + "]" : host;
+            if (okURL.port() != HttpUrl.defaultPort(okURL.scheme()))
+                authority += ":" + okURL.port();
+            return authority;
         }
 
         @Override
@@ -830,21 +853,27 @@ public class ApproovDefaultMessageSigning {
             return okURL.scheme();
         }
 
+        /**
+         * Gets the target URI (RFC 9421 section 2.2.2): the URL as OkHttp sends
+         * it. A fragment is never sent, so it is left out.
+         */
         @Override
         public String getTargetUri() {
-            return jURI.toString();
+            String url = okURL.toString();
+            String fragment = okURL.encodedFragment();
+            if (fragment != null)
+                url = url.substring(0, url.length() - fragment.length() - 1);
+            return url;
         }
 
+        /**
+         * Gets the request target (RFC 9421 section 2.2.5): the path and query as
+         * they appear in the request line.
+         */
         @Override
         public String getRequestTarget() {
-            String reqt = "";
-            if (jURI.getRawPath() != null) {
-                reqt += okURL.encodedPath();
-            }
-            if (jURI.getRawQuery() != null) {
-                reqt += "?" + okURL.encodedQuery();
-            }
-            return reqt;
+            String query = okURL.encodedQuery();
+            return (query == null) ? okURL.encodedPath() : okURL.encodedPath() + "?" + query;
         }
 
         @Override
@@ -852,14 +881,25 @@ public class ApproovDefaultMessageSigning {
             return okURL.encodedPath();
         }
 
+        /**
+         * Gets the query (RFC 9421 section 2.2.7): the query as sent with its
+         * leading {@code ?}, or {@code ?} alone when there is none.
+         */
         @Override
         public String getQuery() {
-            return okURL.encodedQuery();
+            String query = okURL.encodedQuery();
+            return (query == null) ? "?" : "?" + query;
         }
 
+        /**
+         * Gets a query parameter (RFC 9421 section 2.2.8). The name is the encoded
+         * name from the component identifier; the value is the parameter's
+         * decoded value encoded again with the application/x-www-form-urlencoded
+         * percent-encode set, a space as {@code %20}.
+         */
         @Override
         public String getQueryParam(String name) {
-            List<String> values = okURL.queryParameterValues(name);
+            List<String> values = okURL.queryParameterValues(formDecode(name));
             if (values.isEmpty()) {
                 throw new IllegalArgumentException("Could not find query parameter named " + name);
             } else if (values.size() > 1) {
@@ -874,8 +914,53 @@ public class ApproovDefaultMessageSigning {
                 // to indicate that a query param must not be included, we return null
                 return null;
             }
-            return values.get(0);
+            String value = values.get(0);
+            return (value == null) ? "" : formEncode(value);
         }
+
+        // decodes application/x-www-form-urlencoded text: + is a space and %XX a
+        // byte of UTF-8; a malformed escape is kept as it is
+        private static String formDecode(String text) {
+            if (text.indexOf('%') < 0 && text.indexOf('+') < 0)
+                return text;
+            Buffer out = new Buffer();
+            for (int i = 0; i < text.length(); ) {
+                int c = text.codePointAt(i);
+                if (c == '+') {
+                    out.writeByte(' ');
+                } else if (c == '%' && i + 2 < text.length()
+                        && Character.digit(text.charAt(i + 1), 16) >= 0
+                        && Character.digit(text.charAt(i + 2), 16) >= 0) {
+                    out.writeByte((Character.digit(text.charAt(i + 1), 16) << 4)
+                            | Character.digit(text.charAt(i + 2), 16));
+                    i += 3;
+                    continue;
+                } else {
+                    out.writeUtf8CodePoint(c);
+                }
+                i += Character.charCount(c);
+            }
+            return out.readUtf8();
+        }
+
+        // percent-encodes UTF-8 text with the application/x-www-form-urlencoded
+        // percent-encode set, which leaves only ASCII letters, digits and *-._
+        private static String formEncode(String text) {
+            byte[] bytes = text.getBytes(StandardCharsets.UTF_8);
+            StringBuilder out = new StringBuilder(bytes.length);
+            for (byte b : bytes) {
+                int c = b & 0xff;
+                if ((c >= 'a' && c <= 'z') || (c >= 'A' && c <= 'Z') || (c >= '0' && c <= '9')
+                        || c == '*' || c == '-' || c == '.' || c == '_') {
+                    out.append((char) c);
+                } else {
+                    out.append('%').append(HEX_DIGITS[c >> 4]).append(HEX_DIGITS[c & 0xf]);
+                }
+            }
+            return out.toString();
+        }
+
+        private static final char[] HEX_DIGITS = "0123456789ABCDEF".toCharArray();
 
         @Override
         public String getStatus() {
