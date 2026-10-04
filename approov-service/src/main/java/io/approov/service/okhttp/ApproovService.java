@@ -176,6 +176,24 @@ public class ApproovService {
     }
 
     /**
+     * Converts a RuntimeException thrown by an Approov SDK call (an
+     * IllegalStateException, an IllegalArgumentException or anything else) into an
+     * ApproovException, an IOException, with the SDK's exception as its cause. On
+     * the request path an exception other than an IOException is rethrown by OkHttp
+     * on its dispatcher thread for an enqueued call, which terminates the app, so no
+     * SDK call reachable from a request may let one escape (SPECIFICATION 1.6); the
+     * direct methods report an SDK failure the same way (SPECIFICATION 1.8).
+     *
+     * @param operation what the layer was doing, for the exception message
+     * @param e         the exception thrown by the SDK
+     * @return the exception to throw
+     */
+    static ApproovException sdkFailure(String operation, RuntimeException e) {
+        Log.e(TAG, operation + ": Approov SDK failure: " + e);
+        return new ApproovException(operation + ": Approov SDK failure: " + e, e);
+    }
+
+    /**
      * Installs the SDK boundary, for tests only.
      *
      * @param facade the SDK facade to use
@@ -220,8 +238,16 @@ public class ApproovService {
         // the pins are rebuilt after the ApproovService monitor is released, keeping
         // the lock order ApproovService then pinning interceptor. No prefetch is
         // started: the SDK manages prefetching (SPECIFICATION 5.2)
-        if (initializeLocked(context, config, comment))
-            rebuildPins();
+        if (initializeLocked(context, config, comment)) {
+            try {
+                rebuildPins();
+            } catch (ApproovException e) {
+                // the SDK is initialized and protection is enabled; the pinning
+                // interceptor asks for the pins again before its next connection check
+                // and fails that connection while they cannot be read
+                Log.e(TAG, "Approov pins not built on initialization: " + e.getMessage());
+            }
+        }
     }
 
     /**
@@ -457,9 +483,7 @@ public class ApproovService {
         try {
             ApproovService.sdk().setDevKey(devKey);
             Log.d(TAG, "setDevKey");
-        } catch (IllegalStateException e) {
-            throw new ApproovException(e);
-        } catch (IllegalArgumentException e) {
+        } catch (RuntimeException e) {
             throw new ApproovException(e);
         }
     }
@@ -653,15 +677,21 @@ public class ApproovService {
      * presence is optional.
      *
      * @param request the request that may carry the binding header
+     * @throws ApproovException if the SDK fails to set the data hash
      */
-    static void updateBindingDataHash(Request request) {
+    static void updateBindingDataHash(Request request) throws ApproovException {
         String bindingHeader = getBindingHeader();
         if (bindingHeader != null) {
             // Header names are case-insensitive. A null value means the header is
             // absent; a present-but-empty value must still be forwarded to the SDK.
             String bindingValue = request.header(bindingHeader);
-            if (bindingValue != null)
-                ApproovService.sdk().setDataHashInToken(bindingValue);
+            if (bindingValue != null) {
+                try {
+                    ApproovService.sdk().setDataHashInToken(bindingValue);
+                } catch (RuntimeException e) {
+                    throw sdkFailure("Token binding for " + bindingHeader, e);
+                }
+            }
         }
     }
 
@@ -673,11 +703,17 @@ public class ApproovService {
      * a configuration change only.
      *
      * @param approovResults the token fetch result
+     * @throws ApproovException if the SDK fails to provide the configuration or the
+     *                          pins
      */
-    static void updatePinsIfConfigChanged(Approov.TokenFetchResult approovResults) {
+    static void updatePinsIfConfigChanged(Approov.TokenFetchResult approovResults) throws ApproovException {
         boolean configChanged = approovResults.isConfigChanged();
         if (configChanged) {
-            ApproovService.sdk().fetchConfig();
+            try {
+                ApproovService.sdk().fetchConfig();
+            } catch (RuntimeException e) {
+                throw sdkFailure("Approov dynamic configuration", e);
+            }
             Log.d(TAG, "Dynamic configuration updated");
         }
         if (configChanged || approovResults.isForceApplyPins()) {
@@ -996,8 +1032,10 @@ public class ApproovService {
             approovResults = ApproovService.sdk().fetchSecureStringAndWait("precheck-dummy-key", null);
             recordLastARC(approovResults);
             Log.d(TAG, "precheck: " + approovResults.getStatus().toString());
-        } catch (IllegalStateException | IllegalArgumentException e) {
-            // the fetch failed without a result, so it leaves no ARC behind
+        } catch (RuntimeException e) {
+            // the fetch failed without a result, so it leaves no ARC behind; any
+            // RuntimeException from the SDK, including a null result, is reported as
+            // an ApproovException (SPECIFICATION 1.8)
             recordLastARC(null);
             throw new ApproovException(e);
         }
@@ -1023,7 +1061,7 @@ public class ApproovService {
             String deviceID = ApproovService.sdk().getDeviceID();
             Log.d(TAG, "getDeviceID: " + deviceID);
             return deviceID;
-        } catch (IllegalStateException e) {
+        } catch (RuntimeException e) {
             throw new ApproovException(e);
         }
     }
@@ -1048,9 +1086,7 @@ public class ApproovService {
         try {
             ApproovService.sdk().setDataHashInToken(data);
             Log.d(TAG, "setDataHashInToken");
-        } catch (IllegalStateException e) {
-            throw new ApproovException(e);
-        } catch (IllegalArgumentException e) {
+        } catch (RuntimeException e) {
             throw new ApproovException(e);
         }
     }
@@ -1084,8 +1120,10 @@ public class ApproovService {
             approovResults = ApproovService.sdk().fetchApproovTokenAndWait(url);
             recordLastARC(approovResults);
             Log.d(TAG, "fetchToken: " + approovResults.getStatus().toString());
-        } catch (IllegalStateException | IllegalArgumentException e) {
-            // the fetch failed without a result, so it leaves no ARC behind
+        } catch (RuntimeException e) {
+            // the fetch failed without a result, so it leaves no ARC behind; any
+            // RuntimeException from the SDK, including a null result, is reported as
+            // an ApproovException (SPECIFICATION 1.8)
             recordLastARC(null);
             throw new ApproovException(e);
         }
@@ -1151,9 +1189,7 @@ public class ApproovService {
             if (signature == null)
                 throw new ApproovException("no account signature available");
             return signature;
-        } catch (IllegalStateException e) {
-            throw new ApproovException(e);
-        } catch (IllegalArgumentException e) {
+        } catch (RuntimeException e) {
             throw new ApproovException(e);
         }
     }
@@ -1190,9 +1226,7 @@ public class ApproovService {
             if (signature == null)
                 throw new ApproovException("no device signature available");
             return signature;
-        } catch (IllegalStateException e) {
-            throw new ApproovException(e);
-        } catch (IllegalArgumentException e) {
+        } catch (RuntimeException e) {
             throw new ApproovException(e);
         }
     }
@@ -1241,8 +1275,10 @@ public class ApproovService {
             approovResults = ApproovService.sdk().fetchSecureStringAndWait(key, newDef);
             recordLastARC(approovResults);
             Log.d(TAG, "fetchSecureString " + type + ": " + key + ", " + approovResults.getStatus().toString());
-        } catch (IllegalStateException | IllegalArgumentException e) {
-            // the fetch failed without a result, so it leaves no ARC behind
+        } catch (RuntimeException e) {
+            // the fetch failed without a result, so it leaves no ARC behind; any
+            // RuntimeException from the SDK, including a null result, is reported as
+            // an ApproovException (SPECIFICATION 1.8)
             recordLastARC(null);
             throw new ApproovException(e);
         }
@@ -1277,8 +1313,10 @@ public class ApproovService {
             approovResults = ApproovService.sdk().fetchCustomJWTAndWait(payload);
             recordLastARC(approovResults);
             Log.d(TAG, "fetchCustomJWT: " + approovResults.getStatus().toString());
-        } catch (IllegalStateException | IllegalArgumentException e) {
-            // the fetch failed without a result, so it leaves no ARC behind
+        } catch (RuntimeException e) {
+            // the fetch failed without a result, so it leaves no ARC behind; any
+            // RuntimeException from the SDK, including a null result, is reported as
+            // an ApproovException (SPECIFICATION 1.8)
             recordLastARC(null);
             throw new ApproovException(e);
         }
@@ -1342,7 +1380,7 @@ public class ApproovService {
         try {
             ApproovService.sdk().setInstallAttrsInToken(attrs);
             Log.d(TAG, "setInstallAttributes");
-        } catch (IllegalArgumentException | IllegalStateException e) {
+        } catch (RuntimeException e) {
             Log.e(TAG, "setInstallAttributes failed: " + e.getMessage());
             throw new ApproovException(e);
         }
@@ -1353,8 +1391,12 @@ public class ApproovService {
      * change or when Approov protection is enabled. The ApproovService monitor is
      * not held while the pins are built, so the lock order is always
      * ApproovService then interceptor, never the reverse.
+     *
+     * @throws ApproovException if the SDK fails to provide the pins; the pinning
+     *                          interceptor then fails every connection check until
+     *                          they can be read
      */
-    static void rebuildPins() {
+    static void rebuildPins() throws ApproovException {
         ApproovPinningInterceptor interceptor;
         synchronized (ApproovService.class) {
             if (pinningInterceptor == null) {
@@ -1571,8 +1613,8 @@ class ApproovTokenInterceptor implements Interceptor {
         HttpUrl url = request.url();
 
         // request an Approov token for the request URL
-        Approov.TokenFetchResult approovResults = ApproovService.sdk().fetchApproovTokenAndWait(url.toString());
-        ApproovService.recordLastARC(approovResults);
+        Approov.TokenFetchResult approovResults = fetchForRequest("Approov token fetch for " + url, () ->
+                ApproovService.sdk().fetchApproovTokenAndWait(url.toString()));
 
         // provide information about the obtained token or error (note "approov token
         // -check" can be used to check the validity of the token and if you use token
@@ -1632,8 +1674,9 @@ class ApproovTokenInterceptor implements Interceptor {
             String prefix = entry.getValue();
             String value = request.header(header);
             if ((value != null) && value.startsWith(prefix) && (value.length() > prefix.length())) {
-                approovResults = ApproovService.sdk().fetchSecureStringAndWait(value.substring(prefix.length()), null);
-                ApproovService.recordLastARC(approovResults);
+                String key = value.substring(prefix.length());
+                approovResults = fetchForRequest("Header substitution for " + header, () ->
+                        ApproovService.sdk().fetchSecureStringAndWait(key, null));
                 Log.d(TAG, "Substituting header: " + header + ", " + approovResults.getStatus().toString());
                 // a failed substitution leaves the placeholder value in the header and the
                 // request proceeds: the backend sees the placeholder and decides
@@ -1668,8 +1711,8 @@ class ApproovTokenInterceptor implements Interceptor {
                 // we have found an occurrence of the query parameter to be replaced so we look
                 // up the existing value as a key for a secure string
                 String queryValue = matcher.group(1);
-                approovResults = ApproovService.sdk().fetchSecureStringAndWait(queryValue, null);
-                ApproovService.recordLastARC(approovResults);
+                approovResults = fetchForRequest("Query parameter substitution for " + queryKey, () ->
+                        ApproovService.sdk().fetchSecureStringAndWait(queryValue, null));
                 Log.d(TAG, "Substituting query parameter: " + queryKey + ", " + approovResults.getStatus().toString());
                 if (mutator.handleInterceptorQueryParamSubstitutionResult(approovResults, queryKey)) {
                     String secureString = approovResults.getSecureString();
@@ -1695,7 +1738,7 @@ class ApproovTokenInterceptor implements Interceptor {
         if (aChange) {
             Request.Builder builder = request.newBuilder();
             if (setTokenHeaderKey != null) {
-                builder.header(setTokenHeaderKey, setTokenHeaderValue);
+                setHeader(builder, setTokenHeaderKey, setTokenHeaderValue, "Approov token header");
                 changes.setTokenHeaderKey(setTokenHeaderKey);
                 changes.setTokenHeaderPrefix(setTokenHeaderPrefix);
 
@@ -1706,24 +1749,32 @@ class ApproovTokenInterceptor implements Interceptor {
                 builder.tag(ApproovRequestFreshness.class, freshness);
             }
             if (setTraceIDHeaderKey != null) {
-                builder.header(setTraceIDHeaderKey, setTraceIDHeaderValue);
+                setHeader(builder, setTraceIDHeaderKey, setTraceIDHeaderValue, "Approov trace header");
                 changes.setTraceIDHeaderKey(setTraceIDHeaderKey);
             }
             // report the fetch status on the status header, replacing any value the app
             // may have set itself so that the backend only sees what this layer observed
             if (setStatusHeaderKey != null) {
-                builder.header(setStatusHeaderKey, setStatusHeaderValue);
+                setHeader(builder, setStatusHeaderKey, setStatusHeaderValue, "Approov status header");
                 changes.setStatusHeaderKey(setStatusHeaderKey);
             }
             if (!setSubstitutionHeaders.isEmpty()) {
                 for (Map.Entry<String, String> entry : setSubstitutionHeaders.entrySet()) {
                     // substitute the header
-                    builder.header(entry.getKey(), entry.getValue());
+                    setHeader(builder, entry.getKey(), entry.getValue(),
+                            "Header substitution for " + entry.getKey());
                 }
                 changes.setSubstitutionHeaderKeys(new ArrayList<>(setSubstitutionHeaders.keySet()));
             }
             if (!originalURL.equals(replacementURL)) {
-                builder.url(replacementURL);
+                try {
+                    builder.url(replacementURL);
+                } catch (IllegalArgumentException e) {
+                    // OkHttp's message quotes the URL, which now holds secure strings, so
+                    // neither it nor the cause is kept
+                    throw new ApproovException("Query parameter substitution for " + queryKeys
+                            + ": the secure string does not form a valid URL");
+                }
                 changes.setSubstitutionQueryParamResults(originalURL, queryKeys);
             }
             request = builder.build();
@@ -1767,6 +1818,66 @@ class ApproovTokenInterceptor implements Interceptor {
         }
 
         return processedRequest;
+    }
+
+    /**
+     * A fetch made by the SDK on the request path.
+     */
+    private interface RequestFetch {
+        Approov.TokenFetchResult fetch();
+    }
+
+    /**
+     * Performs a token or secure string fetch for a request and records its ARC. A
+     * RuntimeException from the SDK, or a fetch that returns no result, is an
+     * ApproovException with the SDK's exception as its cause, and leaves no ARC
+     * behind, as in the direct methods.
+     *
+     * @param operation what is fetched, for the exception message
+     * @param fetch     the SDK call
+     * @return the fetch result, never null
+     * @throws ApproovException if the SDK throws or returns no result
+     */
+    private static Approov.TokenFetchResult fetchForRequest(String operation, RequestFetch fetch)
+            throws ApproovException {
+        Approov.TokenFetchResult approovResults;
+        try {
+            approovResults = fetch.fetch();
+        } catch (RuntimeException e) {
+            ApproovService.recordLastARC(null);
+            throw ApproovService.sdkFailure(operation, e);
+        }
+        if (approovResults == null) {
+            ApproovService.recordLastARC(null);
+            Log.e(TAG, operation + ": no result from the Approov SDK");
+            throw new ApproovException(operation + ": no result from the Approov SDK");
+        }
+        ApproovService.recordLastARC(approovResults);
+        return approovResults;
+    }
+
+    /**
+     * Sets a header that this layer adds or substitutes. A name or value that
+     * OkHttp rejects (for example a secure string or token with a line break, or a
+     * header name with a space set by the app) fails the request with an
+     * ApproovException instead of OkHttp's IllegalArgumentException. OkHttp's
+     * message quotes the value, which may be a token or a secure string, so neither
+     * it nor the cause is kept.
+     *
+     * @param builder   the request builder
+     * @param name      the header name
+     * @param value     the header value
+     * @param operation what the header is for, for the exception message
+     * @throws ApproovException if OkHttp rejects the name or the value
+     */
+    private static void setHeader(Request.Builder builder, String name, String value, String operation)
+            throws ApproovException {
+        try {
+            builder.header(name, value);
+        } catch (IllegalArgumentException e) {
+            Log.e(TAG, operation + ": not a valid header name or value for " + name);
+            throw new ApproovException(operation + ": not a valid header name or value for " + name);
+        }
     }
 
     /**
@@ -1935,21 +2046,36 @@ class ApproovPinningInterceptor implements Interceptor {
 
     // the certificate pinner to use for pinning that may be rebuilt if there is a
     // change in the pinning configuration
-    private CertificatePinner certificatePinner;
+    private CertificatePinner certificatePinner = new CertificatePinner.Builder().build();
+
+    // true while the most recent attempt to read the pins from the SDK failed: every
+    // connection check then reads them again and fails while they cannot be read,
+    // since the hosts that must be pinned are unknown
+    private boolean rebuildRequired = false;
 
     /**
-     * Construct a new pinning interceptor.
+     * Construct a new pinning interceptor. If the SDK fails to provide the pins
+     * they are read again before the next connection check.
      */
     public ApproovPinningInterceptor() {
-        buildPins();
+        try {
+            buildPins();
+        } catch (ApproovException e) {
+            Log.e(TAG, "Approov pins not built: " + e.getMessage());
+        }
     }
 
     /**
      * Rebuild the pinning configuration. This is called when the dynamic
      * configuration changes and we need to update the pinning information; the
      * next connection check uses the new pins.
+     *
+     * @throws ApproovException if the SDK fails to provide the pins (a
+     *                          RuntimeException from the SDK, a null pin map or a
+     *                          pin OkHttp rejects); the pins in force are kept and
+     *                          every connection check fails until a rebuild succeeds
      */
-    public void buildPins() {
+    public void buildPins() throws ApproovException {
         // read before this interceptor's monitor is taken: the lock order is always
         // ApproovService then interceptor, never the reverse
         boolean protectionEnabled = ApproovService.isApproovProtectionEnabled();
@@ -1958,7 +2084,7 @@ class ApproovPinningInterceptor implements Interceptor {
         }
     }
 
-    private void buildPinsLocked(boolean protectionEnabled) {
+    private void buildPinsLocked(boolean protectionEnabled) throws ApproovException {
         CertificatePinner.Builder pinBuilder = new CertificatePinner.Builder();
         if (!protectionEnabled) {
             // before initialize() and in bypass mode the layer applies no Approov pinning
@@ -1966,26 +2092,49 @@ class ApproovPinningInterceptor implements Interceptor {
             // SDK and it holds pins (SPECIFICATION 5.7(f)); initialize() rebuilds the
             // pins once protection is enabled
             certificatePinner = pinBuilder.build();
+            rebuildRequired = false;
             return;
         }
-        Map<String, List<String>> allPins = ApproovService.sdk().getPins("public-key-sha256");
-        for (Map.Entry<String, List<String>> entry : allPins.entrySet()) {
-            String domain = entry.getKey();
-            if (!domain.equals("*")) {
-                // the * domain is for managed trust roots and should
-                // not be added directly
-                List<String> pins = entry.getValue();
+        CertificatePinner pinner;
+        try {
+            Map<String, List<String>> allPins = ApproovService.sdk().getPins("public-key-sha256");
+            if (allPins == null)
+                throw new IllegalStateException("getPins returned no pins");
+            for (Map.Entry<String, List<String>> entry : allPins.entrySet()) {
+                String domain = entry.getKey();
+                if (!domain.equals("*")) {
+                    // the * domain is for managed trust roots and should
+                    // not be added directly
+                    List<String> pins = entry.getValue();
 
-                // if there are no pins then we try and use any managed trust roots
-                if (pins.isEmpty() && (allPins.get("*") != null))
-                    pins = allPins.get("*");
+                    // if there are no pins then we try and use any managed trust roots
+                    if (pins.isEmpty() && (allPins.get("*") != null))
+                        pins = allPins.get("*");
 
-                // add the required pins for the domain
-                for (String pin : pins)
-                    pinBuilder = pinBuilder.add(domain, "sha256/" + pin);
+                    // add the required pins for the domain
+                    for (String pin : pins)
+                        pinBuilder = pinBuilder.add(domain, "sha256/" + pin);
+                }
             }
+            pinner = pinBuilder.build();
+        } catch (RuntimeException e) {
+            // a pin set that cannot be read fails closed: the pins in force are kept
+            // and every connection check reads them again, failing until it succeeds
+            rebuildRequired = true;
+            throw ApproovService.sdkFailure("Approov pins", e);
         }
-        certificatePinner = pinBuilder.build();
+        certificatePinner = pinner;
+        rebuildRequired = false;
+    }
+
+    /**
+     * Indicates whether the last attempt to read the pins from the SDK failed, so
+     * that they must be read again before a connection check.
+     *
+     * @return true if the pins must be rebuilt
+     */
+    private synchronized boolean isRebuildRequired() {
+        return rebuildRequired;
     }
 
     /**
@@ -2016,8 +2165,10 @@ class ApproovPinningInterceptor implements Interceptor {
 
         // the pins may not have been available when this interceptor was constructed
         // (the SDK only holds pins once a token has been fetched for the app
-        // installation) so build them now if there are still none
-        if (getCertificatePinner().getPins().isEmpty())
+        // installation) so build them now if there are still none, or if the last
+        // attempt to read them failed; a failure to read them fails the connection
+        // with an ApproovException
+        if (isRebuildRequired() || getCertificatePinner().getPins().isEmpty())
             buildPins();
 
         String host = chain.request().url().host();

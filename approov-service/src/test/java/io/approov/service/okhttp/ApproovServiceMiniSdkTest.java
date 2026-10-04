@@ -2185,7 +2185,11 @@ public class ApproovServiceMiniSdkTest {
                     // rebuild after this request obtains its old pinner, before this request
                     // checks and caches its old generation verdict
                     AttesterProxyController.setNextPinningDirectiveJson("{\"operation\":\"getPins\",\"shouldFail\":true}");
-                    buildPins();
+                    try {
+                        buildPins();
+                    } catch (ApproovException e) {
+                        throw new AssertionError(e);
+                    }
                 }
                 return snapshot;
             }
@@ -2616,7 +2620,7 @@ public class ApproovServiceMiniSdkTest {
         reinitializeServiceWithTargetHost("");
         AtomicInteger rebuilds = new AtomicInteger();
         ApproovPinningInterceptor interceptor = new ApproovPinningInterceptor() {
-            @Override public synchronized void buildPins() {
+            @Override public synchronized void buildPins() throws ApproovException {
                 rebuilds.incrementAndGet();
                 super.buildPins();
             }

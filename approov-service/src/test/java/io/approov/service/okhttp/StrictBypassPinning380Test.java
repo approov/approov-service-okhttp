@@ -104,7 +104,7 @@ public class StrictBypassPinning380Test {
     }
 
     @Test
-    public void thePinnerHoldsNoPinsWhileProtectionIsNotEnabled() {
+    public void thePinnerHoldsNoPinsWhileProtectionIsNotEnabled() throws Exception {
         ApproovService.getOkHttpClient();
         ApproovService.rebuildPins();
         assertTrue(ApproovService.getCertificatePinner().getPins().isEmpty());

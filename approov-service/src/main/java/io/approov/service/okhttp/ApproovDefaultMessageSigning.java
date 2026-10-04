@@ -193,6 +193,26 @@ public class ApproovDefaultMessageSigning {
      * @throws ApproovException            if a signature algorithm is unsupported
      */
     Request sign(Request request, ApproovRequestMutations changes) throws ApproovException {
+        // Every failure other than the two configuration errors above, including a
+        // RuntimeException from the SDK, from a custom factory or from building the
+        // headers, is inside the fail-open (SPECIFICATION 3.3, 3.5): the request
+        // proceeds unsigned and nothing but an IOException leaves the request path.
+        try {
+            return signOrFail(request, changes);
+        } catch (RuntimeException e) {
+            Log.e(TAG, "Message signing failed - proceeding unsigned: " + e);
+            return request;
+        }
+    }
+
+    /**
+     * Signs a request, see {@link #sign(Request, ApproovRequestMutations)}.
+     *
+     * @throws RequiredBodyDigestException if a body digest configured as required
+     *                                     cannot be generated
+     * @throws ApproovException            if a signature algorithm is unsupported
+     */
+    private Request signOrFail(Request request, ApproovRequestMutations changes) throws ApproovException {
         if (changes == null || changes.getTokenHeaderKey() == null) {
             // the request doesn't have an Approov token header, so we don't need to sign it
             return request;
@@ -231,6 +251,9 @@ public class ApproovDefaultMessageSigning {
         if (params.getAlg() != null) {
             algs = Collections.singletonList(params.getAlg());
         } else {
+            // a factory with no algorithm enabled throws IllegalStateException here,
+            // which is not one of the fail-closed conditions: the request is sent
+            // unsigned (see sign)
             algs = factory.getAlgs();
         }
         for (String alg : algs) {
