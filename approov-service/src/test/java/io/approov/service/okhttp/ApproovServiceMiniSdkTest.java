@@ -1257,6 +1257,78 @@ public class ApproovServiceMiniSdkTest {
         }
     }
 
+    /**
+     * §4 Dynamic Pinning Updates (isForceApplyPins), as approov-service-android
+     * 1cb63cb: the SDK can ask for the current pins to be applied without a
+     * configuration change. The pins are rebuilt even though the pinner already
+     * holds pins (so the empty-pinner rebuild in the pinning interceptor does not
+     * apply), the request is checked against the rebuilt pins, and there is no new
+     * configuration to acknowledge with fetchConfig.
+     */
+    @Test
+    public void testForceApplyPinsRebuildsPinsWithoutConfigChange() throws Exception {
+        // the default case pins the target host with the managed trust roots, so the
+        // pinner is not empty
+        assertFalse(ApproovService.getCertificatePinner().getPins().isEmpty());
+        RecordingSdkFacade sdk = RecordingSdkFacade.install();
+        OkHttpClient client = ApproovService.getOkHttpClient();
+        Request request = new Request.Builder().url(getTargetURL()).get().build();
+
+        // the next pins the SDK provides are dummy pins that the target host fails
+        AttesterProxyController.setNextPinningDirectiveJson("{\"operation\": \"getPins\", \"shouldFail\": true}");
+        setDirective("{\"operation\": \"fetchApproovToken\", \"response\": {\"status\": \"SUCCESS\"," +
+            " \"configChanged\": false, \"forceApplyPins\": true}}");
+        try (Response response = client.newCall(request).execute()) {
+            fail("Expected a pinning failure against the force-applied pins, got " + response.code());
+        } catch (javax.net.ssl.SSLPeerUnverifiedException e) {
+            assertTrue(e.getMessage(), e.getMessage().contains("AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA="));
+        }
+        assertEquals(1, sdk.count("getPins"));
+        assertEquals(0, sdk.count("fetchConfig"));
+    }
+
+    /**
+     * §4 Dynamic Pinning Updates: a configuration change that also sets
+     * isForceApplyPins acknowledges the configuration with fetchConfig and rebuilds
+     * the pins once.
+     */
+    @Test
+    public void testConfigChangeWithForceApplyPinsRebuildsPinsOnce() throws Exception {
+        RecordingSdkFacade sdk = RecordingSdkFacade.install();
+        OkHttpClient client = ApproovService.getOkHttpClient();
+        Request request = new Request.Builder().url(getTargetURL()).get().build();
+
+        setDirective("{\"operation\": \"fetchApproovToken\", \"response\": {\"status\": \"SUCCESS\"," +
+            " \"configChanged\": true, \"forceApplyPins\": true}}");
+        try (Response response = client.newCall(request).execute()) {
+            assertEquals(200, response.code());
+        }
+        assertEquals(1, sdk.count("getPins"));
+        assertEquals(1, sdk.count("fetchConfig"));
+    }
+
+    /**
+     * §4 Dynamic Pinning Updates: with neither isConfigChanged nor isForceApplyPins
+     * set, the pins already held are kept: the SDK is not asked for pins and the
+     * pending dummy pins are never applied.
+     */
+    @Test
+    public void testNoConfigChangeOrForceApplyPinsKeepsPins() throws Exception {
+        assertFalse(ApproovService.getCertificatePinner().getPins().isEmpty());
+        RecordingSdkFacade sdk = RecordingSdkFacade.install();
+        OkHttpClient client = ApproovService.getOkHttpClient();
+        Request request = new Request.Builder().url(getTargetURL()).get().build();
+
+        AttesterProxyController.setNextPinningDirectiveJson("{\"operation\": \"getPins\", \"shouldFail\": true}");
+        setDirective("{\"operation\": \"fetchApproovToken\", \"response\": {\"status\": \"SUCCESS\"," +
+            " \"configChanged\": false, \"forceApplyPins\": false}}");
+        try (Response response = client.newCall(request).execute()) {
+            assertEquals(200, response.code());
+        }
+        assertEquals(0, sdk.count("getPins"));
+        assertEquals(0, sdk.count("fetchConfig"));
+    }
+
     // ==================================================================================
     // SECTION 5: Message Signing
     // TESTING_REQUIREMENTS.md §5

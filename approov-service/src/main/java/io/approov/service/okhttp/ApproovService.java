@@ -667,15 +667,22 @@ public class ApproovService {
 
     /**
      * Forces a pinning rebuild if the given token fetch result indicates that
-     * there was a dynamic configuration update.
+     * there was a dynamic configuration update, or that the SDK asks for the
+     * current pins to be applied (isForceApplyPins) without a configuration
+     * change. The pins are rebuilt once if both are set; fetchConfig acknowledges
+     * a configuration change only.
      *
      * @param approovResults the token fetch result
      */
     static void updatePinsIfConfigChanged(Approov.TokenFetchResult approovResults) {
-        if (approovResults.isConfigChanged()) {
+        boolean configChanged = approovResults.isConfigChanged();
+        if (configChanged) {
             ApproovService.sdk().fetchConfig();
-            rebuildPins();
             Log.d(TAG, "Dynamic configuration updated");
+        }
+        if (configChanged || approovResults.isForceApplyPins()) {
+            rebuildPins();
+            Log.d(TAG, "Pins rebuilt");
         }
     }
 
