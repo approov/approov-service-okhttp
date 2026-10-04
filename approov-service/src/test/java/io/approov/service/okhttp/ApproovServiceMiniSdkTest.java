@@ -87,8 +87,8 @@ public class ApproovServiceMiniSdkTest {
             assertNotNull(e.getMessage());
         }
         // Per TESTING_REQUIREMENTS §17-18: failure preserves the prior operating state.
-        assertTrue(ApproovService.isInitialized());
-        assertTrue(ApproovService.isApproovEnabled());
+        assertTrue(ApproovService.isApproovServiceEnabled());
+        assertTrue(ApproovService.isApproovProtectionEnabled());
     }
 
     /**
@@ -106,7 +106,7 @@ public class ApproovServiceMiniSdkTest {
         ApproovService.reset();
         ApproovService.initialize(context, "", "reinit-empty-config");
 
-        assertTrue(ApproovService.isInitialized());
+        assertTrue(ApproovService.isApproovServiceEnabled());
 
         OkHttpClient client = ApproovService.getOkHttpClient();
         Request request = new Request.Builder()
@@ -143,13 +143,13 @@ public class ApproovServiceMiniSdkTest {
             assertNull(getHeader(reply, "Approov-TraceID"));
         }
 
-        assertTrue(ApproovService.isInitialized());
-        assertFalse(ApproovService.isApproovEnabled());
+        assertTrue(ApproovService.isApproovServiceEnabled());
+        assertFalse(ApproovService.isApproovProtectionEnabled());
 
         ApproovService.initialize(context, validInitialConfig);
 
-        assertTrue(ApproovService.isInitialized());
-        assertTrue(ApproovService.isApproovEnabled());
+        assertTrue(ApproovService.isApproovServiceEnabled());
+        assertTrue(ApproovService.isApproovProtectionEnabled());
 
         OkHttpClient protectedClient = ApproovService.getOkHttpClient();
         try (Response response = protectedClient.newCall(new Request.Builder().url(getTargetURL()).build()).execute()) {

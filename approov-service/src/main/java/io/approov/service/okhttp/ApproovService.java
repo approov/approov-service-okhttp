@@ -204,7 +204,7 @@ public class ApproovService {
 
         // If we are already initialized with a valid config, ignore any subsequent
         // empty config initialization
-        if (isApproovEnabled() && config.isEmpty()) {
+        if (isApproovProtectionEnabled() && config.isEmpty()) {
             Log.d(TAG, "ApproovService already initialized with a valid config; ignoring empty configuration");
             return;
         }
@@ -247,7 +247,7 @@ public class ApproovService {
         isInitialized = true;
         configString = config;
         lastARC = "";
-        if (isApproovEnabled()) {
+        if (isApproovProtectionEnabled()) {
             pinningInterceptor = new ApproovPinningInterceptor();
             ApproovService.sdk().setUserProperty("approov-service-okhttp/" + BuildConfig.APPROOV_SERVICE_VERSION);
         } else {
@@ -269,22 +269,27 @@ public class ApproovService {
     }
 
     /**
-     * Indicates whether the service layer has been initialized.
+     * Indicates whether the ApproovService is enabled, which is true once any
+     * initialize has succeeded, including bypass mode (an empty account ID). Before
+     * that, requests made through the OkHttpClient go out without Approov
+     * processing. Replaces isInitialized(), removed in 3.8.0.
      *
-     * @return true if the service layer has been initialized, false otherwise
+     * @return true if the service has been enabled by a successful initialize
      */
-    public static synchronized boolean isInitialized() {
+    public static synchronized boolean isApproovServiceEnabled() {
         return isInitialized;
     }
 
     /**
-     * Indicates whether Approov protection is enabled for this service layer
-     * instance. If initialization used an empty string instead of the account ID then the layer is
-     * initialized but Approov protection is bypassed.
+     * Indicates whether Approov protection is enabled, which is true once the
+     * Approov SDK has been initialized by a successful initialize with a non-empty
+     * account ID. It is false before initialization and in bypass mode, where
+     * requests pass through without Approov processing. Replaces isApproovProtectionEnabled(),
+     * removed in 3.8.0.
      *
-     * @return true if Approov protection is enabled, false otherwise
+     * @return true if the Approov SDK is initialized and requests are protected
      */
-    public static synchronized boolean isApproovEnabled() {
+    public static synchronized boolean isApproovProtectionEnabled() {
         return isInitialized && (configString != null) && !configString.isEmpty();
     }
 
@@ -446,7 +451,7 @@ public class ApproovService {
      * @throws ApproovException if there was a problem
      */
     public static synchronized void setDevKey(String devKey) throws ApproovException {
-        if (!isApproovEnabled()) {
+        if (!isApproovProtectionEnabled()) {
             Log.e(TAG, "setDevKey: SDK not initialized");
             throw new ApproovException("setDevKey: SDK not initialized");
         }
@@ -977,7 +982,7 @@ public class ApproovService {
      */
     @Deprecated
     public static synchronized void prefetch() {
-        if (isApproovEnabled())
+        if (isApproovProtectionEnabled())
             // fire and forget the prefetch
             ApproovService.sdk().fetchApproovToken(new PrefetchCallbackHandler(), "approov.io");
     }
@@ -1000,7 +1005,7 @@ public class ApproovService {
      * @throws ApproovException if there was a problem
      */
     public static void precheck() throws ApproovException {
-        if (!isApproovEnabled()) {
+        if (!isApproovProtectionEnabled()) {
             Log.e(TAG, "precheck: SDK not initialized");
             throw new ApproovException("precheck: SDK not initialized");
         }
@@ -1031,7 +1036,7 @@ public class ApproovService {
      * @throws ApproovException if there was a problem
      */
     public static String getDeviceID() throws ApproovException {
-        if (!isApproovEnabled()) {
+        if (!isApproovProtectionEnabled()) {
             Log.e(TAG, "getDeviceID: SDK not initialized");
             throw new ApproovException("getDeviceID: SDK not initialized");
         }
@@ -1059,7 +1064,7 @@ public class ApproovService {
      * @throws ApproovException if there was a problem
      */
     public static void setDataHashInToken(String data) throws ApproovException {
-        if (!isApproovEnabled()) {
+        if (!isApproovProtectionEnabled()) {
             Log.e(TAG, "setDataHashInToken: SDK not initialized");
             throw new ApproovException("setDataHashInToken: SDK not initialized");
         }
@@ -1094,7 +1099,7 @@ public class ApproovService {
      * @throws ApproovException if there was a problem
      */
     public static String fetchToken(String url) throws ApproovException {
-        if (!isApproovEnabled()) {
+        if (!isApproovProtectionEnabled()) {
             Log.e(TAG, "fetchToken: SDK not initialized");
             throw new ApproovException("fetchToken: SDK not initialized");
         }
@@ -1161,7 +1166,7 @@ public class ApproovService {
      * @throws ApproovException if there was a problem
      */
     public static String getAccountMessageSignature(String message) throws ApproovException {
-        if (!isApproovEnabled()) {
+        if (!isApproovProtectionEnabled()) {
             Log.e(TAG, "getAccountMessageSignature: SDK not initialized");
             throw new ApproovException("getAccountMessageSignature: SDK not initialized");
         }
@@ -1202,7 +1207,7 @@ public class ApproovService {
      * @throws ApproovException if there was a problem
      */
     public static String getInstallMessageSignature(String message) throws ApproovException {
-        if (!isApproovEnabled()) {
+        if (!isApproovProtectionEnabled()) {
             Log.e(TAG, "getInstallMessageSignature: SDK not initialized");
             throw new ApproovException("getInstallMessageSignature: SDK not initialized");
         }
@@ -1249,7 +1254,7 @@ public class ApproovService {
      * @throws ApproovException if there was a problem
      */
     public static String fetchSecureString(String key, String newDef) throws ApproovException {
-        if (!isApproovEnabled()) {
+        if (!isApproovProtectionEnabled()) {
             Log.e(TAG, "fetchSecureString: SDK not initialized");
             throw new ApproovException("fetchSecureString: SDK not initialized");
         }
@@ -1293,7 +1298,7 @@ public class ApproovService {
      * @throws ApproovException if there was a problem
      */
     public static String fetchCustomJWT(String payload) throws ApproovException {
-        if (!isApproovEnabled()) {
+        if (!isApproovProtectionEnabled()) {
             Log.e(TAG, "fetchCustomJWT: SDK not initialized");
             throw new ApproovException("fetchCustomJWT: SDK not initialized");
         }
@@ -1326,7 +1331,7 @@ public class ApproovService {
      * @return the ARC of the most recent fetch, or an empty string
      */
     public static synchronized String getLastARC() {
-        if (!isApproovEnabled()) {
+        if (!isApproovProtectionEnabled()) {
             Log.e(TAG, "getLastARC: SDK not initialized");
             return "";
         }
@@ -1362,7 +1367,7 @@ public class ApproovService {
      *                          initialized
      */
     public static void setInstallAttrsInToken(String attrs) throws ApproovException {
-        if (!isApproovEnabled()) {
+        if (!isApproovProtectionEnabled()) {
             Log.e(TAG, "setInstallAttrsInToken: SDK not initialized");
             throw new ApproovException("setInstallAttrsInToken: SDK not initialized");
         }
@@ -1459,7 +1464,7 @@ public class ApproovService {
                 okHttpBuilder = new OkHttpClient.Builder();
             }
             // build a new OkHttpClient on demand
-            if (isApproovEnabled()) {
+            if (isApproovProtectionEnabled()) {
                 // remove any existing ApproovTokenInterceptor from the builder
                 List<Interceptor> interceptors = okHttpBuilder.interceptors();
                 Iterator<Interceptor> iter = interceptors.iterator();
