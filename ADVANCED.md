@@ -36,10 +36,13 @@ Secure string substitutions (see [Secure strings](#secure-strings)):
 | Approov fetch status | `CLOSE_FAILURE` (3.8.0 default) | `ALWAYS_PROCEED` |
 | :--- | :--- | :--- |
 | `SUCCESS` | the secret is substituted | same |
+| `SUCCESS`, but the secret is a value the header or URL cannot carry | the placeholder is left in place, the request proceeds and a warning names the header or query parameter, never the value | same |
 | `UNKNOWN_KEY` (the value is not a secure string key) | the value is left unchanged and the request proceeds | same |
 | `REJECTED`, `NO_APPROOV_SERVICE` | the placeholder is left in place and the request proceeds (3.5.x threw); the backend sees the placeholder | same |
 | `NO_NETWORK`, `POOR_NETWORK`, `UNTRUSTED_NETWORK` | fails with `ApproovNetworkException` | the placeholder is left in place and the request proceeds |
 | any other status | fails with `ApproovFetchStatusException` | the placeholder is left in place and the request proceeds |
+
+A header can carry only tab and printable ASCII. A secure string set in the account with a non-ASCII or DEL character, or any value an app set with a new definition (`fetchSecureString(key, newDef)`), may break that rule; such a value is never substituted into a header. In a query parameter OkHttp percent-encodes non-ASCII and DEL, which the backend decodes to the same value, so those are substituted, but it silently drops tab, LF, FF and CR from a URL, so a value carrying one of them is not. The Approov token and the trace ID are always base64url. A value you supply yourself that a header cannot carry (a token prefix given to `setTokenHeader`, or a header your mutator sets in `handleInterceptorProcessedRequest`) is a configuration error and fails the request with `ApproovException("Approov cannot set header <name>: its value contains a character a header value cannot carry")`, which never quotes the value.
 
 To opt in to always proceeding in 3.8.0:
 

@@ -218,6 +218,10 @@ public class ApproovService {
     static <T> T callMutator(String hook, MutatorHook<T> call) throws IOException {
         try {
             return call.call();
+        } catch (IllegalArgumentException e) {
+            // OkHttp refusing a header the hook set quotes the value: never kept
+            ApproovException unsafe = unsafeHeaderFromOkHttp(e);
+            throw (unsafe != null) ? unsafe : mutatorFailure(hook, e);
         } catch (RuntimeException e) {
             throw mutatorFailure(hook, e);
         }
@@ -235,6 +239,90 @@ public class ApproovService {
     static ApproovException mutatorFailure(String hook, RuntimeException e) {
         Log.e(TAG, "ApproovServiceMutator." + hook + " threw " + e);
         return new ApproovException("ApproovServiceMutator." + hook + " failed: " + e, e);
+    }
+
+    // OkHttp's message for a header value it refuses, which quotes the value unless
+    // the header is one OkHttp considers sensitive
+    private static final Pattern OKHTTP_HEADER_VALUE_ERROR =
+            Pattern.compile("^Unexpected char \\S+ at \\d+ in (.*?) value(?:: .*)?$", Pattern.DOTALL);
+
+    // OkHttp's message for a header name it refuses
+    private static final String OKHTTP_HEADER_NAME_ERROR = "Unexpected char ";
+
+    /**
+     * Indicates whether a header value can be carried by OkHttp: horizontal tab and
+     * printable ASCII only, the rule OkHttp applies to header values and the one
+     * approov-service-android uses. A secure string can break it (a non-ASCII or DEL
+     * value set in the account, or any value an app set with a new definition); the
+     * token and the trace ID are always base64url and cannot.
+     *
+     * @param value the header value
+     * @return true if the value can be set
+     */
+    static boolean isSafeHeaderValue(String value) {
+        if (value == null)
+            return true;
+        for (int i = 0; i < value.length(); i++) {
+            char c = value.charAt(i);
+            if ((c != '\t') && ((c < 0x20) || (c > 0x7e)))
+                return false;
+        }
+        return true;
+    }
+
+    /**
+     * Indicates whether a secure string can be substituted into a query parameter
+     * unchanged. OkHttp percent-encodes non-ASCII, DEL and the other control
+     * characters, which the backend decodes to the same value, but silently drops
+     * tab, LF, FF and CR from a URL, so a value carrying one of them would arrive
+     * changed.
+     *
+     * @param value the secure string
+     * @return true if the value can be substituted
+     */
+    static boolean isSafeQueryValue(String value) {
+        for (int i = 0; i < value.length(); i++) {
+            char c = value.charAt(i);
+            if ((c == '\t') || (c == '\n') || (c == '\f') || (c == '\r'))
+                return false;
+        }
+        return true;
+    }
+
+    /**
+     * Reports a header value a header cannot carry, set from a value the app
+     * supplied: logged at error level and returned as an ApproovException naming
+     * the header, with no cause and never quoting the value (SPECIFICATION 1.7(a)).
+     *
+     * @param header the header name
+     * @return the exception to throw
+     */
+    static ApproovException unsafeHeaderValue(String header) {
+        String message = "Approov cannot set header " + header
+                + ": its value contains a character a header value cannot carry";
+        Log.e(TAG, message);
+        return new ApproovException(message);
+    }
+
+    /**
+     * Converts OkHttp's IllegalArgumentException for a header name or value it
+     * refuses, thrown inside a mutator hook, into the layer's exception without
+     * quoting the value: OkHttp's message carries it and the value may be a secret,
+     * so neither the message nor the cause is kept.
+     *
+     * @param e the exception the hook threw
+     * @return the exception to throw, or null if e is not OkHttp's header error
+     */
+    private static ApproovException unsafeHeaderFromOkHttp(IllegalArgumentException e) {
+        String message = e.getMessage();
+        if ((message == null) || !message.startsWith(OKHTTP_HEADER_NAME_ERROR))
+            return null;
+        Matcher matcher = OKHTTP_HEADER_VALUE_ERROR.matcher(message);
+        if (matcher.matches())
+            return unsafeHeaderValue(matcher.group(1));
+        String nameError = "Approov cannot set a header: its name contains a character a header name cannot carry";
+        Log.e(TAG, nameError);
+        return new ApproovException(nameError);
     }
 
     /**
@@ -1768,6 +1856,12 @@ class ApproovTokenInterceptor implements Interceptor {
                         // a non-SUCCESS result) leaves the placeholder, never "null"
                         Log.d(TAG, "No secure string to substitute, placeholder left in header: " + header
                                 + ", " + approovResults.getStatus().toString());
+                    } else if (!ApproovService.isSafeHeaderValue(secureString)) {
+                        // a value a header cannot carry is a substitution that produced no
+                        // usable value, under every mutator (SPECIFICATION 1.4); the value
+                        // is never logged
+                        Log.w(TAG, "Secure string for header " + header + " contains a character a header "
+                                + "value cannot carry, placeholder left");
                     } else {
                         aChange = true;
                         setSubstitutionHeaders.put(header, prefix + secureString);
@@ -1803,6 +1897,12 @@ class ApproovTokenInterceptor implements Interceptor {
                         // a decision to substitute with no value leaves the placeholder
                         Log.d(TAG, "No secure string to substitute, placeholder left in query parameter: "
                                 + queryKey + ", " + approovResults.getStatus().toString());
+                    } else if (!ApproovService.isSafeQueryValue(secureString)) {
+                        // OkHttp silently drops tab, LF, FF and CR from a URL, so the
+                        // backend would receive a different value: no usable value, under
+                        // every mutator (SPECIFICATION 1.4); the value is never logged
+                        Log.w(TAG, "Secure string for query parameter " + queryKey + " contains a character "
+                                + "a URL cannot carry, placeholder left");
                     } else {
                         // substitute the query parameter
                         aChange = true;
@@ -1821,7 +1921,7 @@ class ApproovTokenInterceptor implements Interceptor {
         if (aChange) {
             Request.Builder builder = request.newBuilder();
             if (setTokenHeaderKey != null) {
-                setHeader(builder, setTokenHeaderKey, setTokenHeaderValue, "Approov token header");
+                setHeader(builder, setTokenHeaderKey, setTokenHeaderValue);
                 changes.setTokenHeaderKey(setTokenHeaderKey);
                 changes.setTokenHeaderPrefix(setTokenHeaderPrefix);
 
@@ -1832,20 +1932,19 @@ class ApproovTokenInterceptor implements Interceptor {
                 builder.tag(ApproovRequestFreshness.class, freshness);
             }
             if (setTraceIDHeaderKey != null) {
-                setHeader(builder, setTraceIDHeaderKey, setTraceIDHeaderValue, "Approov trace header");
+                setHeader(builder, setTraceIDHeaderKey, setTraceIDHeaderValue);
                 changes.setTraceIDHeaderKey(setTraceIDHeaderKey);
             }
             // report the fetch status on the status header, replacing any value the app
             // may have set itself so that the backend only sees what this layer observed
             if (setStatusHeaderKey != null) {
-                setHeader(builder, setStatusHeaderKey, setStatusHeaderValue, "Approov status header");
+                setHeader(builder, setStatusHeaderKey, setStatusHeaderValue);
                 changes.setStatusHeaderKey(setStatusHeaderKey);
             }
             if (!setSubstitutionHeaders.isEmpty()) {
                 for (Map.Entry<String, String> entry : setSubstitutionHeaders.entrySet()) {
                     // substitute the header
-                    setHeader(builder, entry.getKey(), entry.getValue(),
-                            "Header substitution for " + entry.getKey());
+                    setHeader(builder, entry.getKey(), entry.getValue());
                 }
                 changes.setSubstitutionHeaderKeys(new ArrayList<>(setSubstitutionHeaders.keySet()));
             }
@@ -1885,6 +1984,19 @@ class ApproovTokenInterceptor implements Interceptor {
                 // exception from it (SPECIFICATION 1.6.1)
                 Log.e(TAG, "ApproovServiceMutator.handleInterceptorProcessedRequest returned null");
                 throw new ApproovException("ApproovServiceMutator.handleInterceptorProcessedRequest returned null");
+            }
+            // a header the callback set or changed that a header cannot carry is the
+            // app's configuration error (SPECIFICATION 1.4, 1.7(a)): OkHttp's builder
+            // refuses most such values inside the callback (see callMutator), but one
+            // set with Headers.Builder.addUnsafeNonAscii would reach the wire
+            for (String name : processedRequest.headers().names()) {
+                List<String> values = processedRequest.headers(name);
+                if (values.equals(request.headers(name)))
+                    continue;
+                for (String value : values) {
+                    if (!ApproovService.isSafeHeaderValue(value))
+                        throw ApproovService.unsafeHeaderValue(name);
+                }
             }
         } else {
             Log.d(TAG, "Protection reapplied without the processed request callback of "
@@ -1950,26 +2062,28 @@ class ApproovTokenInterceptor implements Interceptor {
     }
 
     /**
-     * Sets a header that this layer adds or substitutes. A name or value that
-     * OkHttp rejects (for example a secure string or token with a line break, or a
-     * header name with a space set by the app) fails the request with an
-     * ApproovException instead of OkHttp's IllegalArgumentException. OkHttp's
-     * message quotes the value, which may be a token or a secure string, so neither
-     * it nor the cause is kept.
+     * Sets a header that this layer adds or substitutes. The value is checked first
+     * (SPECIFICATION 1.4, 1.7(a)): a value a header cannot carry, which can only come
+     * from what the app supplied (a token prefix), fails the request with an
+     * ApproovException naming the header, never quoting the value. OkHttp's own
+     * IllegalArgumentException quotes the value, so it is never let through; a
+     * header name OkHttp rejects (set by the app with setTokenHeader or
+     * setStatusHeader) fails the request the same way.
      *
-     * @param builder   the request builder
-     * @param name      the header name
-     * @param value     the header value
-     * @param operation what the header is for, for the exception message
-     * @throws ApproovException if OkHttp rejects the name or the value
+     * @param builder the request builder
+     * @param name    the header name
+     * @param value   the header value
+     * @throws ApproovException if the name or the value cannot be set
      */
-    private static void setHeader(Request.Builder builder, String name, String value, String operation)
-            throws ApproovException {
+    private static void setHeader(Request.Builder builder, String name, String value) throws ApproovException {
+        if (!ApproovService.isSafeHeaderValue(value))
+            throw ApproovService.unsafeHeaderValue(name);
         try {
             builder.header(name, value);
         } catch (IllegalArgumentException e) {
-            Log.e(TAG, operation + ": not a valid header name or value for " + name);
-            throw new ApproovException(operation + ": not a valid header name or value for " + name);
+            String message = "Approov cannot set header " + name + ": not a valid header name";
+            Log.e(TAG, message);
+            throw new ApproovException(message);
         }
     }
 

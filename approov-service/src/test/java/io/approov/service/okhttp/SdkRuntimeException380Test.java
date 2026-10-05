@@ -343,28 +343,6 @@ public class SdkRuntimeException380Test {
         assertEquals(0, fixture.server.getRequestCount());
     }
 
-    @Test
-    public void secureStringThatIsNotAValidHeaderValueIsAnIOExceptionWithoutTheValue() throws Exception {
-        // a secure string with a line break cannot be a header value; OkHttp's own
-        // message for that quotes the value, so it must not reach the app
-        assertEquals("line-one\nsecret-line-two",
-                ApproovService.fetchSecureString("bad-key", "line-one\nsecret-line-two"));
-        ApproovService.addSubstitutionHeader("X-Api-Key", null);
-        for (boolean enqueued : new boolean[] {true, false}) {
-            // a response in case the request wrongly reaches the server
-            fixture.server.enqueue(new MockResponse().setBody("ok"));
-            Request request = new Request.Builder().url(fixture.server.url("/p"))
-                    .header("X-Api-Key", "bad-key").build();
-            ApproovException e = RequestPathProbe.assertFailure("invalid secure string",
-                    probe.run(request, enqueued), ApproovException.class);
-            assertTrue(e.getMessage(), e.getMessage().contains("X-Api-Key"));
-            for (Throwable t = e; t != null; t = t.getCause())
-                assertFalse("the secure string must not appear in " + t,
-                        String.valueOf(t.getMessage()).contains("secret-line-two"));
-        }
-        assertEquals(0, fixture.server.getRequestCount());
-    }
-
     // ==================================================================================
     // message signing: SDK failures are inside the fail-open (SPECIFICATION 3.5)
     // ==================================================================================
