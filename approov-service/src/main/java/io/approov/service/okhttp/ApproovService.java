@@ -271,29 +271,33 @@ public class ApproovService {
     }
 
     /**
-     * Indicates whether a secure string substituted into a query parameter reaches
-     * the backend unchanged. The URL is parsed as OkHttp will send it and the
-     * parameter's value is read back from the query OkHttp stores: it must be
-     * printable ASCII and either the secure string itself or its percent-encoded
-     * form. OkHttp percent-encodes non-ASCII and DEL, which the backend decodes to
-     * the same value, but silently drops tab, LF, FF and CR from a URL, and an & or
-     * a # in the value changes the structure of the URL. Mirrors
-     * approov-service-android's check (c695dca), reading only the query so that a
-     * value cut short by a fragment is caught.
+     * Indicates whether a secure string substituted into an occurrence of a query
+     * parameter reaches the backend unchanged. The URL is parsed as OkHttp will
+     * send it and the given occurrence of the parameter is read back from the
+     * query OkHttp stores: it must be printable ASCII and either the secure string
+     * itself or its percent-encoded form. OkHttp percent-encodes non-ASCII and DEL,
+     * which the backend decodes to the same value, but silently drops tab, LF, FF
+     * and CR from a URL, and an & or a # in the value changes the structure of the
+     * URL. Mirrors approov-service-android's check (ee11052), reading only the
+     * query so that a value cut short by a fragment is caught.
      *
      * @param url          the URL with the secure string substituted
      * @param pattern      the query parameter's pattern, whose group 1 is its value
+     * @param occurrence   the occurrence of the parameter in the query, from 0
      * @param secureString the secure string substituted
      * @return true if the backend receives the secure string unchanged
      */
-    static boolean isCarriedInQuery(String url, Pattern pattern, String secureString) {
+    static boolean isCarriedInQuery(String url, Pattern pattern, int occurrence, String secureString) {
         HttpUrl parsed = HttpUrl.parse(url);
         if ((parsed == null) || (parsed.encodedQuery() == null))
             return false;
         Matcher stored = pattern.matcher("?" + parsed.encodedQuery());
-        if (!stored.find())
-            return false;
-        String value = stored.group(1);
+        String value = null;
+        for (int i = 0; i <= occurrence; i++) {
+            if (!stored.find())
+                return false;
+            value = stored.group(1);
+        }
         for (int i = 0; i < value.length(); i++) {
             char c = value.charAt(i);
             if ((c < 0x20) || (c > 0x7e))
@@ -1103,8 +1107,9 @@ public class ApproovService {
      * require a new
      * OkHttpClient to be built.
      *
-     * The key is matched as a literal string, not as a regular expression, and only
-     * its first occurrence in a URL is substituted (SPECIFICATION 1.4).
+     * The key is matched as a literal string, not as a regular expression, and every
+     * occurrence of it in a URL's query is substituted, each value looked up as its
+     * own secure string key (SPECIFICATION 1.4).
      *
      * @param key is the query parameter key name to be added for substitution
      */
@@ -1925,8 +1930,20 @@ class ApproovTokenInterceptor implements Interceptor {
         for (Map.Entry<String, Pattern> entry : substitutionQueryParams.entrySet()) {
             String queryKey = entry.getKey();
             Pattern pattern = entry.getValue();
-            Matcher matcher = pattern.matcher(replacementURL);
-            if (matcher.find()) {
+            // every occurrence of the parameter in the query is substituted, each value
+            // looked up as its own key and read back on its own (SPECIFICATION 1.4);
+            // the search is confined to the query, after the first '?' and before any
+            // '#', so that the occurrences counted here are the ones read back from it
+            int occurrence = 0;
+            int from = replacementURL.indexOf('?');
+            while (from >= 0) {
+                int hash = replacementURL.indexOf('#', from);
+                Matcher matcher = pattern.matcher(replacementURL);
+                matcher.region(from, (hash < 0) ? replacementURL.length() : hash);
+                if (!matcher.find())
+                    break;
+                int start = matcher.start(1);
+                from = matcher.end(1);
                 // we have found an occurrence of the query parameter to be replaced so we look
                 // up the existing value as a key for a secure string
                 String queryValue = matcher.group(1);
@@ -1942,24 +1959,28 @@ class ApproovTokenInterceptor implements Interceptor {
                         Log.d(TAG, "No secure string to substitute, placeholder left in query parameter: "
                                 + queryKey + ", " + approovResults.getStatus().toString());
                     } else {
-                        // substitute the query parameter, then read the URL back as OkHttp
-                        // stores it: a value OkHttp does not carry unchanged (it strips tab,
-                        // LF, FF and CR from a URL; an & ends the parameter, a # starts the
-                        // fragment) would reach the backend changed, so it is a
-                        // substitution with no usable value under every mutator and the
-                        // placeholder stays (SPECIFICATION 1.4); the value is never logged
-                        String candidateURL = new StringBuilder(replacementURL).replace(matcher.start(1),
-                                matcher.end(1), secureString).toString();
-                        if (ApproovService.isCarriedInQuery(candidateURL, pattern, secureString)) {
+                        // substitute this occurrence, then read it back from the URL as
+                        // OkHttp stores it: a value OkHttp does not carry unchanged (it
+                        // strips tab, LF, FF and CR from a URL; an & ends the parameter, a
+                        // # starts the fragment) would reach the backend changed, so it is
+                        // a substitution with no usable value under every mutator and this
+                        // occurrence keeps its placeholder (SPECIFICATION 1.4); the value
+                        // is never logged
+                        String candidateURL = new StringBuilder(replacementURL).replace(start, from,
+                                secureString).toString();
+                        if (ApproovService.isCarriedInQuery(candidateURL, pattern, occurrence, secureString)) {
                             aChange = true;
-                            queryKeys.add(queryKey);
+                            if (!queryKeys.contains(queryKey))
+                                queryKeys.add(queryKey);
                             replacementURL = candidateURL;
+                            from = start + secureString.length();
                         } else {
                             Log.w(TAG, "Secure string for query parameter " + queryKey + " cannot be carried "
                                     + "in the URL unchanged, placeholder left");
                         }
                     }
                 }
+                occurrence++;
             }
         }
 
