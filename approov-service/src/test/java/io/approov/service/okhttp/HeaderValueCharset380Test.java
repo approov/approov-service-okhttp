@@ -64,6 +64,16 @@ public class HeaderValueCharset380Test {
         "crlf\r\n-SECRETMARK",
     };
 
+    // values OkHttp would not carry unchanged in a query parameter: it strips LF, CR
+    // and tab from a URL, an & ends the parameter and a # starts the fragment
+    private static final String[] QUERY_CHANGED_VALUES = {
+        "line\n-SECRETMARK",
+        "crlf\r\n-SECRETMARK",
+        "tab\t-SECRETMARK",
+        "amp&x=SECRETMARK",
+        "hash#SECRETMARK",
+    };
+
     private static final ApproovServiceMutator[] MUTATORS = {
         ApproovServiceMutator.CLOSE_FAILURE, ApproovServiceMutator.ALWAYS_PROCEED,
     };
@@ -81,6 +91,9 @@ public class HeaderValueCharset380Test {
         for (int i = 0; i < UNSAFE_VALUES.length; i++)
             assertEquals(UNSAFE_VALUES[i], ApproovService.fetchSecureString("unsafe-" + i, UNSAFE_VALUES[i]));
         assertEquals("good-secret", ApproovService.fetchSecureString("good-key", "good-secret"));
+        for (int i = 0; i < QUERY_CHANGED_VALUES.length; i++)
+            assertEquals(QUERY_CHANGED_VALUES[i],
+                    ApproovService.fetchSecureString("changed-" + i, QUERY_CHANGED_VALUES[i]));
         probe = new RequestPathProbe(fixture);
         ShadowLog.reset();
     }
@@ -143,21 +156,22 @@ public class HeaderValueCharset380Test {
     }
 
     @Test
-    public void secureStringOkHttpWouldMangleInAQueryKeepsThePlaceholder() throws Exception {
+    public void secureStringOkHttpWouldNotCarryUnchangedInAQueryKeepsThePlaceholder() throws Exception {
         ApproovService.addSubstitutionQueryParam("key");
-        // OkHttp drops tab, LF, FF and CR from a URL, so these values would be changed
         for (ApproovServiceMutator mutator : MUTATORS) {
             ApproovService.setServiceMutator(mutator);
-            for (int i : new int[] {2, 3}) {
+            for (int i = 0; i < QUERY_CHANGED_VALUES.length; i++) {
                 for (boolean enqueued : new boolean[] {true, false}) {
                     String what = mutator + " value " + i + (enqueued ? " enqueue" : " execute");
                     ShadowLog.reset();
                     fixture.server.enqueue(new MockResponse().setBody("ok"));
                     RequestPathProbe.assertOk(what, probe.run(new Request.Builder()
-                            .url(fixture.server.url("/p?key=unsafe-" + i)).build(), enqueued));
+                            .url(fixture.server.url("/p?key=changed-" + i + "&other=1")).build(), enqueued));
                     RecordedRequest recorded = fixture.server.takeRequest(1, TimeUnit.SECONDS);
-                    assertEquals(what + ": the placeholder stays", "/p?key=unsafe-" + i, recorded.getPath());
-                    assertTrue(what + ": a warning names the query parameter", logged(Log.WARN, "key"));
+                    assertEquals(what + ": the placeholder stays", "/p?key=changed-" + i + "&other=1",
+                            recorded.getPath());
+                    assertTrue(what + ": a warning names the query parameter",
+                            logged(Log.WARN, "query parameter key"));
                     assertNeverLogged(what, "SECRETMARK");
                 }
             }
@@ -167,14 +181,22 @@ public class HeaderValueCharset380Test {
     @Test
     public void nonAsciiAndDelSecureStringsInAQueryArePercentEncoded() throws Exception {
         ApproovService.addSubstitutionQueryParam("key");
-        fixture.server.enqueue(new MockResponse().setBody("ok"));
-        RequestPathProbe.assertOk("non-ASCII", probe.execute(new Request.Builder()
-                .url(fixture.server.url("/p?key=unsafe-0")).build()));
-        assertEquals("/p?key=caf%C3%A9-SECRETMARK", fixture.server.takeRequest(1, TimeUnit.SECONDS).getPath());
-        fixture.server.enqueue(new MockResponse().setBody("ok"));
-        RequestPathProbe.assertOk("DEL", probe.execute(new Request.Builder()
-                .url(fixture.server.url("/p?key=unsafe-1")).build()));
-        assertEquals("/p?key=del%7F-SECRETMARK", fixture.server.takeRequest(1, TimeUnit.SECONDS).getPath());
+        for (ApproovServiceMutator mutator : MUTATORS) {
+            ApproovService.setServiceMutator(mutator);
+            for (boolean enqueued : new boolean[] {true, false}) {
+                String what = mutator + (enqueued ? " enqueue" : " execute");
+                fixture.server.enqueue(new MockResponse().setBody("ok"));
+                RequestPathProbe.assertOk(what + " non-ASCII", probe.run(new Request.Builder()
+                        .url(fixture.server.url("/p?key=unsafe-0&other=1")).build(), enqueued));
+                assertEquals(what, "/p?key=caf%C3%A9-SECRETMARK&other=1",
+                        fixture.server.takeRequest(1, TimeUnit.SECONDS).getPath());
+                fixture.server.enqueue(new MockResponse().setBody("ok"));
+                RequestPathProbe.assertOk(what + " DEL", probe.run(new Request.Builder()
+                        .url(fixture.server.url("/p?key=unsafe-1")).build(), enqueued));
+                assertEquals(what, "/p?key=del%7F-SECRETMARK",
+                        fixture.server.takeRequest(1, TimeUnit.SECONDS).getPath());
+            }
+        }
     }
 
     @Test

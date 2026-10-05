@@ -271,22 +271,62 @@ public class ApproovService {
     }
 
     /**
-     * Indicates whether a secure string can be substituted into a query parameter
-     * unchanged. OkHttp percent-encodes non-ASCII, DEL and the other control
-     * characters, which the backend decodes to the same value, but silently drops
-     * tab, LF, FF and CR from a URL, so a value carrying one of them would arrive
-     * changed.
+     * Indicates whether a secure string substituted into a query parameter reaches
+     * the backend unchanged. The URL is parsed as OkHttp will send it and the
+     * parameter's value is read back from the query OkHttp stores: it must be
+     * printable ASCII and either the secure string itself or its percent-encoded
+     * form. OkHttp percent-encodes non-ASCII and DEL, which the backend decodes to
+     * the same value, but silently drops tab, LF, FF and CR from a URL, and an & or
+     * a # in the value changes the structure of the URL. Mirrors
+     * approov-service-android's check (c695dca), reading only the query so that a
+     * value cut short by a fragment is caught.
      *
-     * @param value the secure string
-     * @return true if the value can be substituted
+     * @param url          the URL with the secure string substituted
+     * @param pattern      the query parameter's pattern, whose group 1 is its value
+     * @param secureString the secure string substituted
+     * @return true if the backend receives the secure string unchanged
      */
-    static boolean isSafeQueryValue(String value) {
+    static boolean isCarriedInQuery(String url, Pattern pattern, String secureString) {
+        HttpUrl parsed = HttpUrl.parse(url);
+        if ((parsed == null) || (parsed.encodedQuery() == null))
+            return false;
+        Matcher stored = pattern.matcher("?" + parsed.encodedQuery());
+        if (!stored.find())
+            return false;
+        String value = stored.group(1);
         for (int i = 0; i < value.length(); i++) {
             char c = value.charAt(i);
-            if ((c == '\t') || (c == '\n') || (c == '\f') || (c == '\r'))
+            if ((c < 0x20) || (c > 0x7e))
                 return false;
         }
-        return true;
+        return value.equals(secureString) || secureString.equals(percentDecode(value));
+    }
+
+    /**
+     * Decodes %XX escapes as UTF-8, leaving every other character as it is.
+     *
+     * @param value the encoded value
+     * @return the decoded value, or null if an escape is malformed
+     */
+    private static String percentDecode(String value) {
+        java.io.ByteArrayOutputStream bytes = new java.io.ByteArrayOutputStream();
+        for (int i = 0; i < value.length(); i++) {
+            char c = value.charAt(i);
+            if (c == '%') {
+                if (i + 2 >= value.length())
+                    return null;
+                int high = Character.digit(value.charAt(i + 1), 16);
+                int low = Character.digit(value.charAt(i + 2), 16);
+                if ((high < 0) || (low < 0))
+                    return null;
+                bytes.write((high << 4) | low);
+                i += 2;
+            } else {
+                byte[] encoded = String.valueOf(c).getBytes(java.nio.charset.StandardCharsets.UTF_8);
+                bytes.write(encoded, 0, encoded.length);
+            }
+        }
+        return new String(bytes.toByteArray(), java.nio.charset.StandardCharsets.UTF_8);
     }
 
     /**
@@ -1897,18 +1937,23 @@ class ApproovTokenInterceptor implements Interceptor {
                         // a decision to substitute with no value leaves the placeholder
                         Log.d(TAG, "No secure string to substitute, placeholder left in query parameter: "
                                 + queryKey + ", " + approovResults.getStatus().toString());
-                    } else if (!ApproovService.isSafeQueryValue(secureString)) {
-                        // OkHttp silently drops tab, LF, FF and CR from a URL, so the
-                        // backend would receive a different value: no usable value, under
-                        // every mutator (SPECIFICATION 1.4); the value is never logged
-                        Log.w(TAG, "Secure string for query parameter " + queryKey + " contains a character "
-                                + "a URL cannot carry, placeholder left");
                     } else {
-                        // substitute the query parameter
-                        aChange = true;
-                        queryKeys.add(queryKey);
-                        replacementURL = new StringBuilder(replacementURL).replace(matcher.start(1),
+                        // substitute the query parameter, then read the URL back as OkHttp
+                        // stores it: a value OkHttp does not carry unchanged (it strips tab,
+                        // LF, FF and CR from a URL; an & ends the parameter, a # starts the
+                        // fragment) would reach the backend changed, so it is a
+                        // substitution with no usable value under every mutator and the
+                        // placeholder stays (SPECIFICATION 1.4); the value is never logged
+                        String candidateURL = new StringBuilder(replacementURL).replace(matcher.start(1),
                                 matcher.end(1), secureString).toString();
+                        if (ApproovService.isCarriedInQuery(candidateURL, pattern, secureString)) {
+                            aChange = true;
+                            queryKeys.add(queryKey);
+                            replacementURL = candidateURL;
+                        } else {
+                            Log.w(TAG, "Secure string for query parameter " + queryKey + " cannot be carried "
+                                    + "in the URL unchanged, placeholder left");
+                        }
                     }
                 }
             }
