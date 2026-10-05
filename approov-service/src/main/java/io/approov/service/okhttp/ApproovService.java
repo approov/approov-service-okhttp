@@ -1103,12 +1103,16 @@ public class ApproovService {
      * require a new
      * OkHttpClient to be built.
      *
+     * The key is matched as a literal string, not as a regular expression, and only
+     * its first occurrence in a URL is substituted (SPECIFICATION 1.4).
+     *
      * @param key is the query parameter key name to be added for substitution
      */
     public static synchronized void addSubstitutionQueryParam(String key) {
         Log.d(TAG, "addSubstitutionQueryParam " + key);
         try {
-            Pattern pattern = Pattern.compile("[\\?&]" + key + "=([^&;]+)");
+            // quoted, so that a key such as "a.b" never matches another parameter
+            Pattern pattern = Pattern.compile("[\\?&]" + Pattern.quote(key) + "=([^&;]+)");
             substitutionQueryParams.put(key, pattern);
         } catch (PatternSyntaxException e) {
             Log.e(TAG, "addSubstitutionQueryParam " + key + " error: " + e.getMessage());
