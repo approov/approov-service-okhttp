@@ -3,6 +3,7 @@
 ![Java](https://img.shields.io/badge/Java-8%2B-007396?logo=openjdk&logoColor=white)
 ![Android](https://img.shields.io/badge/Android-minSdk%2023-3DDC84?logo=android&logoColor=white)
 ![Maven Central](https://img.shields.io/maven-central/v/io.approov/service.okhttp?logo=apachemaven&logoColor=white&label=Maven%20Central)
+![Approov SDK](https://img.shields.io/badge/Approov%20SDK-3.5.3-0A66C2)
 ![Message Signing](https://img.shields.io/badge/Message%20Signing-RFC%209421-1f6feb)
 ![Build](https://github.com/approov/approov-service-okhttp/actions/workflows/build_and_test.yml/badge.svg)
 
@@ -18,7 +19,7 @@ Add the package to your app's Gradle dependencies, with `mavenCentral()` enabled
 implementation("io.approov:service.okhttp:3.8.0")
 ```
 
-The package supports Android 6.0 (API level 23) and later. Add these permissions to your app manifest:
+The package supports Android 6.0 (API level 23) and later, and OkHttp 4.12 or later (it depends on 4.12.0; OkHttp 3.x is not supported). Add these permissions to your app manifest:
 
 ```xml
 <uses-permission android:name="android.permission.ACCESS_NETWORK_STATE" />
@@ -102,7 +103,7 @@ OkHttpClient client = ApproovService.getOkHttpClient();
 ```
 </details>
 
-If you already configure an OkHttp client, for example to set timeouts or add interceptors, pass its builder to `ApproovService` before obtaining the client (initialization keeps it, like every other setting):
+If you already configure an OkHttp client, for example to set timeouts or add interceptors, pass its builder to `ApproovService` before obtaining the client (initialization keeps it, like every other setting). Approov's network interceptors are placed ahead of yours, so your network interceptors see each request as it is sent:
 
 ```kotlin
 ApproovService.setOkHttpClientBuilder(
@@ -142,6 +143,8 @@ By default 3.8.0 makes the same token decisions as 3.5.x and throws the same exc
 * A secure string substitution now mirrors the token decision: a `REJECTED` or `NO_APPROOV_SERVICE` secure string leaves the placeholder and the request proceeds, where 3.5.x threw `ApproovRejectionException` or `ApproovFetchStatusException`.
 * `initialize` never resets configuration: settings made before or after it are kept, a repeat with the same account ID returns at once, and the SDK's own exception reaches the caller of a rejected one. `isInitialized()` and `isApproovEnabled()` are replaced by `isApproovServiceEnabled()` and `isApproovProtectionEnabled()`.
 * `setInstallAttrsInToken` is renamed `setInstallAttributes`. `setUseApproovStatusIfNoToken`, `setProceedOnNetworkFail` and `prefetch` are removed; install `ApproovServiceMutator.ALWAYS_PROCEED` to proceed on network failures, and the SDK manages prefetching.
+* Approov's network interceptors now run before the network interceptors your builder adds, so a logger or inspector there no longer sees a redirect before Approov strips it. Such interceptors run after signing and must not change a signed header, the URL or the body.
+* A secure string is only substituted into a request sent over `https`; a cleartext request keeps its placeholder.
 * The methods that call the SDK throw `ApproovException` (`<method>: Approov protection not enabled`) before initialization and in bypass mode, and `getOkHttpClient()` may be called before initialization.
 
 4.0.0 will make `ALWAYS_PROCEED` the default and message signing compulsory, so your backend becomes the only place that rejects requests without a valid token. Read the [changelog](CHANGELOG.md) before upgrading and test app and backend together.

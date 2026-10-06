@@ -98,7 +98,7 @@ Returns `true` once the Approov SDK has been initialized with the account ID and
 
 
 ## getOkHttpClient
-Gets the default `OkHttpClient` that enables the Approov service. This adds the Approov token in a header to requests, performs and header or query parameter substitutions and also pins the connections, checking the current pins for the request's host on every request. The `OkHttpClient` is constructed lazily on demand but is cached if there are no changes.
+Gets the default `OkHttpClient` that enables the Approov service. This adds the Approov token in a header to requests, performs any header or query parameter substitutions and also pins the connections, checking the current pins for the request's host on every request against the certificate chain the trust manager validated (OkHttp 4.12 or later is required; OkHttp 3.x is not supported). A pin failure fails that request only: the connection is not closed, so other hosts OkHttp coalesced onto the same HTTP/2 connection are unaffected. The `OkHttpClient` is constructed lazily on demand but is cached if there are no changes.
 
 **Java:**
 ```Java
@@ -126,6 +126,8 @@ fun getOkHttpClient(builderName: String): OkHttpClient
 
 ## setOkHttpClientBuilder
 Sets the `OkHttpClient.Builder` to be used for constructing the default Approov `OkHttpClient`. This allows a custom configuration to be set, with additional interceptors and properties. It may be called before or after `initialize`, which keeps it, and takes effect for the next `getOkHttpClient` call.
+
+`getOkHttpClient` adds the Approov token interceptor after the builder's application interceptors, and the Approov freshness and pinning interceptors before the builder's network interceptors, so app code at the network layer (a logger, an inspector) sees each attempt only after Approov stripped or refreshed its protection. Network interceptors of the builder therefore run after signing and must not change a signed header, the URL or the body. `getOkHttpClient` adds the Approov interceptors to the builder you pass, after removing any it added before.
 
 **Java:**
 ```Java
@@ -162,12 +164,12 @@ void setServiceMutator(ApproovServiceMutator mutator)
 fun setServiceMutator(mutator: ApproovServiceMutator?)
 ```
 
-The out-of-the-box mutator is `ApproovServiceMutator.DEFAULT`, and passing `null` reinstates it; `initialize` keeps whichever mutator is installed. Mutators carry decisions only: installing one never switches message signing on or off (see [enableMessageSigning](#enablemessagesigning)). Three standard decision sets are provided:
+The out-of-the-box mutator is `ApproovServiceMutator.DEFAULT`, and passing `null` reinstates it; `initialize` keeps whichever mutator is installed. Mutators carry decisions only: installing one never switches message signing on or off (see [enableMessageSigning](#enablemessagesigning)). The mutator is read at each decision point: a stale protection refresh, a redirect, a retry and the pinning hook use the mutator installed at that moment, not necessarily the one that first processed the request (SPECIFICATION 6.5, one request one mutator, is deferred beyond 3.8.0). Install it once at startup, not while requests are in flight. Three standard decision sets are provided:
 
 | Mutator | Decisions |
 | :--- | :--- |
 | `ApproovServiceMutator.CLOSE_FAILURE` | the 3.5.x decisions, which are also the interface defaults: a token fetch proceeds on `SUCCESS` (token header) and `NO_APPROOV_SERVICE` (empty token header); `UNKNOWN_URL` and `UNPROTECTED_URL` send the request with no Approov headers; `NO_NETWORK`, `POOR_NETWORK` and `UNTRUSTED_NETWORK` throw `ApproovNetworkException`; every other status throws `ApproovFetchStatusException`, `REJECTED` included. A secure string substitution mirrors the token decision for the same status: it is made on `SUCCESS`; on `UNKNOWN_KEY`, `REJECTED` and `NO_APPROOV_SERVICE` the placeholder is left and the request proceeds; the network statuses throw `ApproovNetworkException` and every other status `ApproovFetchStatusException` |
-| `ApproovServiceMutator.ALWAYS_PROCEED` | never aborts: every token fetch status except `UNKNOWN_URL` and `UNPROTECTED_URL` sends the token header, empty if there is no token, and the status header; a secure string is substituted on `SUCCESS` and the placeholder is left otherwise |
+| `ApproovServiceMutator.ALWAYS_PROCEED` | never aborts: every token fetch status except `UNKNOWN_URL` and `UNPROTECTED_URL` sends the token header, empty if there is no token, and the status header; a secure string is substituted on `SUCCESS` and the placeholder is left otherwise; a cleartext (`http`) request, which the SDK answers with `BAD_URL`, is sent with an empty token header and its placeholders, never a secure string |
 | `ApproovServiceMutator.DEFAULT` | `CLOSE_FAILURE` in 3.8.0, `ALWAYS_PROCEED` from 4.0.0. Name one of the two explicitly to keep your decisions fixed across 4.0.0 |
 
 **Java:**
@@ -268,7 +270,7 @@ fun setDevKey(devKey: String)
 This throws `ApproovException` if the SDK rejects the development key. Before `initialize` and in bypass mode it throws `ApproovException` with the message `setDevKey: Approov protection not enabled`, without calling the SDK.
 
 ## setTokenHeader
-Sets the `header` that the Approov token is added on, as well as an optional `prefix` String (such as "`Bearer `"). Pass `null` or the empty string for `prefix` if it is not required; `null` never prepends the literal string "null". By default the token is provided on `Approov-Token` with no prefix. If no token could be obtained the header is still sent, with an empty value after any prefix, and the status is reported on the status header (see `setStatusHeader`). Failure information is never placed in this header.
+Sets the `header` that the Approov token is added on, as well as an optional `prefix` String (such as "`Bearer `"). Pass `null` or the empty string for `prefix` if it is not required; `null` never prepends the literal string "null". With message signing on, a token header that is also a covered optional header (`Authorization` in the default factory) is covered once. By default the token is provided on `Approov-Token` with no prefix. If no token could be obtained the header is still sent, with an empty value after any prefix, and the status is reported on the status header (see `setStatusHeader`). Failure information is never placed in this header.
 
 **Java:**
 ```Java
@@ -390,7 +392,7 @@ fun setStaleProtectionRefreshPeriod(periodMS: Long)
 ```
 
 ## addSubstitutionHeader
-Adds the name of a `header` which should be subject to [secure strings](https://approov.io/docs/latest/approov-usage-documentation/#secure-strings) substitution. This means that if the `header` is present then the value will be used as a key to look up a secure string value which will be substituted into the `header` value instead. This allows easy migration to the use of secure strings. A `requiredPrefix` may be specified to deal with cases such as the use of "`Bearer `" prefixed before values in an authorization header. Set `requiredPrefix` to `null` if it is not required.
+Adds the name of a `header` which should be subject to [secure strings](https://approov.io/docs/latest/approov-usage-documentation/#secure-strings) substitution. This means that if the `header` is present then the value will be used as a key to look up a secure string value which will be substituted into the `header` value instead. This allows easy migration to the use of secure strings. A `requiredPrefix` may be specified to deal with cases such as the use of "`Bearer `" prefixed before values in an authorization header. Set `requiredPrefix` to `null` if it is not required. A secure string is only substituted into a request sent over TLS (`https`): a cleartext request keeps the placeholder under every mutator, with a warning naming the header. It applies to requests processed after the call, through clients already obtained.
 
 Header names are matched case-insensitively. Adding the same logical header again replaces its existing configuration and preserves the casing from the latest call. A substitution header cannot also be the token binding header; either configuration call throws `IllegalArgumentException` when it detects the conflict.
 
@@ -433,7 +435,7 @@ fun getSubstitutionHeaders(): Map<String, String>
 ```
 
 ## addSubstitutionQueryParam
-Adds a `key` name for a query parameter that should be subject to [secure strings](https://approov.io/docs/latest/approov-usage-documentation/#secure-strings) substitution. This means that if the query parameter is present in a URL then the value will be used as a key to look up a secure string value which will be substituted as the query parameter value instead. This allows easy migration to the use of secure strings. The `key` is matched as a literal string, not as a regular expression (a `.` in it matches only a `.`), and every occurrence of it in the query of a URL is substituted, each value looked up as its own secure string key and checked on its own: an occurrence whose secure string OkHttp would not carry unchanged keeps its placeholder while the others are substituted.
+Adds a `key` name for a query parameter that should be subject to [secure strings](https://approov.io/docs/latest/approov-usage-documentation/#secure-strings) substitution. This means that if the query parameter is present in a URL then the value will be used as a key to look up a secure string value which will be substituted as the query parameter value instead. This allows easy migration to the use of secure strings. The `key` is matched as a literal string, not as a regular expression (a `.` in it matches only a `.`), and every occurrence of it in the query of a URL is substituted, each value looked up as its own secure string key and checked on its own: an occurrence whose secure string OkHttp would not carry unchanged keeps its placeholder while the others are substituted. A cleartext (`http`) request keeps every placeholder under every mutator. A substituted query parameter is part of the URL OkHttp stores, so a client with an OkHttp `Cache` writes it to the disk cache; do not use a cache on such a client.
 
 > **Note**: The package inserts secure strings into the URL exactly as they are returned by the Approov cloud. It does **not** automatically apply URL encoding. A secure string that OkHttp would not carry unchanged (one with `&`, `#`, a tab, CR or LF) is not substituted: the placeholder stays and the request proceeds. If your secure strings contain reserved characters, store them URL-encoded when adding them via the Approov CLI.
 
@@ -488,7 +490,7 @@ void addExclusionURLRegex(String urlRegex)
 fun addExclusionURLRegex(urlRegex: String)
 ```
 
-Note that this facility must be used with *EXTREME CAUTION* due to the impact of dynamic pinning. Pinning may be applied to all domains added using Approov, and updates to the pins are received when an Approov fetch is performed. If you exclude some URLs on domains that are protected with Approov, then these will be protected with Approov pins but without a path to update the pins until a URL is used that is not excluded. Thus you are responsible for ensuring that there is always a possibility of calling a non-excluded URL, or you should make an explicit call to fetchToken if there are persistent pinning failures. Conversely, use of those option may allow a connection to be established before any dynamic pins have been received via Approov, thus potentially opening the channel to a MitM.
+Note that this facility must be used with *EXTREME CAUTION* due to the impact of dynamic pinning. Pinning may be applied to all domains added using Approov, and updates to the pins are received when an Approov fetch is performed. If you exclude some URLs on domains that are protected with Approov, then these will be protected with Approov pins but without a path to update the pins until a URL is used that is not excluded. Thus you are responsible for ensuring that there is always a possibility of calling a non-excluded URL through the client: the pins this package applies are rebuilt only when such a request's token fetch reports a configuration change, and a direct call to `fetchToken` does not rebuild them. Conversely, use of those option may allow a connection to be established before any dynamic pins have been received via Approov, thus potentially opening the channel to a MitM.
 
 ## removeExclusionURLRegex
 Removes an exclusion URL regular expression (`urlRegex`) previously added using `addExclusionURLRegex`.
@@ -580,7 +582,7 @@ String fetchToken(String url) throws ApproovException
 fun fetchToken(url: String): String
 ```
 
-This throws `ApproovException` if there was a problem obtaining an Approov token, an `ApproovFetchStatusException` carrying the status in `getTokenFetchStatus()` when the fetch did not succeed. This may require network access so may take some time to complete, and should not be called from the UI thread. Before `initialize` and in bypass mode it throws `ApproovException` with the message `fetchToken: Approov protection not enabled`, without calling the SDK.
+This throws `ApproovException` if there was a problem obtaining an Approov token, an `ApproovFetchStatusException` carrying the status in `getTokenFetchStatus()` when the fetch did not succeed. This may require network access so may take some time to complete, and should not be called from the UI thread. Before `initialize` and in bypass mode it throws `ApproovException` with the message `fetchToken: Approov protection not enabled`, without calling the SDK. It does not update the pins the client applies: that happens only through requests made with the client.
 
 ## getMessageSignature
 **DEPRECATED**, replaced by `getAccountMessageSignature`.
@@ -742,7 +744,7 @@ Passed to `handleInterceptorProcessedRequest`, describing what the interceptor d
 | `void setSubstitutionHeaderKeys(List<String>)` | sets the substituted header names |
 | `void setSubstitutionQueryParamResults(String originalURL, List<String> keys)` | sets the pre-substitution URL and the substituted query parameters |
 
-The setters are used by the interceptor and by tests that construct a mutations object for a custom mutator; a mutator receiving the object reads it and does not need to call them.
+The setters are used by the interceptor and by tests that construct a mutations object for a custom mutator; a mutator receiving the object reads it and does not need to call them. Calling them changes nothing the package does: it keeps its own copy of what it applied, which it strips on a redirect and signs.
 
 ## SignatureParameters
 
@@ -752,7 +754,7 @@ The setters are used by the interceptor and by tests that construct a mutations 
 | :--- | :--- |
 | `SignatureParameters()` | empty parameter set |
 | `SignatureParameters(SignatureParameters base)` | copy of the components, parameters and debug flag of another set |
-| `SignatureParameters addComponentIdentifier(String)` / `(StringItem)` | cover a component: a derived component such as `ComponentProvider.DC_METHOD` (`@method`) or `DC_TARGET_URI` (`@target-uri`), or a header name |
+| `SignatureParameters addComponentIdentifier(String)` / `(StringItem)` | cover a component: a derived component such as `ComponentProvider.DC_METHOD` (`@method`) or `DC_TARGET_URI` (`@target-uri`), or a header name; a component already covered (same name and parameters) is not added again (RFC 9421 section 2) |
 | `boolean containsComponentIdentifier(String)` / `(StringItem)` | whether a component is covered |
 | `String getAlg()` / `SignatureParameters setAlg(String)` | signature algorithm; left unset by the default factory so that one signature per configured algorithm is produced, set explicitly to produce a single signature |
 | `Long getCreated()` / `setCreated(Long)` | the `created` parameter, seconds since the epoch |
@@ -765,7 +767,7 @@ The setters are used by the interceptor and by tests that construct a mutations 
 | `boolean isDebugMode()` / `void setDebugMode(boolean)` | when true the signer adds `Signature-Base-Digest`, a SHA-256 of each signature base, for verifier debugging |
 | `StringItem toComponentIdentifier()` | the `@signature-params` identifier |
 | `InnerList toComponentValue()` | the `Signature-Input` member value for this set |
-| `static SignatureParameters fromDictionaryEntry(Dictionary, String sigId)` | parses a `Signature-Input` member back into a parameter set |
+| `static SignatureParameters fromDictionaryEntry(Dictionary, String sigId)` | parses a `Signature-Input` member back into a parameter set, keeping its components exactly as received, repeats included |
 
 ## ApproovDefaultMessageSigning
 
@@ -773,7 +775,7 @@ Holds the message signing constants and the signature parameters factory API. It
 
 | Member | Meaning |
 | :--- | :--- |
-| `static SignatureParametersFactory generateDefaultSignatureParametersFactory()` | the default factory: both signatures, method and target URI, token, trace and status headers, `Authorization`, `Content-Length`, `Content-Type` when present, optional SHA-256 body digest, `created`, 15 second `expires` |
+| `static SignatureParametersFactory generateDefaultSignatureParametersFactory()` | the default factory: both signatures, method and target URI, token, trace and status headers, `Authorization`, `Content-Length`, `Content-Type` when present (the last two as OkHttp sends them, from the body), SHA-256 body digest when one can be computed (an empty body included), `created`, 15 second `expires` |
 | `static SignatureParametersFactory generateDefaultSignatureParametersFactory(SignatureParameters base)` | as above over a custom base component set |
 | `DIGEST_SHA256`, `DIGEST_SHA512` | body digest algorithms |
 | `ALG_ES256`, `ALG_HS256` | signature algorithms (`ecdsa-p256-sha256`, `hmac-sha256`) |
