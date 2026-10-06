@@ -1000,14 +1000,49 @@ public class ApproovDefaultMessageSigning {
 
         @Override
         public boolean hasField(String name) {
-            List<String> headers = request.headers(name);
-            return !headers.isEmpty();
+            return !fieldValues(name).isEmpty();
         }
 
         @Override
         public String getField(String name) {
-            List<String> headers = request.headers(name);
-            return ComponentProvider.combineFieldValues(headers);
+            return ComponentProvider.combineFieldValues(fieldValues(name));
+        }
+
+        /**
+         * Gets the values of a header field as OkHttp will send them. The request
+         * is signed before OkHttp's BridgeInterceptor, which runs between the
+         * application and the network interceptors and, for a request with a body,
+         * sets Content-Type from the body's media type (if it has one) and
+         * Content-Length from its length, removing Content-Length when the length
+         * is unknown and the body is sent chunked, whatever the app set. Those two
+         * fields are reported as Bridge will set them, so that the signature covers
+         * the values on the wire (SPECIFICATION 3.7); on a request that already
+         * passed Bridge (a reapplication at the network layer) the result is the
+         * same. Every other field is the request's own.
+         *
+         * @param name the field name
+         * @return the field's values, empty if it is not sent
+         */
+        private List<String> fieldValues(String name) {
+            RequestBody body = request.body();
+            if (body != null) {
+                if ("Content-Type".equalsIgnoreCase(name)) {
+                    okhttp3.MediaType type = body.contentType();
+                    if (type != null)
+                        return Collections.singletonList(type.toString());
+                } else if ("Content-Length".equalsIgnoreCase(name)) {
+                    long length;
+                    try {
+                        length = body.contentLength();
+                    } catch (IOException e) {
+                        // OkHttp fails the request on the same exception before sending
+                        return request.headers(name);
+                    }
+                    return (length != -1) ? Collections.singletonList(Long.toString(length))
+                            : Collections.<String>emptyList();
+                }
+            }
+            return request.headers(name);
         }
 
         @Override

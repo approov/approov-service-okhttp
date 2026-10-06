@@ -241,6 +241,62 @@ public class TargetUriWireUrl380Test {
     }
 
     // ==================================================================================
+    // header fields OkHttp sets after signing
+    // ==================================================================================
+
+    @Test
+    public void contentTypeAndLengthFromTheBodyAreCoveredAsSent() throws Exception {
+        // the app sets neither header: OkHttp's BridgeInterceptor adds both from the
+        // body after the application interceptors, where this layer signs
+        Received received = execute(new Request.Builder().url(url("/body"))
+                .post(RequestBody.create("{\"a\":1}", MediaType.get("application/json; charset=utf-8")))
+                .build());
+        assertEquals("application/json; charset=utf-8", received.header("Content-Type"));
+        assertEquals("7", received.header("Content-Length"));
+        for (Map.Entry<String, String> input : members(received.header("Signature-Input")).entrySet()) {
+            List<String> components = components(input.getValue());
+            assertTrue(input.getKey() + " must cover content-type: " + components, components.contains("content-type"));
+            assertTrue(input.getKey() + " must cover content-length: " + components, components.contains("content-length"));
+        }
+        verifyBothSignatures(received);
+    }
+
+    @Test
+    public void appBodyHeadersOkHttpReplacesAreSignedAsSent() throws Exception {
+        // OkHttp replaces an app's Content-Type and Content-Length with the body's
+        Received received = execute(new Request.Builder().url(url("/body"))
+                .header("Content-Type", "application/json")
+                .header("Content-Length", "1")
+                .post(RequestBody.create("{\"a\":1}", MediaType.get("application/json; charset=utf-8")))
+                .build());
+        assertEquals("application/json; charset=utf-8", received.header("Content-Type"));
+        assertEquals("7", received.header("Content-Length"));
+        verifyBothSignatures(received);
+    }
+
+    @Test
+    public void contentLengthOkHttpRemovesForAChunkedBodyIsNotSigned() throws Exception {
+        RequestBody unknownLength = new RequestBody() {
+            @Override
+            public MediaType contentType() {
+                return MediaType.get("text/plain");
+            }
+
+            @Override
+            public void writeTo(okio.BufferedSink sink) throws IOException {
+                sink.writeUtf8("chunked");
+            }
+        };
+        Received received = execute(new Request.Builder().url(url("/body"))
+                .header("Content-Length", "7")
+                .post(unknownLength)
+                .build());
+        assertNull("OkHttp sends a body of unknown length chunked", received.header("Content-Length"));
+        assertEquals("chunked", received.header("Transfer-Encoding"));
+        verifyBothSignatures(received);
+    }
+
+    // ==================================================================================
     // sending and receiving
     // ==================================================================================
 
