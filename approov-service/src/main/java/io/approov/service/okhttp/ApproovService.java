@@ -2478,15 +2478,21 @@ class ApproovPinningInterceptor implements Interceptor {
             throw new SSLPeerUnverifiedException("Approov pinning: cleartext connection to pinned host " + host);
         }
         // check the peer certificates against the current pins for this host on every
-        // connection check
+        // connection check. OkHttp 4.x holds the chain its trust manager validated in
+        // the handshake (RealConnection.connectTls cleans the presented chain with the
+        // client's CertificateChainCleaner), so a pinned certificate the server merely
+        // appends to an unrelated chain never matches.
         List<Certificate> certs = handshake.peerCertificates();
         try {
             getCertificatePinner().check(host, certs);
         } catch (SSLPeerUnverifiedException e) {
-            // if a certificate pinning error is detected then close the socket to force
-            // the next request to redo the TLS negotiation
+            // Only this request fails; the connection is not closed. OkHttp may have
+            // coalesced this host onto another host's HTTP/2 connection, whose streams
+            // must survive this host's pin failure. No verdict is cached, so the next
+            // request to this host on the same connection is checked again and fails
+            // again, and OkHttp itself cancels the exchange of this request (closing
+            // an HTTP/1 connection, which carries one request at a time).
             Log.d(TAG, "Pinning failure: " + e.toString());
-            connection.socket().close();
             throw e;
         }
         return chain.proceed(chain.request());
