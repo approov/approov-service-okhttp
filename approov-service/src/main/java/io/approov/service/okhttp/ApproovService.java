@@ -535,7 +535,7 @@ public class ApproovService {
      * Indicates whether Approov protection is enabled, which is true once the
      * Approov SDK has been initialized by a successful initialize with a non-empty
      * account ID. It is false before initialization and in bypass mode, where
-     * requests pass through without Approov processing. Replaces isApproovProtectionEnabled(),
+     * requests pass through without Approov processing. Replaces isApproovEnabled(),
      * removed in 3.8.0.
      *
      * @return true if the Approov SDK is initialized and requests are protected
@@ -1022,13 +1022,12 @@ public class ApproovService {
      * look up a
      * secure string value which will be substituted into the header value instead.
      * This allows
-     * easy migration to the use of secure strings. Note that this function should
-     * be called on initialization
-     * rather than for every request as it will require a new OkHttpClient to be
-     * built. A required
+     * easy migration to the use of secure strings. It applies to every request
+     * processed after the call, through any client already obtained. A required
      * prefix may be specified to deal with cases such as the use of "Bearer "
      * prefixed before values
-     * in an authorization header.
+     * in an authorization header. A secure string is only substituted into a
+     * request sent over TLS (https); a cleartext request keeps the placeholder.
      *
      * @param header         is the header to be marked for substitution
      * @param requiredPrefix is any required prefix to the value being substituted
@@ -1101,11 +1100,10 @@ public class ApproovService {
      * will be used as a
      * key to look up a secure string value which will be substituted as the query
      * parameter value
-     * instead. This allows easy migration to the use of secure strings. Note that
-     * this function
-     * should be called on initialization rather than for every request as it will
-     * require a new
-     * OkHttpClient to be built.
+     * instead. This allows easy migration to the use of secure strings. It applies
+     * to every request processed after the call, through any client already
+     * obtained. A secure string is only substituted into a request sent over TLS
+     * (https); a cleartext request keeps the placeholder.
      *
      * The key is matched as a literal string, not as a regular expression, and every
      * occurrence of it in a URL's query is substituted, each value looked up as its
@@ -1160,8 +1158,9 @@ public class ApproovService {
      * is not excluded. Thus
      * you are responsible for ensuring that there is always a possibility of
      * calling a non-excluded
-     * URL, or you should make an explicit call to fetchToken if there are
-     * persistent pinning failures.
+     * URL through an OkHttpClient from getOkHttpClient: the pins this layer applies
+     * are rebuilt only when such a request's token fetch reports a configuration
+     * change. A direct fetchToken call does not rebuild them.
      * Conversely, use of those option may allow a connection to be established
      * before any dynamic pins
      * have been received via Approov, thus potentially opening the channel to a
