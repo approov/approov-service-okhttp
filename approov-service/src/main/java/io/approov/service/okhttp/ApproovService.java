@@ -1882,15 +1882,25 @@ class ApproovTokenInterceptor implements Interceptor {
             }
         } else {
             // the request is not for a domain protected by Approov (or the mutator has
-            // decided it must be sent untouched) so no Approov headers are added: this
-            // also protects against header substitutions in domains not protected by
-            // Approov and therefore potentially subject to a MitM
+            // decided it must be sent untouched) so no Approov headers are added and no
+            // secure string is substituted. A status the mutator lets proceed (BAD_URL
+            // under ALWAYS_PROCEED, for example) is substituted below, but never over
+            // cleartext.
             return request;
         }
 
         // we now deal with any header substitutions, which may require further fetches
         // but these should be using cached results; the original values are kept so
         // that the substitution can be undone if the protection is reapplied
+        //
+        // A secure string is never substituted into a request that is not sent over
+        // TLS, whatever the mutator decides: the SDK answers BAD_URL for an http URL,
+        // which a mutator such as ALWAYS_PROCEED lets proceed, and a redirect from a
+        // protected host to an attacker's http URL carrying the placeholder would
+        // otherwise receive the secret in cleartext. The placeholder stays, as for any
+        // substitution that produces no usable value (SPECIFICATION 1.4), and a
+        // warning names the header or query parameter, never the value.
+        boolean overTLS = url.isHttps();
         Map<String, String> substitutionHeaders = ApproovService.getSubstitutionHeaders();
         Map<String, String> setSubstitutionHeaders = new LinkedHashMap<>(substitutionHeaders.size());
         Map<String, List<String>> originalHeaderValues = new LinkedHashMap<>(substitutionHeaders.size());
@@ -1899,6 +1909,11 @@ class ApproovTokenInterceptor implements Interceptor {
             String prefix = entry.getValue();
             String value = request.header(header);
             if ((value != null) && value.startsWith(prefix) && (value.length() > prefix.length())) {
+                if (!overTLS) {
+                    Log.w(TAG, "Secure string not substituted in header " + header
+                            + ": the request is not sent over TLS, placeholder left");
+                    continue;
+                }
                 String key = value.substring(prefix.length());
                 approovResults = fetchForRequest("Header substitution for " + header, () ->
                         ApproovService.sdk().fetchSecureStringAndWait(key, null));
@@ -1951,6 +1966,11 @@ class ApproovTokenInterceptor implements Interceptor {
                 matcher.region(from, (hash < 0) ? replacementURL.length() : hash);
                 if (!matcher.find())
                     break;
+                if (!overTLS) {
+                    Log.w(TAG, "Secure string not substituted in query parameter " + queryKey
+                            + ": the request is not sent over TLS, placeholder left");
+                    break;
+                }
                 int start = matcher.start(1);
                 from = matcher.end(1);
                 // we have found an occurrence of the query parameter to be replaced so we look
