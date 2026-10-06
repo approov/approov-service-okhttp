@@ -241,7 +241,7 @@ public class TargetUriWireUrl380Test {
     }
 
     // ==================================================================================
-    // header fields OkHttp sets after signing
+    // header fields OkHttp sets after signing, and repeated components
     // ==================================================================================
 
     @Test
@@ -293,6 +293,21 @@ public class TargetUriWireUrl380Test {
                 .build());
         assertNull("OkHttp sends a body of unknown length chunked", received.header("Content-Length"));
         assertEquals("chunked", received.header("Transfer-Encoding"));
+        verifyBothSignatures(received);
+    }
+
+    @Test
+    public void aTokenHeaderThatIsAlsoAnOptionalHeaderIsCoveredOnce() throws Exception {
+        // the token on Authorization, which the default factory also covers when present
+        ApproovService.setTokenHeader("Authorization", "Bearer ");
+        Received received = execute(new Request.Builder().url(url("/p")).get().build());
+        assertTrue(received.header("Authorization"), received.header("Authorization").startsWith("Bearer ey"));
+        for (Map.Entry<String, String> input : members(received.header("Signature-Input")).entrySet()) {
+            List<String> components = components(input.getValue());
+            // RFC 9421 section 2: each component identifier MUST occur only once
+            assertEquals(input.getKey() + " covers authorization once: " + components, 1,
+                    Collections.frequency(components, "authorization"));
+        }
         verifyBothSignatures(received);
     }
 

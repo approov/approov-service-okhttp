@@ -251,23 +251,27 @@ public class SignatureParameters implements Cloneable {
 	}
 
 	/**
-	 * Add a component without parameters.
+	 * Add a component without parameters. A component already covered is not added
+	 * again: RFC 9421 section 2 allows each component identifier only once in the
+	 * covered components, so that, for example, a token header named Authorization
+	 * that is also an optional header of the factory is covered once.
 	 */
 	public SignatureParameters addComponentIdentifier(String identifier) {
 		if (!identifier.startsWith("@")) {
-			componentIdentifiers.add(StringItem.valueOf(identifier.toLowerCase(Locale.US)));
+			return addComponentIdentifier(StringItem.valueOf(identifier.toLowerCase(Locale.US)));
 		} else {
-			componentIdentifiers.add(StringItem.valueOf(identifier));
+			return addComponentIdentifier(StringItem.valueOf(identifier));
 		}
-		return this;
 	}
 
 	/**
 	 * Add a component with optional parameters. Field components are assumed to be
-	 * already set to lowercase.
+	 * already set to lowercase. A component already covered with the same parameters
+	 * is not added again (RFC 9421 section 2).
 	 */
 	public SignatureParameters addComponentIdentifier(StringItem identifier) {
-		componentIdentifiers.add(identifier);
+		if (!containsComponentIdentifier(identifier))
+			componentIdentifiers.add(identifier);
 		return this;
 	}
 
@@ -305,7 +309,8 @@ public class SignatureParameters implements Cloneable {
 				InnerList coveredComponents = (InnerList)item;
 				SignatureParameters params = new SignatureParameters();
 				for (Item<?> innerItem : coveredComponents.get()) {
-					params.addComponentIdentifier((StringItem)innerItem);
+					// kept as received, repeats included, for the verifier to reject
+					params.componentIdentifiers.add((StringItem)innerItem);
 				}
 				for (Map.Entry<String, Item<?>> entry : coveredComponents.getParams().entrySet()) {
 					String key = entry.getKey();

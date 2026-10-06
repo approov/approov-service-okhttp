@@ -90,4 +90,33 @@ public class SignatureParametersTest {
         org.junit.Assert.assertNull(ComponentProvider.combineFieldValues(null));
         org.junit.Assert.assertNull(ComponentProvider.combineFieldValues(java.util.Collections.emptyList()));
     }
+
+    @Test
+    public void aComponentIsCoveredOnce() {
+        // RFC 9421 section 2: each component identifier occurs only once
+        SignatureParameters params = new SignatureParameters()
+                .addComponentIdentifier("@method")
+                .addComponentIdentifier("Authorization")
+                .addComponentIdentifier("authorization")
+                .addComponentIdentifier(StringItem.valueOf("authorization"))
+                .addComponentIdentifier("@method");
+        assertEquals("(\"@method\" \"authorization\")", params.toComponentValue().serialize());
+    }
+
+    @Test
+    public void theSameFieldWithOtherParametersIsAnotherComponent() {
+        SignatureParameters params = new SignatureParameters()
+                .addComponentIdentifier("example-dict")
+                .addComponentIdentifier(StringItem.valueOf("example-dict")
+                        .withParams(Parameters.valueOf(Collections.singletonMap("sf", BooleanItem.valueOf(true)))));
+        assertEquals("(\"example-dict\" \"example-dict\";sf)", params.toComponentValue().serialize());
+    }
+
+    @Test
+    public void aParsedSignatureInputKeepsARepeatAsReceived() {
+        io.approov.util.okhttp.http.sfv.Dictionary input = io.approov.util.okhttp.http.sfv.Parser
+                .parseDictionary("sig=(\"authorization\" \"authorization\");created=1");
+        SignatureParameters params = SignatureParameters.fromDictionaryEntry(input, "sig");
+        assertEquals(2, params.getComponentIdentifiers().size());
+    }
 }
