@@ -33,6 +33,27 @@ public class ApproovRequestMutations {
     private List<String> substitutionQueryParamKeys;
 
     /**
+     * Gets a copy of these mutations, which later calls to the setters of this
+     * object do not change. The layer keeps such a copy of what it applied to a
+     * request, since the object handed to the service mutator can be changed by it.
+     *
+     * @return the copy
+     */
+    ApproovRequestMutations copy() {
+        ApproovRequestMutations copy = new ApproovRequestMutations();
+        copy.tokenHeaderKey = tokenHeaderKey;
+        copy.tokenHeaderPrefix = tokenHeaderPrefix;
+        copy.traceIDHeaderKey = traceIDHeaderKey;
+        copy.statusHeaderKey = statusHeaderKey;
+        copy.substitutionHeaderKeys = (substitutionHeaderKeys != null)
+                ? new java.util.ArrayList<>(substitutionHeaderKeys) : null;
+        copy.originalURL = originalURL;
+        copy.substitutionQueryParamKeys = (substitutionQueryParamKeys != null)
+                ? new java.util.ArrayList<>(substitutionQueryParamKeys) : null;
+        return copy;
+    }
+
+    /**
      * Gets the header key used for the Approov token.
      *
      * @return the Approov token header key

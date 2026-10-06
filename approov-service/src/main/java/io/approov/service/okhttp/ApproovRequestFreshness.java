@@ -47,8 +47,9 @@ class ApproovRequestFreshness {
     private final String fetchURL;
 
     // the mutations that were applied to the request by the Approov interceptor,
-    // required to strip the protection from the request
-    private final ApproovRequestMutations changes;
+    // required to strip the protection from the request; a private copy once the
+    // layer has applied them (see freezeChanges)
+    private volatile ApproovRequestMutations changes;
 
     // elapsed realtime (which advances during device sleep) at the point the
     // protection was applied, or -1 if protection has not yet been marked
@@ -112,6 +113,17 @@ class ApproovRequestFreshness {
 
     ApproovRequestMutations getChanges() {
         return changes;
+    }
+
+    /**
+     * Replaces the mutations with a private copy once the layer has applied them,
+     * before the service mutator's processed request callback is handed the
+     * original: its setters are public, and the protection stripped from the
+     * request (and signed) must be what the layer applied, whatever the callback
+     * does to that object.
+     */
+    void freezeChanges() {
+        changes = changes.copy();
     }
 
     long getProtectedAtMillis() {

@@ -2068,6 +2068,7 @@ class ApproovTokenInterceptor implements Interceptor {
                 for (String header : setSubstitutionHeaders.keySet())
                     installedHeaderValues.put(header, request.header(header));
                 freshness.setSubstitutions(originalHeaderValues, installedHeaderValues);
+                freshness.freezeChanges();
             }
         }
 
@@ -2107,7 +2108,7 @@ class ApproovTokenInterceptor implements Interceptor {
         // whichever mutator made the decisions above; only a request carrying the
         // token header is signed
         if ((signing != null) && (freshness != null))
-            processedRequest = signing.sign(processedRequest, changes);
+            processedRequest = signing.sign(processedRequest, freshness.getChanges());
 
         // record the time at which the protection was applied, the URL it was applied
         // to, and the names of any headers added by the processed request callback
