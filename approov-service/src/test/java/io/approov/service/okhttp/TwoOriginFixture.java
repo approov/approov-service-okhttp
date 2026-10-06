@@ -73,8 +73,11 @@ final class TwoOriginFixture {
                 strings.append(", ");
             strings.append('"').append(secureStrings[i]).append("\": \"").append(secureStrings[i + 1]).append('"');
         }
+        // a case name of its own: the mini SDK keeps a case's secure strings across
+        // initializations, by name
+        String name = "two-origin-" + java.util.UUID.randomUUID();
         AttesterProxyController.reset();
-        AttesterProxyController.loadScenarioJson("{\"activeCase\": \"two-origin\", \"cases\": {\"two-origin\": {"
+        AttesterProxyController.loadScenarioJson("{\"activeCase\": \"" + name + "\", \"cases\": {\"" + name + "\": {"
                 + "\"protectedDomains\": [\"localhost\"],"
                 + "\"pins\": {\"public-key-sha256\": {\"localhost\": []}},"
                 + "\"initialSecureStrings\": {" + strings + "}}}}");
