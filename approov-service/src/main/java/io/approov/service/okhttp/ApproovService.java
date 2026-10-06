@@ -1730,10 +1730,19 @@ public class ApproovService {
                         + "initialization; requests proceed without Approov protection until it is initialized");
             else
                 Log.d(TAG, "Building new Approov OkHttpClient for " + builderName);
-            okHttpClient = okHttpBuilder
-                    .addInterceptor(new ApproovTokenInterceptor())
-                    .addNetworkInterceptor(new ApproovFreshnessInterceptor())
-                    .addNetworkInterceptor(getPinningInterceptor()).build();
+            // The token interceptor runs after the app's own interceptors, so they
+            // never see the protection. The network interceptors run before the
+            // app's own network interceptors (a logger, an inspector, an APM agent),
+            // so that an attempt the network stack rebuilt (a redirect, a retry) has
+            // its protection stripped or refreshed, and its connection checked,
+            // before any app code sees it: a redirect to a domain Approov does not
+            // protect never shows the app's network interceptors the token, the
+            // status or the substituted secrets of the original destination.
+            okHttpBuilder.addInterceptor(new ApproovTokenInterceptor());
+            List<Interceptor> networkInterceptors = okHttpBuilder.networkInterceptors();
+            networkInterceptors.add(0, getPinningInterceptor());
+            networkInterceptors.add(0, new ApproovFreshnessInterceptor());
+            okHttpClient = okHttpBuilder.build();
 
             // cache the client for future usages
             okHttpClients.put(builderName, okHttpClient);
@@ -2209,9 +2218,11 @@ class ApproovTokenInterceptor implements Interceptor {
 // its own request queueing or backoff mechanism; the Approov token and any
 // message signature (which carries created/expires timestamps) may then have
 // expired by the time the request is sent. Since this is a network interceptor
-// it runs immediately before transmission for every attempt, including OkHttp
+// it runs on every attempt once its connection is established, including OkHttp
 // generated retries and redirect followups which do not pass through the
-// application layer ApproovTokenInterceptor again.
+// application layer ApproovTokenInterceptor again. It is the first network
+// interceptor, ahead of any the app adds, so app code at the network layer only
+// ever sees an attempt after its protection was stripped or refreshed.
 class ApproovFreshnessInterceptor implements Interceptor {
     // logging tag
     private final static String TAG = "ApproovFreshness";

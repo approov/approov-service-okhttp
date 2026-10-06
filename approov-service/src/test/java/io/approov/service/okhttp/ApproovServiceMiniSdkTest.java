@@ -1852,15 +1852,13 @@ public class ApproovServiceMiniSdkTest {
         // simulate a device suspend between protection and transmission on the
         // first network attempt only
         AtomicInteger attempts = new AtomicInteger();
-        OkHttpClient.Builder builder = new OkHttpClient.Builder()
-            .addNetworkInterceptor(chain -> {
+        okhttp3.Interceptor hold = chain -> {
                 if (attempts.getAndIncrement() == 0)
                     ShadowSystemClock.advanceBy(Duration.ofSeconds(10));
                 return chain.proceed(chain.request());
-            });
-        ApproovService.setOkHttpClientBuilder(builder);
+            };
 
-        OkHttpClient client = ApproovService.getOkHttpClient();
+        OkHttpClient client = clientHeldBy(hold);
         Request request = new Request.Builder().url(getTargetURL()).get().build();
         try (Response response = client.newCall(request).execute()) {
             JSONObject reply = new JSONObject(response.body().string());
@@ -1973,12 +1971,12 @@ public class ApproovServiceMiniSdkTest {
         reinitializeServiceWithTargetHost("");
         ApproovService.setServiceMutator(ApproovServiceMutator.ALWAYS_PROCEED);
         ApproovService.enableMessageSigning();
-        ApproovService.setOkHttpClientBuilder(new OkHttpClient.Builder().addNetworkInterceptor(chain -> {
+        okhttp3.Interceptor hold = chain -> {
             ShadowSystemClock.advanceBy(Duration.ofSeconds(10));
             setDirective("{\"operation\":\"fetchApproovToken\",\"response\":{\"status\":\"NO_NETWORK\"}}");
             return chain.proceed(chain.request());
-        }));
-        try (Response response = ApproovService.getOkHttpClient().newCall(new Request.Builder().url(getTargetURL()).build()).execute()) {
+        };
+        try (Response response = clientHeldBy(hold).newCall(new Request.Builder().url(getTargetURL()).build()).execute()) {
             JSONObject reply = new JSONObject(response.body().string());
             assertEquals("", getHeader(reply, "Approov-Token"));
             assertEquals("no_network", getHeader(reply, "Approov-Status"));
@@ -1994,12 +1992,12 @@ public class ApproovServiceMiniSdkTest {
     public void testStaleUnprotectedRemovesHeadersOnWire() throws Exception {
         reinitializeServiceWithTargetHost("");
         ApproovService.enableMessageSigning();
-        ApproovService.setOkHttpClientBuilder(new OkHttpClient.Builder().addNetworkInterceptor(chain -> {
+        okhttp3.Interceptor hold = chain -> {
             ShadowSystemClock.advanceBy(Duration.ofSeconds(10));
             setDirective("{\"operation\":\"fetchApproovToken\",\"response\":{\"status\":\"UNPROTECTED_URL\"}}");
             return chain.proceed(chain.request());
-        }));
-        try (Response response = ApproovService.getOkHttpClient().newCall(new Request.Builder().url(getTargetURL()).build()).execute()) {
+        };
+        try (Response response = clientHeldBy(hold).newCall(new Request.Builder().url(getTargetURL()).build()).execute()) {
             JSONObject reply = new JSONObject(response.body().string());
             assertNull("Stale success status must not survive UNPROTECTED_URL", getHeader(reply, "Approov-Status"));
             assertNull(getHeader(reply, "Approov-Token"));
@@ -2075,7 +2073,7 @@ public class ApproovServiceMiniSdkTest {
         reinitializeServiceWithTargetHost("");
         ApproovService.setServiceMutator(ApproovServiceMutator.ALWAYS_PROCEED);
         AtomicInteger attempts = new AtomicInteger();
-        ApproovService.setOkHttpClientBuilder(new OkHttpClient.Builder().addNetworkInterceptor(chain -> {
+        okhttp3.Interceptor hold = chain -> {
             if (attempts.getAndIncrement() == 0) {
                 ShadowSystemClock.advanceBy(Duration.ofSeconds(10));
                 setDirective("{\"operation\":\"fetchApproovToken\",\"response\":{\"status\":\"NO_NETWORK\"}}");
@@ -2083,11 +2081,11 @@ public class ApproovServiceMiniSdkTest {
                 setDirective("{\"operation\":\"fetchApproovToken\",\"response\":{\"status\":\"NO_NETWORK\"}}");
             }
             return chain.proceed(chain.request());
-        }));
+        };
         // RetryAndFollowUpInterceptor reuses its original Request after a recoverable
         // IOException; this application interceptor, appended after token processing,
         // repeats the same request object to exercise the same ownership problem
-        OkHttpClient client = ApproovService.getOkHttpClient().newBuilder().addInterceptor(chain -> {
+        OkHttpClient client = clientHeldBy(hold).newBuilder().addInterceptor(chain -> {
             try (Response first = chain.proceed(chain.request())) {
                 try {
                     JSONObject reply = new JSONObject(first.body().string());
@@ -2453,14 +2451,14 @@ public class ApproovServiceMiniSdkTest {
             "\"initialSecureStrings\": {\"second-key\": \"second-secret\"}"
         ));
         ApproovService.addSubstitutionHeader("X-List", null);
-        ApproovService.setOkHttpClientBuilder(new OkHttpClient.Builder().addNetworkInterceptor(chain -> {
+        okhttp3.Interceptor hold = chain -> {
             ShadowSystemClock.advanceBy(Duration.ofSeconds(10));
             setDirective("{\"operation\":\"fetchApproovToken\",\"response\":{\"status\":\"UNPROTECTED_URL\"}}");
             return chain.proceed(chain.request());
-        }));
+        };
         Request request = new Request.Builder().url(getTargetURL())
             .addHeader("X-List", "first-key").addHeader("X-List", "second-key").build();
-        try (Response response = ApproovService.getOkHttpClient().newCall(request).execute()) {
+        try (Response response = clientHeldBy(hold).newCall(request).execute()) {
             JSONObject reply = new JSONObject(response.body().string());
             assertNull(getHeader(reply, "Approov-Status"));
             assertEquals(java.util.Arrays.asList("first-key", "second-key"), getHeaderValues(reply, "X-List"));
@@ -2561,12 +2559,12 @@ public class ApproovServiceMiniSdkTest {
         ApproovService.setServiceMutator(signing);
         ApproovService.enableMessageSigning();
         AtomicInteger attempts = new AtomicInteger();
-        ApproovService.setOkHttpClientBuilder(new OkHttpClient.Builder().addNetworkInterceptor(chain -> {
+        okhttp3.Interceptor hold = chain -> {
             if (attempts.getAndIncrement() == 0)
                 ShadowSystemClock.advanceBy(Duration.ofSeconds(10));
             return chain.proceed(chain.request());
-        }));
-        try (Response response = ApproovService.getOkHttpClient().newCall(new Request.Builder().url(getTargetURL()).build()).execute()) {
+        };
+        try (Response response = clientHeldBy(hold).newCall(new Request.Builder().url(getTargetURL()).build()).execute()) {
             JSONObject reply = new JSONObject(response.body().string());
             assertEquals(2, signing.processedCount.get());
             String signature = getHeader(reply, "Signature");
@@ -2816,6 +2814,16 @@ public class ApproovServiceMiniSdkTest {
     // ==================================================================================
     // Test Helpers
     // ==================================================================================
+
+    // A client on which the given interceptor runs at the network layer before
+    // Approov's own network interceptors, which otherwise come first: it stands for a
+    // hold between protection and transmission (a doze period, an app queue), which
+    // happens before the request reaches the network interceptors.
+    private static OkHttpClient clientHeldBy(okhttp3.Interceptor hold) {
+        OkHttpClient.Builder builder = ApproovService.getOkHttpClient().newBuilder();
+        builder.networkInterceptors().add(0, hold);
+        return builder.build();
+    }
 
     // sends a request and returns the echoed reply
     private JSONObject send(OkHttpClient client, Request request) throws Exception {
