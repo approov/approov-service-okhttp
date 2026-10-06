@@ -2269,8 +2269,13 @@ class ApproovFreshnessInterceptor implements Interceptor {
         // protection is reapplied
         ApproovDefaultMessageSigning signing = ApproovService.getActiveMessageSigning();
         if (rebuilt) {
-            Log.d(TAG, "Request rebuilt since protection was applied to " + appliedURL +
-                    " (now " + request.method() + " " + request.url() + "), reapplying Approov protection");
+            // the applied URL and the current one may hold substituted query parameters
+            // (a same-URL rebuild, or a server echoing them in a redirect), so the log
+            // names the URL before substitution and only the origin of the attempt
+            HttpUrl now = request.url();
+            Log.d(TAG, "Request rebuilt since protection was applied to " + freshness.getFetchURL() +
+                    " (now " + request.method() + " " + now.scheme() + "://" + now.host() + ":" + now.port() +
+                    (urlChanged ? ", another URL" : ", the same URL") + "), reapplying Approov protection");
             // cache the mutator for the duration of the interceptor to make sure it is
             // not changed mid-flight; a mutator that does not support refresh has its
             // headers stripped (they must not leak to the new destination) but its
