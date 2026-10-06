@@ -697,13 +697,13 @@ public class ApproovDefaultMessageSigning {
         protected boolean generateBodyDigest(OkHttpComponentProvider provider, SignatureParameters requestParameters) {
             RequestBody body = provider.request.body();
             // ignore null bodies, one shot bodies, or bodies of unknown length as these
-            // will
-            // likely require more specific knowledge
+            // will likely require more specific knowledge; an empty body has a digest
+            // like any other (SPECIFICATION 3.3: whenever one can be computed)
             if (body == null || body.isOneShot()) {
                 return false;
             } else {
                 try {
-                    if (body.contentLength() <= 0) {
+                    if (body.contentLength() < 0) {
                         return false;
                     }
                 } catch (IOException e) {

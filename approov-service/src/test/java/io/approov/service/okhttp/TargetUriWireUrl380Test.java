@@ -311,6 +311,22 @@ public class TargetUriWireUrl380Test {
         verifyBothSignatures(received);
     }
 
+    @Test
+    public void anEmptyBodyHasAContentDigest() throws Exception {
+        // required, so that a body digest that cannot be generated fails the request
+        ApproovService.enableMessageSigning(ApproovDefaultMessageSigning.generateDefaultSignatureParametersFactory()
+                .setBodyDigestConfig(ApproovDefaultMessageSigning.DIGEST_SHA256, true));
+        Received received = execute(new Request.Builder().url(url("/empty"))
+                .post(RequestBody.create(new byte[0], null))
+                .build());
+        assertEquals("0", received.header("Content-Length"));
+        // SHA-256 of no bytes
+        assertEquals("sha-256=:47DEQpj8HBSa+/TImW+5JCeuQeRkm5NMpJWZG3hSuFU=:", received.header("Content-Digest"));
+        for (Map.Entry<String, String> input : members(received.header("Signature-Input")).entrySet())
+            assertTrue(input.getKey(), components(input.getValue()).contains("content-digest"));
+        verifyBothSignatures(received);
+    }
+
     // ==================================================================================
     // sending and receiving
     // ==================================================================================
