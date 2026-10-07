@@ -298,7 +298,8 @@ public class ApproovService {
      * printable ASCII only, the rule OkHttp applies to header values and the one
      * approov-service-android uses. A secure string can break it (a non-ASCII or DEL
      * value set in the account, or any value an app set with a new definition); the
-     * token and the trace ID are always base64url and cannot.
+     * token and the trace ID are always base64url, and one that is not is reported
+     * as an SDK problem (see unsafeSdkValue).
      *
      * @param value the header value
      * @return true if the value can be set
@@ -388,6 +389,24 @@ public class ApproovService {
     static ApproovException unsafeHeaderValue(String header) {
         String message = "Approov cannot set header " + header
                 + ": its value contains a character a header value cannot carry";
+        ApproovLog.e(TAG, message);
+        return new ApproovException(message);
+    }
+
+    /**
+     * Reports a value the Approov SDK issued (a token or a trace ID) that a header
+     * cannot carry: an SDK problem, not the app's configuration (SPECIFICATION
+     * 1.6.1), logged at error level and returned as an ApproovException naming the
+     * header, never quoting the value. Unreachable with the current SDK, whose
+     * tokens and trace IDs are base64url.
+     *
+     * @param what   what the SDK issued, such as "a token"
+     * @param header the header name
+     * @return the exception to throw
+     */
+    static ApproovException unsafeSdkValue(String what, String header) {
+        String message = "Approov SDK problem: the Approov SDK issued " + what + " that header " + header
+                + " cannot carry: it contains a character outside tab and printable ASCII";
         ApproovLog.e(TAG, message);
         return new ApproovException(message);
     }
@@ -2109,6 +2128,13 @@ class ApproovTokenInterceptor implements Interceptor {
         if (aChange) {
             Request.Builder builder = request.newBuilder();
             if (setTokenHeaderKey != null) {
+                // the prefix is the app's (a configuration error if a header cannot
+                // carry it), the token the SDK's (an SDK problem, never blamed on the
+                // app's configuration)
+                if (!ApproovService.isSafeHeaderValue(setTokenHeaderPrefix))
+                    throw ApproovService.unsafeHeaderValue(setTokenHeaderKey);
+                if (!ApproovService.isSafeHeaderValue(tokenResults.getToken()))
+                    throw ApproovService.unsafeSdkValue("a token", setTokenHeaderKey);
                 setHeader(builder, setTokenHeaderKey, setTokenHeaderValue);
                 changes.setTokenHeaderKey(setTokenHeaderKey);
                 changes.setTokenHeaderPrefix(setTokenHeaderPrefix);
@@ -2120,6 +2146,8 @@ class ApproovTokenInterceptor implements Interceptor {
                 builder.tag(ApproovRequestFreshness.class, freshness);
             }
             if (setTraceIDHeaderKey != null) {
+                if (!ApproovService.isSafeHeaderValue(setTraceIDHeaderValue))
+                    throw ApproovService.unsafeSdkValue("a trace ID", setTraceIDHeaderKey);
                 setHeader(builder, setTraceIDHeaderKey, setTraceIDHeaderValue);
                 changes.setTraceIDHeaderKey(setTraceIDHeaderKey);
             }
@@ -2253,9 +2281,11 @@ class ApproovTokenInterceptor implements Interceptor {
 
     /**
      * Sets a header that this layer adds or substitutes. The value is checked first
-     * (SPECIFICATION 1.4, 1.7(a)): a value a header cannot carry, which can only come
-     * from what the app supplied (a token prefix), fails the request with an
-     * ApproovException naming the header, never quoting the value. OkHttp's own
+     * (SPECIFICATION 1.4, 1.7(a)): a value a header cannot carry fails the request
+     * with an ApproovException naming the header, never quoting the value. The
+     * token and the trace ID the SDK issued are checked before this, so that such a
+     * value of theirs is reported as an SDK problem (SPECIFICATION 1.6.1); what is
+     * left here can only come from what the app supplied (a token prefix). OkHttp's own
      * IllegalArgumentException quotes the value, so it is never let through; a
      * header name OkHttp rejects (set by the app with setTokenHeader or
      * setStatusHeader) fails the request the same way.
