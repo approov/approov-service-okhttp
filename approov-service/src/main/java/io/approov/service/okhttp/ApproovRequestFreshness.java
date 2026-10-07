@@ -89,43 +89,6 @@ class ApproovRequestFreshness {
     // keeps no copy of a secure string beyond the request that carries it.
     private volatile Map<String, String> installedHeaderDigests;
 
-    // every secure string query parameter substitution made on the request (the
-    // parameter, the app's placeholder as it appeared in the URL and a digest of the
-    // value installed, never the value), so that a value the server echoes back in a
-    // redirect target is restored to its placeholder (SPECIFICATION 7.3)
-    private volatile List<QuerySubstitution> querySubstitutions;
-
-    /**
-     * A secure string query parameter substitution: the parameter, the app's
-     * placeholder as it appeared in the URL, and a SHA-256 digest of the secure
-     * string installed, never the secure string itself.
-     */
-    static final class QuerySubstitution {
-        final String key;
-        final String placeholder;
-        final String installedDigest;
-
-        QuerySubstitution(String key, String placeholder, String installedDigest) {
-            this.key = key;
-            this.placeholder = placeholder;
-            this.installedDigest = installedDigest;
-        }
-
-        @Override
-        public boolean equals(Object other) {
-            if (!(other instanceof QuerySubstitution))
-                return false;
-            QuerySubstitution that = (QuerySubstitution) other;
-            return key.equals(that.key) && placeholder.equals(that.placeholder)
-                    && installedDigest.equals(that.installedDigest);
-        }
-
-        @Override
-        public int hashCode() {
-            return (key.hashCode() * 31 + placeholder.hashCode()) * 31 + installedDigest.hashCode();
-        }
-    }
-
     /**
      * Constructs a marker for protection applied to a request.
      *
@@ -142,7 +105,6 @@ class ApproovRequestFreshness {
         this.appliedHeaders = null;
         this.originalHeaderValues = Collections.emptyMap();
         this.installedHeaderDigests = Collections.emptyMap();
-        this.querySubstitutions = Collections.emptyList();
     }
 
     String getFetchURL() {
@@ -240,106 +202,6 @@ class ApproovRequestFreshness {
         for (Map.Entry<String, String> entry : installedHeaderValues.entrySet())
             digests.put(entry.getKey(), digestOf(entry.getValue()));
         this.installedHeaderDigests = digests;
-    }
-
-    /**
-     * Records the secure string query parameter substitutions applied to the
-     * request, adding to any already recorded.
-     *
-     * @param substitutions the substitutions made
-     */
-    synchronized void addQuerySubstitutions(List<QuerySubstitution> substitutions) {
-        List<QuerySubstitution> all = new ArrayList<>(querySubstitutions);
-        for (QuerySubstitution substitution : substitutions) {
-            if (!all.contains(substitution))
-                all.add(substitution);
-        }
-        querySubstitutions = Collections.unmodifiableList(all);
-    }
-
-    /**
-     * Gets the secure string query parameter substitutions recorded on the
-     * request.
-     *
-     * @return the substitutions
-     */
-    List<QuerySubstitution> getQuerySubstitutions() {
-        return querySubstitutions;
-    }
-
-    /**
-     * Creates the record of a query parameter substitution.
-     *
-     * @param key          the query parameter
-     * @param placeholder  the app's placeholder as it appeared in the URL
-     * @param secureString the secure string substituted, of which only a digest is
-     *                     kept
-     * @return the record
-     */
-    static QuerySubstitution querySubstitution(String key, String placeholder, String secureString) {
-        return new QuerySubstitution(key, placeholder, digestOf(secureString));
-    }
-
-    /**
-     * Restores to its placeholder every query parameter value in a URL that is a
-     * secure string substituted on this request, compared by digest as it appears
-     * in the URL or percent-decoded (SPECIFICATION 7.3). Only the query (after the
-     * first '?' and before any '#') of a substituted parameter is examined, and
-     * nothing else in the URL is changed. The URL may be absolute or relative, such
-     * as a Location header.
-     *
-     * @param url the URL, as the server or OkHttp gave it
-     * @return the URL with the placeholders restored, or url itself if it holds no
-     *         value substituted on this request
-     */
-    String restoreQueryPlaceholders(String url) {
-        List<QuerySubstitution> substitutions = querySubstitutions;
-        if ((url == null) || substitutions.isEmpty())
-            return url;
-        int start = url.indexOf('?');
-        if (start < 0)
-            return url;
-        int hash = url.indexOf('#', start);
-        int end = (hash < 0) ? url.length() : hash;
-        String query = url.substring(start, end);
-        List<String> keys = new ArrayList<>();
-        for (QuerySubstitution substitution : substitutions) {
-            if (!keys.contains(substitution.key))
-                keys.add(substitution.key);
-        }
-        boolean restored = false;
-        for (String key : keys) {
-            java.util.regex.Matcher matcher = java.util.regex.Pattern.compile(
-                    "[?&]" + java.util.regex.Pattern.quote(key) + "=([^&;#]*)").matcher(query);
-            StringBuilder rebuilt = new StringBuilder();
-            int last = 0;
-            while (matcher.find()) {
-                String placeholder = placeholderFor(substitutions, key, matcher.group(1));
-                if (placeholder == null)
-                    continue;
-                rebuilt.append(query, last, matcher.start(1)).append(placeholder);
-                last = matcher.end(1);
-                restored = true;
-            }
-            if (last > 0)
-                query = rebuilt.append(query, last, query.length()).toString();
-        }
-        return restored ? url.substring(0, start) + query + url.substring(end) : url;
-    }
-
-    // the placeholder of the substitution that installed a value, as it appears in
-    // a URL or percent-decoded, or null if it is not a value substituted on this
-    // request
-    private static String placeholderFor(List<QuerySubstitution> substitutions, String key, String value) {
-        String asIs = digestOf(value);
-        String decoded = ApproovService.percentDecode(value);
-        String asDecoded = (decoded == null) ? null : digestOf(decoded);
-        for (QuerySubstitution substitution : substitutions) {
-            if (substitution.key.equals(key) && (substitution.installedDigest.equals(asIs)
-                    || substitution.installedDigest.equals(asDecoded)))
-                return substitution.placeholder;
-        }
-        return null;
     }
 
     // SHA-256 of a header value as lowercase hex, or "" for null
