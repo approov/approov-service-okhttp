@@ -122,9 +122,9 @@ ApproovService.setOkHttpClientBuilder(
 val client = ApproovService.getOkHttpClient()
 ```
 
-Each request to a domain you have added to Approov is sent with its Approov token, the proof of attestation, and the `Approov-Status` header, over a connection validated against the Managed Trust Roots Approov maintains for your account; a connection that fails validation is refused with OkHttp's standard `SSLPeerUnverifiedException`. Requests to other domains are sent unchanged.
+Each request to a domain you have added to Approov is sent with its Approov token, the proof of attestation, and the `Approov-Status` header, over a connection validated against the Managed Trust Roots Approov maintains for your account; a connection that fails validation is refused with OkHttp's standard `SSLPeerUnverifiedException`. An API you added with `-noApproovToken` gets its secure strings and a validated connection and nothing else. Requests to other domains are sent unchanged.
 
-If the app could not be attested at that moment, 3.8.0 keeps the 3.5.x behaviour by default (`ApproovServiceMutator.DEFAULT` is `CLOSE_FAILURE`): the request goes out with an empty token header if the Approov service was unavailable, and otherwise fails in the app with an `ApproovException`, an `ApproovNetworkException` for a network problem the user can retry. To always send the request, with an empty token header and the reason in `Approov-Status`, and leave the decision to your backend, install `ApproovServiceMutator.ALWAYS_PROCEED`; it becomes the default in 4.0.0. See [what happens by default](ADVANCED.md#what-happens-by-default).
+If the app could not be attested at that moment, 3.8.0 keeps the 3.5.x behaviour by default (`ApproovServiceMutator.DEFAULT` is `CLOSE_FAILURE`): the request goes out without a token header, with the reason in `Approov-Status`, if the Approov service was unavailable, and otherwise fails in the app with an `ApproovException`, an `ApproovNetworkException` for a network problem the user can retry. To always send the request, without a token header and with the reason in `Approov-Status`, and leave the decision to your backend, install `ApproovServiceMutator.ALWAYS_PROCEED`; it becomes the default in 4.0.0. A request sent without a token carries no secure string and no signature. See [what happens by default](ADVANCED.md#what-happens-by-default).
 
 ```kotlin
 ApproovService.setServiceMutator(ApproovServiceMutator.ALWAYS_PROCEED)  // optional, the 4.0.0 default
@@ -146,11 +146,12 @@ Run your app and make a request. The package never logs a token; it logs the [lo
 
 By default 3.8.0 makes the same token decisions as 3.5.x and throws the same exceptions. What changes:
 
-* Every protected request also carries the `Approov-Status` header, and a request that proceeds without a token (`NO_APPROOV_SERVICE`) sends an empty `Approov-Token` header. Your backend must tolerate both.
+* Every protected request also carries the `Approov-Status` header. A request that proceeds without a token (`NO_APPROOV_SERVICE`) carries no `Approov-Token` header (3.5.8 sent it empty) and no secure string. Your backend must tolerate both.
+* An API added with `approov api -add <domain> -noApproovToken` gets its secure strings substituted again, as up to 3.5.1; 3.5.2 to 3.5.8 left its placeholders in place.
 * Message signing is switched on with `ApproovService.enableMessageSigning()`, not by installing a mutator. If you installed `ApproovDefaultMessageSigning` with `setServiceMutator`, replace that call with `enableMessageSigning(factory)` (it no longer compiles).
 * The message signing helper classes moved: change imports of `io.approov.util.sig.*` to `io.approov.util.okhttp.sig.*` and of `io.approov.util.http.sfv.*` to `io.approov.util.okhttp.http.sfv.*`.
 * The package no longer depends on BouncyCastle; it bundles its own relocated copy of Google Tink, so it cannot clash with your app's Tink, Gson or BouncyCastle, or with another Approov package.
-* A secure string substitution now mirrors the token decision: a `REJECTED` or `NO_APPROOV_SERVICE` secure string leaves the placeholder and the request proceeds, where 3.5.x threw `ApproovRejectionException` or `ApproovFetchStatusException`.
+* A secure string that cannot be obtained never fails a request: whatever its status (`REJECTED`, `NO_APPROOV_SERVICE`, `NO_NETWORK`, ...) the placeholder is left and the request proceeds, where 3.5.x threw `ApproovRejectionException`, `ApproovNetworkException` or `ApproovFetchStatusException`.
 * `initialize` never resets configuration: settings made before or after it are kept, a repeat with the same account ID returns at once, and the SDK's own exception reaches the caller of a rejected one. `isInitialized()` and `isApproovEnabled()` are replaced by `isApproovServiceEnabled()` and `isApproovProtectionEnabled()`.
 * `setInstallAttrsInToken` is renamed `setInstallAttributes`. `setUseApproovStatusIfNoToken`, `setProceedOnNetworkFail` and `prefetch` are removed; install `ApproovServiceMutator.ALWAYS_PROCEED` to proceed on network failures, and the SDK manages prefetching.
 * Approov's network interceptors now run before the network interceptors your builder adds, so a logger or inspector there no longer sees a redirect before Approov strips it. Such interceptors run after signing and must not change a signed header, the URL or the body.
