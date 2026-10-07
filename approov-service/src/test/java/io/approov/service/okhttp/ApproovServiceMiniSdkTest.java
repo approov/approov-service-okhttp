@@ -321,10 +321,11 @@ public class ApproovServiceMiniSdkTest {
      * §2 Missing Artifacts Fallback
      *
      * When the Approov service is unavailable (NO_APPROOV_SERVICE), the request
-     * should proceed without an Approov token or trace ID.
+     * proceeds without an Approov token or trace ID: no token header at all, not
+     * an empty one (decided 2026-10-07), and the status on the status header.
      */
     @Test
-    public void testUpdateRequestNoApproovServiceProceedsWithEmptyHeaders() throws Exception {
+    public void testUpdateRequestNoApproovServiceProceedsWithStatusHeaderOnly() throws Exception {
         reinitializeServiceWithTargetHost("");
         setDirective("{" +
             "  \"operation\": \"fetchApproovToken\"," +
@@ -337,10 +338,10 @@ public class ApproovServiceMiniSdkTest {
         Request request = new Request.Builder().url(getTargetURL()).build();
         try (Response response = client.newCall(request).execute()) {
             JSONObject reply = new JSONObject(response.body().string());
-            // NO_APPROOV_SERVICE proceeds emitting an empty Approov-Token (and trace ID if the
-            // SDK provides one) as evidence of Approov processing — §2 Missing Artifacts Fallback.
-            assertEquals("", getHeader(reply, "Approov-Token"));
-            assertNotNull(getHeader(reply, "Approov-TraceID"));
+            // NO_APPROOV_SERVICE proceeds with no token header and no trace header, even
+            // though the mini-SDK supplies a trace ID with the failure (decided 2026-10-07)
+            assertNull(getHeader(reply, "Approov-Token"));
+            assertNull(getHeader(reply, "Approov-TraceID"));
             // 3.8.0 §4: the status is reported on the status header
             assertEquals("no_approov_service", getHeader(reply, "Approov-Status"));
         }
@@ -351,9 +352,10 @@ public class ApproovServiceMiniSdkTest {
     // ==================================================================================
 
     /**
-     * T37-01 / T37-05: every token fetch failure status proceeds with an empty
-     * Approov-Token header and the lowercased status on Approov-Status. The token
-     * header never carries the status.
+     * T37-01 / T37-05: under ALWAYS_PROCEED every token fetch failure status
+     * proceeds with no Approov-Token header (decided 2026-10-07: absent, not empty)
+     * and the lowercased status on Approov-Status. The token header never carries
+     * the status.
      */
     @Test
     public void testEveryTokenFetchFailureProceedsAndReportsOnStatusHeader() throws Exception {
@@ -375,7 +377,8 @@ public class ApproovServiceMiniSdkTest {
             try (Response response = client.newCall(request).execute()) {
                 assertEquals(status, 200, response.code());
                 JSONObject reply = new JSONObject(response.body().string());
-                assertEquals(status, "", getHeader(reply, "Approov-Token"));
+                assertNull(status, getHeader(reply, "Approov-Token"));
+                assertNull(status, getHeader(reply, "Approov-TraceID"));
                 assertEquals(status, status.toLowerCase(), getHeader(reply, "Approov-Status"));
             }
         }
@@ -406,8 +409,8 @@ public class ApproovServiceMiniSdkTest {
             assertEquals("success", getHeader(reply, "Approov-Status"));
         }
 
-        // no Approov headers at all for a domain not protected by Approov
-        Request unprotected = new Request.Builder().url(getUnprotectedURL()).get().build();
+        // no Approov headers at all for a host not added to Approov (UNKNOWN_URL)
+        Request unprotected = new Request.Builder().url(getNotInApproovURL()).get().build();
         try (Response response = client.newCall(unprotected).execute()) {
             JSONObject reply = new JSONObject(response.body().string());
             assertNull(getHeader(reply, "Approov-Token"));
@@ -432,7 +435,7 @@ public class ApproovServiceMiniSdkTest {
         Request request = new Request.Builder().url(getTargetURL()).get().build();
         try (Response response = client.newCall(request).execute()) {
             JSONObject reply = new JSONObject(response.body().string());
-            assertEquals("", getHeader(reply, "Approov-Token"));
+            assertNull(getHeader(reply, "Approov-Token"));
             assertNull(getHeader(reply, "Approov-Status"));
             assertEquals("no_network", getHeader(reply, "X-Approov-Fetch-Status"));
         }
@@ -444,8 +447,10 @@ public class ApproovServiceMiniSdkTest {
         try (Response response = client.newCall(request).execute()) {
             assertEquals(200, response.code());
             JSONObject reply = new JSONObject(response.body().string());
-            assertEquals("", getHeader(reply, "Approov-Token"));
-            assertNotNull(getHeader(reply, "Approov-TraceID"));
+            // a failure carries only the status header, so with it disabled the
+            // request carries no Approov header at all
+            assertNull(getHeader(reply, "Approov-Token"));
+            assertNull(getHeader(reply, "Approov-TraceID"));
             assertNull(getHeader(reply, "Approov-Status"));
             assertNull(getHeader(reply, "X-Approov-Fetch-Status"));
         }
@@ -601,14 +606,12 @@ public class ApproovServiceMiniSdkTest {
     }
 
     /**
-     * 3.8.0 §3/§4: a request sent with an empty Approov-Token (token fetch failed)
-     * is still signed by the default mutator, with both the empty token header and
-     * the status header covered. An empty header value is a legal covered component
-     * (RFC 9421 §2.1), so the backend can verify that the reported status came from
-     * a genuine app installation.
+     * Decided 2026-10-07: a request proceeding on a failed token fetch carries the
+     * status header and nothing else. It has no token header (not an empty one) and
+     * is not signed, with signing enabled: only a token-protected request is.
      */
     @Test
-    public void testFailedTokenFetchStillSignedWithTokenAndStatusHeadersCovered() throws Exception {
+    public void testFailedTokenFetchCarriesStatusHeaderOnlyAndIsNotSigned() throws Exception {
         reinitializeServiceWithTargetHost("");
         ApproovService.enableMessageSigning();
         setDirective("{\"operation\": \"fetchApproovToken\", \"response\": {\"status\": \"NO_APPROOV_SERVICE\"}}");
@@ -616,15 +619,11 @@ public class ApproovServiceMiniSdkTest {
         Request request = new Request.Builder().url(getTargetURL()).get().build();
         try (Response response = client.newCall(request).execute()) {
             JSONObject reply = new JSONObject(response.body().string());
-            assertEquals("", getHeader(reply, "Approov-Token"));
+            assertNull(getHeader(reply, "Approov-Token"));
+            assertNull(getHeader(reply, "Approov-TraceID"));
             assertEquals("no_approov_service", getHeader(reply, "Approov-Status"));
-            String signatureInput = getHeader(reply, "Signature-Input");
-            assertNotNull(signatureInput);
-            assertTrue(signatureInput, signatureInput.contains("\"approov-token\""));
-            assertTrue(signatureInput, signatureInput.contains("\"approov-status\""));
-            assertTrue(signatureInput, signatureInput.startsWith("install=("));
-            assertTrue(signatureInput, signatureInput.contains(", account=("));
-            assertNotNull(getHeader(reply, "Signature"));
+            assertNull(getHeader(reply, "Signature-Input"));
+            assertNull(getHeader(reply, "Signature"));
         }
     }
 
@@ -830,9 +829,9 @@ public class ApproovServiceMiniSdkTest {
 
     /**
      * T37-03 / SPECIFICATION 2.2: on the request path UNTRUSTED_NETWORK proceeds like
-     * NO_NETWORK, with an empty token, the lowercased status, and the default
-     * signatures covering both headers. An interception on the attestation path no
-     * longer blocks the request.
+     * NO_NETWORK under ALWAYS_PROCEED, with no token header and the lowercased
+     * status, and is not signed (decided 2026-10-07). An interception on the
+     * attestation path no longer blocks the request.
      */
     @Test
     public void testUntrustedNetworkProceedsOnTheWire() throws Exception {
@@ -844,11 +843,9 @@ public class ApproovServiceMiniSdkTest {
         try (Response response = client.newCall(new Request.Builder().url(getTargetURL()).get().build()).execute()) {
             assertEquals(200, response.code());
             JSONObject reply = new JSONObject(response.body().string());
-            assertEquals("", getHeader(reply, "Approov-Token"));
+            assertNull(getHeader(reply, "Approov-Token"));
             assertEquals("untrusted_network", getHeader(reply, "Approov-Status"));
-            String signatureInput = getHeader(reply, "Signature-Input");
-            assertNotNull(signatureInput);
-            assertTrue(signatureInput, signatureInput.contains("\"approov-status\""));
+            assertNull(getHeader(reply, "Signature-Input"));
         }
         // the mini SDK's attester channel interception directive now yields the same status
         setDirective("{\"operation\": \"fetchApproovToken\", \"response\": {\"attesterChannelMitm\": true}}");
@@ -1001,8 +998,8 @@ public class ApproovServiceMiniSdkTest {
      * T37-01a: the out-of-the-box mutator, and the one setServiceMutator(null)
      * reinstates, is CLOSE_FAILURE in 3.8.0: a REJECTED token fetch aborts with the
      * fetch status exception and sends nothing, a network status aborts with the
-     * network exception, and NO_APPROOV_SERVICE proceeds with an empty token header
-     * and the status header. A custom mutator that overrides no decision gets the
+     * network exception, and NO_APPROOV_SERVICE proceeds with the status header and
+     * no token header. A custom mutator that overrides no decision gets the
      * same decisions, since they are the interface defaults.
      */
     @Test
@@ -1016,7 +1013,7 @@ public class ApproovServiceMiniSdkTest {
         assertTokenFetchAborts("REJECTED", ApproovFetchStatusException.class, attempts);
         assertTokenFetchAborts("NO_NETWORK", ApproovNetworkException.class, attempts);
         JSONObject reply = sendWithTokenStatus("NO_APPROOV_SERVICE");
-        assertEquals("", getHeader(reply, "Approov-Token"));
+        assertNull(getHeader(reply, "Approov-Token"));
         assertEquals("no_approov_service", getHeader(reply, "Approov-Status"));
 
         ApproovService.setServiceMutator(ApproovServiceMutator.ALWAYS_PROCEED);
@@ -1036,7 +1033,7 @@ public class ApproovServiceMiniSdkTest {
 
     /**
      * SPECIFICATION 6.2: every CLOSE_FAILURE token fetch decision, the 3.5.x ones.
-     * SUCCESS adds the token, NO_APPROOV_SERVICE an empty token, UNKNOWN_URL and
+     * SUCCESS adds the token, NO_APPROOV_SERVICE the status header only, UNKNOWN_URL and
      * UNPROTECTED_URL send no Approov headers, the network statuses throw the
      * network exception and every other status the fetch status exception, with no
      * request reaching the wire. setProceedOnNetworkFail is removed in 3.8.0
@@ -1066,15 +1063,12 @@ public class ApproovServiceMiniSdkTest {
     }
 
     /**
-     * SPECIFICATION 6.2 (changed 2026-10-04): every CLOSE_FAILURE substitution
-     * decision, for headers and query parameters, under CLOSE_FAILURE and under
-     * DEFAULT (setServiceMutator(null)). The decision mirrors the token decision
-     * for the same status: SUCCESS substitutes; UNKNOWN_KEY, REJECTED and
-     * NO_APPROOV_SERVICE leave the placeholder and the request proceeds with the
-     * token and a "success" status header; the network statuses throw the network
-     * exception and every other status the fetch status exception, carrying the
-     * status, with no request reaching the wire. A REJECTED secure string no longer
-     * throws: the backend is the enforcement point.
+     * Every CLOSE_FAILURE substitution decision, for headers and query parameters,
+     * under CLOSE_FAILURE and under DEFAULT (setServiceMutator(null)). SUCCESS
+     * substitutes; every other secure string status leaves the placeholder and the
+     * request proceeds with the token and a "success" status header (decided
+     * 2026-10-07: a standard mutator never aborts a request because of a secure
+     * string; until then the network statuses and the remaining failures threw).
      */
     @Test
     public void testCloseFailureSubstitutionDecisions() throws Exception {
@@ -1119,28 +1113,17 @@ public class ApproovServiceMiniSdkTest {
                 assertEquals(status, "success", getHeader(reply, "Approov-Status"));
             }
 
-            Object[][] failing = {
-                {"NO_NETWORK", ApproovNetworkException.class},
-                {"POOR_NETWORK", ApproovNetworkException.class},
-                {"UNTRUSTED_NETWORK", ApproovNetworkException.class},
-                {"INTERNAL_ERROR", ApproovFetchStatusException.class},
-                {"BAD_URL", ApproovFetchStatusException.class},
-                {"DISABLED", ApproovFetchStatusException.class},
-            };
-            for (Request request : new Request[] {header, query}) {
-                for (Object[] f : failing) {
-                    String status = (String) f[0];
-                    int before = attempts.get();
-                    setDirective("{\"operation\": \"fetchSecureString\", \"response\": {\"status\": \"" + status + "\"}}");
-                    try (Response response = client.newCall(request).execute()) {
-                        fail(status + " substitution must abort under CLOSE_FAILURE");
-                    } catch (IOException e) {
-                        assertEquals(status + ": " + e, f[1], e.getClass());
-                        assertEquals(status, Approov.TokenFetchStatus.valueOf(status),
-                            ((ApproovFetchStatusException) e).getTokenFetchStatus());
-                    }
-                    assertEquals(status + " must send nothing", before, attempts.get());
-                }
+            for (String status : new String[] {"NO_NETWORK", "POOR_NETWORK", "UNTRUSTED_NETWORK",
+                    "INTERNAL_ERROR", "BAD_URL", "DISABLED"}) {
+                int before = attempts.get();
+                setDirective("{\"operation\": \"fetchSecureString\", \"response\": {\"status\": \"" + status + "\"}}");
+                reply = send(client, header);
+                assertEquals(status + " keeps the placeholder", "the-key", getHeader(reply, "Api-Key"));
+                assertEquals(status, "success", getHeader(reply, "Approov-Status"));
+                setDirective("{\"operation\": \"fetchSecureString\", \"response\": {\"status\": \"" + status + "\"}}");
+                reply = send(client, query);
+                assertTrue(status + ": " + reply.getString("url"), reply.getString("url").contains("api_key=the-key"));
+                assertEquals(status + " proceeds", before + 2, attempts.get());
             }
         }
     }
@@ -1391,12 +1374,13 @@ public class ApproovServiceMiniSdkTest {
         ApproovService.setServiceMutator(ApproovServiceMutator.ALWAYS_PROCEED);
         assertTrue(ApproovService.isMessageSigningEnabled());
         assertBothSignatures(send(client, request));
-        // a request that proceeds without a token is signed too (SPECIFICATION 3.4)
+        // a request that proceeds without a token carries the status header only and
+        // is not signed, under any mutator (decided 2026-10-07)
         setDirective("{\"operation\": \"fetchApproovToken\", \"response\": {\"status\": \"NO_NETWORK\"}}");
         JSONObject failed = send(client, request);
-        assertEquals("", getHeader(failed, "Approov-Token"));
+        assertNull(getHeader(failed, "Approov-Token"));
         assertEquals("no_network", getHeader(failed, "Approov-Status"));
-        assertBothSignatures(failed);
+        assertNull(getHeader(failed, "Signature-Input"));
 
         ApproovService.setServiceMutator(custom);
         assertTrue(ApproovService.isMessageSigningEnabled());
@@ -1545,7 +1529,7 @@ public class ApproovServiceMiniSdkTest {
             assertFalse(signature.contains("account="));
         }
         
-        Request unprotectedRequest = new Request.Builder().url(getUnprotectedURL()).get().build();
+        Request unprotectedRequest = new Request.Builder().url(getNotInApproovURL()).get().build();
         try (Response response = client.newCall(unprotectedRequest).execute()) {
             JSONObject reply = new JSONObject(response.body().string());
             assertNull(getHeader(reply, "Approov-Token"));
@@ -1963,8 +1947,9 @@ public class ApproovServiceMiniSdkTest {
     // ==================================================================================
 
     /**
-     * Control: a held request whose refreshed fetch fails is sent with an empty token,
-     * the refreshed status and fresh signatures (both members).
+     * Control: a held request whose refreshed fetch fails is sent with the refreshed
+     * status and nothing else: no token header and no signatures (decided
+     * 2026-10-07).
      */
     @Test
     public void testStaleFailureRewritesStatusOnWire() throws Exception {
@@ -1978,15 +1963,17 @@ public class ApproovServiceMiniSdkTest {
         };
         try (Response response = clientHeldBy(hold).newCall(new Request.Builder().url(getTargetURL()).build()).execute()) {
             JSONObject reply = new JSONObject(response.body().string());
-            assertEquals("", getHeader(reply, "Approov-Token"));
+            assertNull(getHeader(reply, "Approov-Token"));
             assertEquals("no_network", getHeader(reply, "Approov-Status"));
-            assertTrue(getHeader(reply, "Signature-Input").contains(", account=("));
+            assertNull(getHeader(reply, "Signature-Input"));
+            assertNull(getHeader(reply, "Signature"));
         }
     }
 
     /**
-     * Finding 4: a refresh whose fetch says the URL is no longer protected must strip
-     * the previously applied protection rather than send it unchanged.
+     * Finding 4: a refresh whose fetch says the URL is a secrets-only API
+     * (UNPROTECTED_URL) must strip the token, status and trace headers and the
+     * signatures rather than send them unchanged.
      */
     @Test
     public void testStaleUnprotectedRemovesHeadersOnWire() throws Exception {
@@ -2001,16 +1988,17 @@ public class ApproovServiceMiniSdkTest {
             JSONObject reply = new JSONObject(response.body().string());
             assertNull("Stale success status must not survive UNPROTECTED_URL", getHeader(reply, "Approov-Status"));
             assertNull(getHeader(reply, "Approov-Token"));
+            assertNull(getHeader(reply, "Approov-TraceID"));
             assertNull(getHeader(reply, "Signature"));
         }
     }
 
     /**
-     * Finding 2: a redirect from a protected host to an unprotected one must not carry
+     * Finding 2: a redirect from a protected host to one not added to Approov must not carry
      * the protected host's token, status or signatures (SPECIFICATION 1.5, 7.1).
      */
     @Test
-    public void testRedirectToUnprotectedHostRemovesProtectionOnWire() throws Exception {
+    public void testRedirectToHostNotInApproovRemovesProtectionOnWire() throws Exception {
         reinitializeServiceWithTargetHost("");
         ApproovService.enableMessageSigning();
         AtomicInteger attempts = new AtomicInteger();
@@ -2018,7 +2006,7 @@ public class ApproovServiceMiniSdkTest {
             Response response = chain.proceed(chain.request());
             if (attempts.getAndIncrement() == 0) {
                 return response.newBuilder().code(302).message("Found")
-                    .header("Location", getUnprotectedURL()).build();
+                    .header("Location", getNotInApproovURL()).build();
             }
             return response;
         }));
@@ -2100,7 +2088,7 @@ public class ApproovServiceMiniSdkTest {
             assertEquals(2, attempts.get());
             JSONObject reply = new JSONObject(response.body().string());
             assertEquals("Retry must use refreshed status, not mark the original status fresh", "no_network", getHeader(reply, "Approov-Status"));
-            assertEquals("", getHeader(reply, "Approov-Token"));
+            assertNull(getHeader(reply, "Approov-Token"));
         }
     }
 
@@ -2243,10 +2231,10 @@ public class ApproovServiceMiniSdkTest {
     /**
      * Third review round, S1: a secure string with surrounding whitespace is stored
      * trimmed by OkHttp; stripping must still recognise the header as one this layer
-     * installed and restore the placeholder before a redirect to an unprotected host.
+     * installed and restore the placeholder before a redirect to a host not added to Approov.
      */
     @Test
-    public void testWhitespaceSecretIsRestoredBeforeUnprotectedRedirect() throws Exception {
+    public void testWhitespaceSecretIsRestoredBeforeRedirectToHostNotInApproov() throws Exception {
         String targetHost = getTargetHost();
         reinitializeService(scenarioJson(uniqueCaseName("padded-secret"),
             "\"protectedDomains\": [\"" + targetHost + "\"]," +
@@ -2258,7 +2246,7 @@ public class ApproovServiceMiniSdkTest {
         ApproovService.setOkHttpClientBuilder(new OkHttpClient.Builder().addNetworkInterceptor(chain -> {
             Response response = chain.proceed(chain.request());
             if (attempts.getAndIncrement() == 0)
-                return response.newBuilder().code(302).message("Found").header("Location", getUnprotectedURL()).build();
+                return response.newBuilder().code(302).message("Found").header("Location", getNotInApproovURL()).build();
             return response;
         }));
         Request request = new Request.Builder().url(getTargetURL()).header("Api-Key", "header-key").build();
@@ -2359,14 +2347,45 @@ public class ApproovServiceMiniSdkTest {
     }
 
     /**
-     * Fourth review round: a header-only rebuild whose refreshed fetch reports the URL
-     * as unprotected leaves the query placeholder, not the previously substituted
+     * Fourth review round, corrected 2026-10-07: a header-only rebuild (an
+     * authenticator retry) whose refreshed fetch reports the URL as a secrets-only
+     * API (UNPROTECTED_URL, added with -noApproovToken) substitutes the query
+     * parameter afresh from the restored placeholder and adds no token or status
+     * header. Until 2026-10-07 this test asserted that the placeholder was left,
+     * which was the 3.5.2 regression that broke secrets-only APIs.
+     */
+    @Test
+    public void testAuthenticatorRetryToUnprotectedSubstitutesQueryAfresh() throws Exception {
+        JSONObject reply = authenticatorRetryWithRefreshedStatus("UNPROTECTED_URL");
+        String url = reply.getString("url");
+        assertTrue(url, url.contains("api_key=query-secret"));
+        assertFalse(url, url.contains("api_key=query-key"));
+        assertNull(getHeader(reply, "Approov-Token"));
+        assertNull(getHeader(reply, "Approov-Status"));
+        assertNull(getHeader(reply, "Approov-TraceID"));
+    }
+
+    /**
+     * The same rebuild whose refreshed fetch reports a host not added to Approov
+     * (UNKNOWN_URL) leaves the query placeholder, not the previously substituted
      * secret, on the wire.
      */
     @Test
-    public void testAuthenticatorRetryToUnprotectedRestoresQueryPlaceholder() throws Exception {
+    public void testAuthenticatorRetryToUnknownUrlRestoresQueryPlaceholder() throws Exception {
+        JSONObject reply = authenticatorRetryWithRefreshedStatus("UNKNOWN_URL");
+        String url = reply.getString("url");
+        assertTrue(url, url.contains("api_key=query-key"));
+        assertFalse(url, url.contains("query-secret"));
+        assertNull(getHeader(reply, "Approov-Token"));
+        assertNull(getHeader(reply, "Approov-Status"));
+    }
+
+    // sends a request with a substituted query parameter that is retried by an
+    // authenticator after a 401, the retry's token fetch reporting the status, and
+    // returns the echo of the retry
+    private JSONObject authenticatorRetryWithRefreshedStatus(String status) throws Exception {
         String targetHost = getTargetHost();
-        reinitializeService(scenarioJson(uniqueCaseName("query-unprotected"),
+        reinitializeService(scenarioJson(uniqueCaseName("query-refresh"),
             "\"protectedDomains\": [\"" + targetHost + "\"]," +
             "\"initialSecureStrings\": {\"query-key\": \"query-secret\"}"
         ));
@@ -2376,7 +2395,7 @@ public class ApproovServiceMiniSdkTest {
             .addNetworkInterceptor(chain -> {
                 Response response = chain.proceed(chain.request());
                 if (attempts.getAndIncrement() == 0) {
-                    setDirective("{\"operation\":\"fetchApproovToken\",\"response\":{\"status\":\"UNPROTECTED_URL\"}}");
+                    setDirective("{\"operation\":\"fetchApproovToken\",\"response\":{\"status\":\"" + status + "\"}}");
                     return response.newBuilder().code(401).message("Unauthorized").build();
                 }
                 return response;
@@ -2390,12 +2409,7 @@ public class ApproovServiceMiniSdkTest {
             .header("Authorization", "Bearer first").build();
         try (Response response = ApproovService.getOkHttpClient().newCall(request).execute()) {
             assertEquals(2, attempts.get());
-            JSONObject reply = new JSONObject(response.body().string());
-            String url = reply.getString("url");
-            assertTrue(url, url.contains("api_key=query-key"));
-            assertFalse(url, url.contains("query-secret"));
-            assertNull(getHeader(reply, "Approov-Token"));
-            assertNull(getHeader(reply, "Approov-Status"));
+            return new JSONObject(response.body().string());
         }
     }
 
@@ -2444,7 +2458,7 @@ public class ApproovServiceMiniSdkTest {
      * a repeated header, in order.
      */
     @Test
-    public void testStaleUnprotectedRestoresAllOriginalHeaderValues() throws Exception {
+    public void testStaleUnknownUrlRestoresAllOriginalHeaderValues() throws Exception {
         String targetHost = getTargetHost();
         reinitializeService(scenarioJson(uniqueCaseName("repeated-header"),
             "\"protectedDomains\": [\"" + targetHost + "\"]," +
@@ -2453,7 +2467,9 @@ public class ApproovServiceMiniSdkTest {
         ApproovService.addSubstitutionHeader("X-List", null);
         okhttp3.Interceptor hold = chain -> {
             ShadowSystemClock.advanceBy(Duration.ofSeconds(10));
-            setDirective("{\"operation\":\"fetchApproovToken\",\"response\":{\"status\":\"UNPROTECTED_URL\"}}");
+            // a refresh to a host not added to Approov restores the placeholders (an
+            // UNPROTECTED_URL refresh would substitute afresh, decided 2026-10-07)
+            setDirective("{\"operation\":\"fetchApproovToken\",\"response\":{\"status\":\"UNKNOWN_URL\"}}");
             return chain.proceed(chain.request());
         };
         Request request = new Request.Builder().url(getTargetURL())
@@ -2887,7 +2903,10 @@ public class ApproovServiceMiniSdkTest {
         return (url != null) ? url : "https://replay.ivol.workers.dev";
     }
  
-    private String getUnprotectedURL() {
+    // a host not added to Approov: the mini-SDK reports UNKNOWN_URL for it (before
+    // the 2026-10-07 mini-SDK fix it reported UNPROTECTED_URL, the status of a
+    // secrets-only API, which is why the variable is named as it is)
+    private String getNotInApproovURL() {
         String url = System.getenv("TESTING_REPLY_URL_UNPROTECTED");
         return (url != null) ? url : "https://replay-unprotected.ivol.workers.dev";
     }

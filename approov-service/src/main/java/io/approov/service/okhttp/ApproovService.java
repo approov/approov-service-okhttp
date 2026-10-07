@@ -784,10 +784,12 @@ public class ApproovService {
     /**
      * Sets the header that the Approov token is added on, as well as an optional
      * prefix String (such as "Bearer "). By default the token is provided on
-     * "Approov-Token" with no prefix. If no token could be obtained the header is
-     * still added with an empty value (after any prefix) as evidence that Approov
-     * processing occurred, and the reason is reported on the status header (see
-     * setStatusHeader). Failure information is never placed in this header.
+     * "Approov-Token" with no prefix. The header is added only to a request to a
+     * token-protected API whose token fetch succeeded. If no token could be
+     * obtained and the service mutator lets the request proceed, the header is not
+     * added at all (not even with an empty value) and the token fetch status is
+     * reported on the status header instead (see setStatusHeader). Failure
+     * information is never placed in this header.
      *
      * @param header is the header to place the Approov token on
      * @param prefix is any prefix String for the Approov token header, or null
@@ -846,13 +848,16 @@ public class ApproovService {
      * the backend on every request processed by Approov. By default this is
      * "Approov-Status". The value is the SDK fetch status name in lowercase, for
      * example "success", "no_network", "untrusted_network", "no_approov_service" or
-     * "rejected", identical on Android and iOS. It is sent on every processed
-     * request, including successful ones, and tells the backend why this
-     * particular request carries no attestation proof, to log against the request
-     * and act on (rejecting it, for example). It is not sent on requests to
-     * domains that are not protected by Approov. Passing null disables the header,
-     * in which case a request that could not be protected is sent with an empty
-     * token header and no explanation.
+     * "rejected", identical on Android and iOS. It always describes the token fetch,
+     * never a secure string fetch. It is sent on every request whose token fetch
+     * the service mutator lets proceed with Approov headers, including successful
+     * ones, and tells the backend why this particular request carries no
+     * attestation proof, to log against the request and act on (rejecting it, for
+     * example). It is not sent on requests to hosts not added to Approov
+     * (UNKNOWN_URL), nor on requests to a secrets-only API added with
+     * -noApproovToken (UNPROTECTED_URL). Passing null disables the header, in
+     * which case a request that could not be protected is sent with no Approov
+     * header at all and no explanation.
      *
      * @param header is the name of the header on which to report the Approov fetch
      *               status, or null to disable the header
@@ -881,6 +886,57 @@ public class ApproovService {
      */
     static String buildStatusHeaderValue(Approov.TokenFetchResult approovResults) {
         return approovResults.getStatus().name().toLowerCase(Locale.ROOT);
+    }
+
+    /**
+     * Describes a fetch outcome for a DEBUG log line: the status in lowercase, and
+     * the ARC and the rejection reasons when the SDK gives them. It never carries
+     * a token, a secure string or a placeholder.
+     *
+     * @param approovResults the fetch result
+     * @return the description
+     */
+    static String describeOutcome(Approov.TokenFetchResult approovResults) {
+        StringBuilder sb = new StringBuilder("status ").append(buildStatusHeaderValue(approovResults));
+        String arc = approovResults.getARC();
+        if ((arc != null) && !arc.isEmpty())
+            sb.append(", ARC ").append(arc);
+        String reasons = approovResults.getRejectionReasons();
+        if ((reasons != null) && !reasons.isEmpty())
+            sb.append(", rejection reasons ").append(reasons);
+        return sb.toString();
+    }
+
+    /**
+     * Indicates whether a host is an Approov API domain, token-protected or added
+     * with -noApproovToken, by its being a key of the SDK's public-key-sha256 pin set
+     * (the "*" Managed Trust Roots key excluded), compared as the pinning path
+     * compares hosts: without regard to case and with one trailing dot ignored. An
+     * empty pin set (no dynamic configuration yet, or an unpin-mode device) lists no
+     * host. This decides only whether a request proceeding on a token fetch failure
+     * carries the status header (decided 2026-10-07): the token fetch status alone
+     * classifies every other request.
+     *
+     * @param host the request host
+     * @return true if the host is a key of the pin set
+     * @throws ApproovException if the SDK throws when asked for its pins
+     */
+    static boolean isApproovApiHost(String host) throws ApproovException {
+        Map<String, List<String>> pins;
+        try {
+            pins = sdk().getPins("public-key-sha256");
+        } catch (RuntimeException e) {
+            throw sdkFailure("getPins", e);
+        }
+        if (pins == null)
+            return false;
+        String wanted = ApproovPinningInterceptor.normalizeHost(host);
+        for (String domain : pins.keySet()) {
+            if ((domain != null) && !domain.equals("*")
+                    && ApproovPinningInterceptor.normalizeHost(domain).equals(wanted))
+                return true;
+        }
+        return false;
     }
 
     /**
@@ -927,8 +983,8 @@ public class ApproovService {
 
     /**
      * Builds the value to be used for the Approov token header from a token
-     * fetch result. If no token was obtained the value is empty (after any
-     * prefix): failure information is never placed in the token header but is
+     * fetch result whose status is SUCCESS (the header is not added for any other
+     * status): failure information is never placed in the token header but is
      * reported on the status header instead.
      *
      * @param approovResults the token fetch result
@@ -1870,12 +1926,12 @@ class ApproovTokenInterceptor implements Interceptor {
 
     /**
      * Constructs a new interceptor that adds Approov tokens and substitutes headers
-     * or query parameters. Whether a request proceeds when a token or a secure
-     * string cannot be obtained is decided by the service mutator (see
-     * ApproovServiceMutator.CLOSE_FAILURE, the 3.8.0 default, and ALWAYS_PROCEED).
-     * A request that proceeds without a token is sent with an empty token header,
-     * and the Approov fetch status is reported on the status header for every
-     * processed request.
+     * or query parameters. Whether a request proceeds when a token cannot be
+     * obtained is decided by the service mutator (see
+     * ApproovServiceMutator.CLOSE_FAILURE, the 3.8.0 default, and ALWAYS_PROCEED);
+     * a secure string that cannot be obtained never aborts a request under either.
+     * A request that proceeds without a token carries no token header and reports
+     * the token fetch status on the status header.
      */
     public ApproovTokenInterceptor() {
     }
@@ -1897,15 +1953,18 @@ class ApproovTokenInterceptor implements Interceptor {
 
     /**
      * Applies Approov protection to a request: decides whether the request is
-     * processed at all, fetches a token for its URL, adds the token, trace and
-     * status headers, performs secure string substitutions, invokes the
-     * mutator's processed request callback and finally, if message signing is
-     * enabled, signs the request. The returned request carries an
+     * processed at all, fetches a token for its URL and applies what the channel
+     * that fetch puts it on allows: on a token-protected API (SUCCESS) the token,
+     * trace and status headers, the secure strings and, if message signing is
+     * enabled, the signatures; on a secrets-only API (UNPROTECTED_URL) the secure
+     * strings only; on a failure status the mutator lets proceed the status header
+     * only. It then invokes the mutator's processed request callback and signs a
+     * token-protected request. The returned request carries an
      * ApproovRequestFreshness marker describing exactly the protection applied
      * to it, so that the network layer can strip and reapply that protection on
      * a stale attempt or on a redirect followup. A request that is not processed
-     * (excluded, or to a domain Approov does not protect) is returned unchanged
-     * with no marker.
+     * (excluded, to a host not added to Approov, or on a failure status the
+     * mutator sends untouched) is returned unchanged with no marker.
      *
      * @param request         the request to protect, carrying no Approov protection
      * @param mutator         the service mutator to consult
@@ -1947,8 +2006,49 @@ class ApproovTokenInterceptor implements Interceptor {
         // force a pinning rebuild if there is any dynamic config update
         ApproovService.updatePinsIfConfigChanged(approovResults);
 
-        // check the status of Approov token fetch using decision maker
-        boolean aChange = false;
+        // the token fetch status decides the channel (decided 2026-10-07, SPECIFICATION
+        // 1.5, 6.1): SUCCESS is a token-protected API, UNPROTECTED_URL a secrets-only
+        // API (added with -noApproovToken: pinned, no token required), UNKNOWN_URL a
+        // host not added to Approov, and every other status a failure. The mutator's
+        // fetch decision is consulted for every status and may abort the request; when
+        // it lets a request proceed it governs the token, status and trace headers and
+        // the signatures, never the secure strings, which follow the channel and then
+        // the substitution hooks.
+        Approov.TokenFetchStatus tokenStatus = approovResults.getStatus();
+        Approov.TokenFetchResult tokenResults = approovResults;
+        boolean proceedWithHeaders = ApproovService.callMutator("handleInterceptorFetchTokenResult",
+                () -> mutator.handleInterceptorFetchTokenResult(tokenResults, url.toString()));
+        boolean tokenProtected = (tokenStatus == Approov.TokenFetchStatus.SUCCESS);
+        boolean secretsOnly = (tokenStatus == Approov.TokenFetchStatus.UNPROTECTED_URL);
+        if (tokenStatus == Approov.TokenFetchStatus.UNKNOWN_URL) {
+            // a host not added to Approov: nothing is added and nothing substituted,
+            // whatever the mutator answered, so that nothing the layer adds reaches it
+            logUndeliveredPlaceholders(request, "token fetch " + ApproovService.describeOutcome(approovResults));
+            return request;
+        }
+        if (!tokenProtected && !secretsOnly
+                && (!proceedWithHeaders || !ApproovService.isApproovApiHost(url.host()))) {
+            // a failure status the mutator decided to send untouched, or one it lets
+            // proceed to a host that is not an Approov API domain (not a key of the
+            // SDK pin set, or the pin set is empty): a failure status says nothing
+            // about the host, so the status header is not sent there, and a failure
+            // carries no secure string either, so nothing at all is added
+            if (proceedWithHeaders)
+                ApproovLog.d(TAG, "Proceeding without a token for " + ApproovLog.loggableURL(url)
+                        + ", a host not in the Approov pin set, with no Approov header: token fetch "
+                        + ApproovService.describeOutcome(approovResults));
+            logUndeliveredPlaceholders(request, "token fetch " + ApproovService.describeOutcome(approovResults));
+            return request;
+        }
+
+        // the headers this request carries: the token, status and trace headers on a
+        // token-protected request the mutator lets proceed with them; only the status
+        // header, reporting the token fetch status, on a failure status the mutator
+        // lets proceed (no token header, not even an empty one, no trace header and so
+        // no signatures), and only to a host that is an Approov API domain, a key of
+        // the SDK pin set: a failure status says nothing about the host, so any other
+        // host, and every host while the pin set is empty, gets nothing at all; none
+        // on a secrets-only request
         String setTokenHeaderKey = null;
         String setTokenHeaderPrefix = null;
         String setTokenHeaderValue = null;
@@ -1956,55 +2056,58 @@ class ApproovTokenInterceptor implements Interceptor {
         String setTraceIDHeaderValue = null;
         String setStatusHeaderKey = null;
         String setStatusHeaderValue = null;
-        Approov.TokenFetchResult tokenResults = approovResults;
-        if (ApproovService.callMutator("handleInterceptorFetchTokenResult",
-                () -> mutator.handleInterceptorFetchTokenResult(tokenResults, url.toString()))) {
-            // the request is Approov processed so add the token header (empty if no
-            // token was obtained, as evidence that Approov processing occurred) and
-            // report the fetch status on the status header; the token header name and
-            // prefix are read as one snapshot
-            aChange = true;
-            String[] tokenHeader = ApproovService.snapshotTokenHeader();
-            setTokenHeaderKey = tokenHeader[0];
-            setTokenHeaderPrefix = tokenHeader[1];
-            setTokenHeaderValue = ApproovService.buildTokenHeaderValue(setTokenHeaderPrefix, approovResults);
+        if (proceedWithHeaders && !secretsOnly) {
             setStatusHeaderKey = ApproovService.getStatusHeader();
             setStatusHeaderValue = ApproovService.buildStatusHeaderValue(approovResults);
+            if (tokenProtected) {
+                // the token header name and prefix are read as one snapshot
+                String[] tokenHeader = ApproovService.snapshotTokenHeader();
+                setTokenHeaderKey = tokenHeader[0];
+                setTokenHeaderPrefix = tokenHeader[1];
+                setTokenHeaderValue = ApproovService.buildTokenHeaderValue(setTokenHeaderPrefix, approovResults);
 
-            String traceIDHeader = ApproovService.getTraceIDHeader();
-            String traceID = approovResults.getTraceID();
-            // Emit the trace header whenever the SDK provides a value, even if it is empty, so the
-            // backend has evidence that Approov processing occurred (see Missing Artifacts Fallback).
-            // A null trace ID means none is available, so the header is omitted in that case.
-            if ((traceIDHeader != null) && (traceID != null)) {
-                setTraceIDHeaderKey = traceIDHeader;
-                setTraceIDHeaderValue = traceID;
+                // the trace header is sent whenever the SDK provides a value with a
+                // token, even an empty one; a null trace ID means none is available
+                String traceIDHeader = ApproovService.getTraceIDHeader();
+                String traceID = approovResults.getTraceID();
+                if ((traceIDHeader != null) && (traceID != null)) {
+                    setTraceIDHeaderKey = traceIDHeader;
+                    setTraceIDHeaderValue = traceID;
+                }
             }
-        } else {
-            // the request is not for a domain protected by Approov (or the mutator has
-            // decided it must be sent untouched) so no Approov headers are added and no
-            // secure string is substituted. A status the mutator lets proceed is
-            // substituted below, except BAD_URL and never over cleartext.
-            return request;
         }
 
         // we now deal with any header substitutions, which may require further fetches
         // but these should be using cached results; the original values are kept so
         // that the substitution can be undone if the protection is reapplied
         //
-        // A secure string is never substituted into a request that is not sent over
-        // TLS or whose token fetch returned BAD_URL, whatever the mutator decides
-        // (SPECIFICATION 1.5, 6.2): the SDK answers BAD_URL for an http URL and for a
-        // URL it cannot parse, which a mutator such as ALWAYS_PROCEED lets proceed, so
-        // such a request is not known to go to a protected domain, and a redirect from
-        // a protected host to an attacker's URL carrying the placeholder would
-        // otherwise receive the secret. No secure string is fetched and the
-        // substitution hooks are not consulted; the placeholder stays, as for any
-        // substitution that produces no usable value (SPECIFICATION 1.4), and a
-        // warning names the header or query parameter, never the value.
+        // A secure string is substituted only on a protected channel, a token-protected
+        // or a secrets-only API, and only over TLS, whatever the mutator decides
+        // (SPECIFICATION 1.5, 6.1): a failure status says nothing about the host,
+        // because the SDK looks the domain up only after a successful fetch, and the
+        // SDK answers BAD_URL for an http URL and for a URL it cannot parse, so such a
+        // request is not known to go to a protected channel, and a redirect from a
+        // protected host to an attacker's URL carrying the placeholder would otherwise
+        // receive the secret. No secure string is fetched and the substitution hooks
+        // are not consulted; the placeholder stays, as for any substitution that
+        // produces no usable value (SPECIFICATION 1.4), and a warning names the header
+        // or query parameter, never the value.
+        //
+        // Every placeholder the layer does not replace, for any reason, and every
+        // request it lets proceed on a token fetch failure, is logged at DEBUG only,
+        // naming the header or query parameter (never a value) with the fetch status,
+        // ARC and rejection reasons (decided 2026-10-07): the placeholder and the
+        // status header are the backend's evidence, and the app log is for support.
+        if (!tokenProtected && !secretsOnly)
+            ApproovLog.d(TAG, "Proceeding without a token for " + ApproovLog.loggableURL(url) + ": token fetch "
+                    + ApproovService.describeOutcome(approovResults));
         String noSecureStrings = !url.isHttps() ? "the request is not sent over TLS"
-                : (approovResults.getStatus() == Approov.TokenFetchStatus.BAD_URL)
-                        ? "the SDK reports the URL as bad_url" : null;
+                : (tokenStatus == Approov.TokenFetchStatus.BAD_URL)
+                        ? "the SDK reports the URL as bad_url, token fetch "
+                                + ApproovService.describeOutcome(approovResults)
+                : (!tokenProtected && !secretsOnly)
+                        ? "token fetch " + ApproovService.describeOutcome(approovResults)
+                        : null;
         Map<String, String> substitutionHeaders = ApproovService.getSubstitutionHeaders();
         Map<String, String> setSubstitutionHeaders = new LinkedHashMap<>(substitutionHeaders.size());
         Map<String, List<String>> originalHeaderValues = new LinkedHashMap<>(substitutionHeaders.size());
@@ -2014,7 +2117,7 @@ class ApproovTokenInterceptor implements Interceptor {
             String value = request.header(header);
             if ((value != null) && value.startsWith(prefix) && (value.length() > prefix.length())) {
                 if (noSecureStrings != null) {
-                    ApproovLog.w(TAG, "Secure string not substituted in header " + header
+                    ApproovLog.d(TAG, "Secure string not substituted in header " + header
                             + ": " + noSecureStrings + ", placeholder left");
                     continue;
                 }
@@ -2040,11 +2143,13 @@ class ApproovTokenInterceptor implements Interceptor {
                         ApproovLog.w(TAG, "Secure string for header " + header + " contains a character a header "
                                 + "value cannot carry, placeholder left");
                     } else {
-                        aChange = true;
                         setSubstitutionHeaders.put(header, prefix + secureString);
                         // every field of the name, in order, so that all can be restored
                         originalHeaderValues.put(header, new ArrayList<>(request.headers(header)));
                     }
+                } else {
+                    ApproovLog.d(TAG, "Secure string not substituted in header " + header + ": secure string fetch "
+                            + ApproovService.describeOutcome(approovResults) + ", placeholder left");
                 }
             }
         }
@@ -2071,7 +2176,7 @@ class ApproovTokenInterceptor implements Interceptor {
                 if (!matcher.find())
                     break;
                 if (noSecureStrings != null) {
-                    ApproovLog.w(TAG, "Secure string not substituted in query parameter " + queryKey
+                    ApproovLog.d(TAG, "Secure string not substituted in query parameter " + queryKey
                             + ": " + noSecureStrings + ", placeholder left");
                     break;
                 }
@@ -2102,8 +2207,7 @@ class ApproovTokenInterceptor implements Interceptor {
                         String candidateURL = new StringBuilder(replacementURL).replace(start, from,
                                 secureString).toString();
                         if (ApproovService.isCarriedInQuery(candidateURL, pattern, occurrence, secureString)) {
-                            aChange = true;
-                            if (!queryKeys.contains(queryKey))
+                                if (!queryKeys.contains(queryKey))
                                 queryKeys.add(queryKey);
                             replacementURL = candidateURL;
                             from = start + secureString.length();
@@ -2112,78 +2216,80 @@ class ApproovTokenInterceptor implements Interceptor {
                                     + "in the URL unchanged, placeholder left");
                         }
                     }
+                } else {
+                    ApproovLog.d(TAG, "Secure string not substituted in query parameter " + queryKey
+                            + ": secure string fetch " + ApproovService.describeOutcome(approovResults)
+                            + ", placeholder left");
                 }
                 occurrence++;
             }
         }
 
-        // gather the request changes applied to the request
+        // gather the request changes applied to the request and apply them. Every
+        // request that gets this far is processed by the layer and carries a freshness
+        // marker describing exactly what was applied, even if nothing was, so that the
+        // network layer can strip and reapply it on a stale attempt or classify a
+        // redirect followup afresh
         ApproovRequestMutations changes = new ApproovRequestMutations();
-        // apply all the changes to the request
-        ApproovRequestFreshness freshness = null;
-        if (aChange) {
-            Request.Builder builder = request.newBuilder();
-            if (setTokenHeaderKey != null) {
-                // the prefix is the app's (a configuration error if a header cannot
-                // carry it), the token the SDK's (an SDK problem, never blamed on the
-                // app's configuration)
-                if (!ApproovService.isSafeHeaderValue(setTokenHeaderPrefix))
-                    throw ApproovService.unsafeHeaderValue(setTokenHeaderKey);
-                if (!ApproovService.isSafeHeaderValue(tokenResults.getToken()))
-                    throw ApproovService.unsafeSdkValue("a token", setTokenHeaderKey);
-                setHeader(builder, setTokenHeaderKey, setTokenHeaderValue);
-                changes.setTokenHeaderKey(setTokenHeaderKey);
-                changes.setTokenHeaderPrefix(setTokenHeaderPrefix);
-
-                // tag the request so that the freshness interceptor can determine at the
-                // network layer whether the protection was applied too long ago and must
-                // be refreshed before transmission, or whether the request was redirected
-                freshness = new ApproovRequestFreshness(url.toString(), changes);
-                builder.tag(ApproovRequestFreshness.class, freshness);
-            }
-            if (setTraceIDHeaderKey != null) {
-                if (!ApproovService.isSafeHeaderValue(setTraceIDHeaderValue))
-                    throw ApproovService.unsafeSdkValue("a trace ID", setTraceIDHeaderKey);
-                setHeader(builder, setTraceIDHeaderKey, setTraceIDHeaderValue);
-                changes.setTraceIDHeaderKey(setTraceIDHeaderKey);
-            }
-            // report the fetch status on the status header, replacing any value the app
-            // may have set itself so that the backend only sees what this layer observed
-            if (setStatusHeaderKey != null) {
-                setHeader(builder, setStatusHeaderKey, setStatusHeaderValue);
-                changes.setStatusHeaderKey(setStatusHeaderKey);
-            }
-            if (!setSubstitutionHeaders.isEmpty()) {
-                for (Map.Entry<String, String> entry : setSubstitutionHeaders.entrySet()) {
-                    // substitute the header
-                    setHeader(builder, entry.getKey(), entry.getValue());
-                }
-                changes.setSubstitutionHeaderKeys(new ArrayList<>(setSubstitutionHeaders.keySet()));
-            }
-            if (!originalURL.equals(replacementURL)) {
-                try {
-                    builder.url(replacementURL);
-                } catch (IllegalArgumentException e) {
-                    // OkHttp's message quotes the URL, which now holds secure strings, so
-                    // neither it nor the cause is kept
-                    throw new ApproovException("Query parameter substitution for " + queryKeys
-                            + ": the secure string does not form a valid URL");
-                }
-                changes.setSubstitutionQueryParamResults(originalURL, queryKeys);
-            }
-            request = builder.build();
-
-            // record the substituted values as they are actually stored on the request
-            // (OkHttp trims header values when they are set) so that stripping can
-            // recognise a header it installed
-            if (freshness != null) {
-                Map<String, String> installedHeaderValues = new LinkedHashMap<>(setSubstitutionHeaders.size());
-                for (String header : setSubstitutionHeaders.keySet())
-                    installedHeaderValues.put(header, request.header(header));
-                freshness.setSubstitutions(originalHeaderValues, installedHeaderValues);
-                freshness.freezeChanges();
-            }
+        Request.Builder builder = request.newBuilder();
+        if (setTokenHeaderKey != null) {
+            // the prefix is the app's (a configuration error if a header cannot carry
+            // it), the token the SDK's (an SDK problem, never blamed on the app's
+            // configuration)
+            if (!ApproovService.isSafeHeaderValue(setTokenHeaderPrefix))
+                throw ApproovService.unsafeHeaderValue(setTokenHeaderKey);
+            if (!ApproovService.isSafeHeaderValue(tokenResults.getToken()))
+                throw ApproovService.unsafeSdkValue("a token", setTokenHeaderKey);
+            setHeader(builder, setTokenHeaderKey, setTokenHeaderValue);
+            changes.setTokenHeaderKey(setTokenHeaderKey);
+            changes.setTokenHeaderPrefix(setTokenHeaderPrefix);
         }
+        if (setTraceIDHeaderKey != null) {
+            if (!ApproovService.isSafeHeaderValue(setTraceIDHeaderValue))
+                throw ApproovService.unsafeSdkValue("a trace ID", setTraceIDHeaderKey);
+            setHeader(builder, setTraceIDHeaderKey, setTraceIDHeaderValue);
+            changes.setTraceIDHeaderKey(setTraceIDHeaderKey);
+        }
+        // report the token fetch status on the status header, replacing any value the
+        // app may have set itself so that the backend only sees what this layer observed
+        if (setStatusHeaderKey != null) {
+            setHeader(builder, setStatusHeaderKey, setStatusHeaderValue);
+            changes.setStatusHeaderKey(setStatusHeaderKey);
+        }
+        if (!setSubstitutionHeaders.isEmpty()) {
+            for (Map.Entry<String, String> entry : setSubstitutionHeaders.entrySet()) {
+                // substitute the header
+                setHeader(builder, entry.getKey(), entry.getValue());
+            }
+            changes.setSubstitutionHeaderKeys(new ArrayList<>(setSubstitutionHeaders.keySet()));
+        }
+        if (!originalURL.equals(replacementURL)) {
+            try {
+                builder.url(replacementURL);
+            } catch (IllegalArgumentException e) {
+                // OkHttp's message quotes the URL, which now holds secure strings, so
+                // neither it nor the cause is kept
+                throw new ApproovException("Query parameter substitution for " + queryKeys
+                        + ": the secure string does not form a valid URL");
+            }
+            changes.setSubstitutionQueryParamResults(originalURL, queryKeys);
+        }
+
+        // tag the request so that the freshness interceptor can determine at the
+        // network layer whether the protection was applied too long ago and must be
+        // refreshed before transmission, or whether the request was redirected
+        ApproovRequestFreshness freshness = new ApproovRequestFreshness(url.toString(), changes);
+        builder.tag(ApproovRequestFreshness.class, freshness);
+        request = builder.build();
+
+        // record the substituted values as they are actually stored on the request
+        // (OkHttp trims header values when they are set) so that stripping can
+        // recognise a header it installed
+        Map<String, String> installedHeaderValues = new LinkedHashMap<>(setSubstitutionHeaders.size());
+        for (String header : setSubstitutionHeaders.keySet())
+            installedHeaderValues.put(header, request.header(header));
+        freshness.setSubstitutions(originalHeaderValues, installedHeaderValues);
+        freshness.freezeChanges();
 
         // call the processed request callback, unless protection is being reapplied
         // under a mutator whose callback is not safe to invoke again
@@ -2219,8 +2325,9 @@ class ApproovTokenInterceptor implements Interceptor {
         // message signing runs last, over the final token, status, trace and
         // substituted values and whatever the processed request callback changed,
         // whichever mutator made the decisions above; only a request carrying the
-        // token header is signed
-        if ((signing != null) && (freshness != null))
+        // token header, a token-protected request, is signed: neither a secrets-only
+        // request nor one proceeding on a failure status is
+        if ((signing != null) && (freshness.getChanges().getTokenHeaderKey() != null))
             processedRequest = signing.sign(processedRequest, freshness.getChanges());
 
         // record the time at which the protection was applied, the URL it was applied
@@ -2228,14 +2335,44 @@ class ApproovTokenInterceptor implements Interceptor {
         // or the message signing, so that the freshness interceptor can
         // strip and reapply the protection at the network layer if the request is
         // held too long before transmission or is redirected
-        if (freshness != null) {
-            freshness.markProtected(SystemClock.elapsedRealtime(),
-                    ApproovRequestFreshness.addedHeaderNames(request, processedRequest));
-            freshness.setAppliedURL(processedRequest.url().toString());
-            freshness.setAppliedMethod(processedRequest.method());
-        }
+        freshness.markProtected(SystemClock.elapsedRealtime(),
+                ApproovRequestFreshness.addedHeaderNames(request, processedRequest));
+        freshness.setAppliedURL(processedRequest.url().toString());
+        freshness.setAppliedMethod(processedRequest.method());
 
         return processedRequest;
+    }
+
+    /**
+     * Logs at DEBUG, by name only, each substitution header and query parameter a
+     * request carries that the layer leaves as it is because the request's channel
+     * allows no secure string (decided 2026-10-07). Never logs a value.
+     *
+     * @param request the request
+     * @param reason  why no secure string is delivered, with the fetch outcome
+     */
+    private static void logUndeliveredPlaceholders(Request request, String reason) {
+        if (!ApproovLog.isDebugEnabled())
+            return;
+        for (Map.Entry<String, String> entry : ApproovService.getSubstitutionHeaders().entrySet()) {
+            String value = request.header(entry.getKey());
+            if ((value != null) && value.startsWith(entry.getValue()) && (value.length() > entry.getValue().length()))
+                ApproovLog.d(TAG, "Secure string not substituted in header " + entry.getKey() + ": " + reason
+                        + ", placeholder left");
+        }
+        String query = request.url().encodedQuery();
+        if (query == null)
+            return;
+        String url = request.url().toString();
+        int from = url.indexOf('?');
+        int hash = url.indexOf('#', Math.max(from, 0));
+        for (Map.Entry<String, Pattern> entry : ApproovService.getSubstitutionQueryParams().entrySet()) {
+            Matcher matcher = entry.getValue().matcher(url);
+            matcher.region(from, (hash < 0) ? url.length() : hash);
+            if (matcher.find())
+                ApproovLog.d(TAG, "Secure string not substituted in query parameter " + entry.getKey() + ": "
+                        + reason + ", placeholder left");
+        }
     }
 
     /**
@@ -2579,7 +2716,8 @@ class ApproovPinningInterceptor implements Interceptor {
         rebuildRequired = false;
     }
 
-    private static String normalizeHost(String host) {
+    // a host as the pins are looked up: lowercase, with one trailing dot removed
+    static String normalizeHost(String host) {
         String lower = host.toLowerCase(Locale.ROOT);
         return lower.endsWith(".") ? lower.substring(0, lower.length() - 1) : lower;
     }

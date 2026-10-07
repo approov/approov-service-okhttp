@@ -44,7 +44,7 @@ import okhttp3.mockwebserver.RecordedRequest;
  * secret over plain HTTP: on a request the app made, or on a redirect from a
  * protected host to an attacker's http URL carrying the placeholder. The
  * placeholder now stays (SPECIFICATION 1.4: a substitution that produces no
- * value) and a warning names the header or parameter.
+ * value) and a DEBUG line names the header or parameter.
  */
 @RunWith(RobolectricTestRunner.class)
 @Config(manifest = Config.NONE)
@@ -103,7 +103,9 @@ public class CleartextSubstitution380Test {
         fixture.otherServer.enqueue(new MockResponse().setBody("ok"));
         send(request(fixture.otherUrl("/data")));
         RecordedRequest recorded = fixture.otherServer.takeRequest(5, TimeUnit.SECONDS);
-        assertEquals("BAD_URL proceeds under ALWAYS_PROCEED", "bad_url", recorded.getHeader("Approov-Status"));
+        // BAD_URL proceeds under ALWAYS_PROCEED; 127.0.0.1 is not a key of the SDK pin
+        // set, so the failure carries no Approov header at all (decided 2026-10-07)
+        LocalHttpsFixture.assertNoApproovHeaders(recorded);
         assertEquals("secret sent in cleartext", PLACEHOLDER, recorded.getHeader("Api-Key"));
         assertEquals("secret sent in cleartext", PLACEHOLDER, recorded.getRequestUrl().queryParameter("key"));
         assertWarned();
@@ -127,18 +129,20 @@ public class CleartextSubstitution380Test {
         assertWarned();
     }
 
-    // a warning names the header and the parameter, never the value
+    // a DEBUG line names the header and the parameter, never the value (decided
+    // 2026-10-07: logged at DEBUG only)
     private void assertWarned() {
         boolean header = false;
         boolean query = false;
         for (ShadowLog.LogItem item : ShadowLog.getLogs()) {
             assertFalse("secret logged: " + item.msg, item.msg.contains(SECRET));
-            if (item.type == android.util.Log.WARN && item.msg.contains("not sent over TLS")) {
-                header |= item.msg.contains("Api-Key");
-                query |= item.msg.contains("key");
+            if (item.type == android.util.Log.DEBUG && item.msg.contains("placeholder left")
+                    && (item.msg.contains("not sent over TLS") || item.msg.contains("bad_url"))) {
+                header |= item.msg.contains("header Api-Key");
+                query |= item.msg.contains("query parameter key");
             }
         }
-        assertTrue("no warning naming the header", header);
-        assertTrue("no warning naming the query parameter", query);
+        assertTrue("no DEBUG line naming the header", header);
+        assertTrue("no DEBUG line naming the query parameter", query);
     }
 }

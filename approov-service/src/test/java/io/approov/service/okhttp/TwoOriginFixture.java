@@ -51,6 +51,17 @@ final class TwoOriginFixture {
      * @param secureStrings secure string keys and values, alternating
      */
     TwoOriginFixture(boolean otherOverTls, String... secureStrings) throws Exception {
+        this(null, otherOverTls, secureStrings);
+    }
+
+    /**
+     * @param extraScenario further fields of the mini-SDK case, as JSON members
+     *                      without the enclosing braces (for example token fetch
+     *                      rules by URL), or null for none
+     * @param otherOverTls  whether the other origin is HTTPS (true) or HTTP (false)
+     * @param secureStrings secure string keys and values, alternating
+     */
+    TwoOriginFixture(String extraScenario, boolean otherOverTls, String... secureStrings) throws Exception {
         HeldCertificate certificate = new HeldCertificate.Builder()
                 .addSubjectAlternativeName("localhost")
                 .addSubjectAlternativeName("127.0.0.1")
@@ -80,6 +91,7 @@ final class TwoOriginFixture {
         AttesterProxyController.loadScenarioJson("{\"activeCase\": \"" + name + "\", \"cases\": {\"" + name + "\": {"
                 + "\"protectedDomains\": [\"localhost\"],"
                 + "\"pins\": {\"public-key-sha256\": {\"localhost\": []}},"
+                + ((extraScenario != null) ? extraScenario + "," : "")
                 + "\"initialSecureStrings\": {" + strings + "}}}}");
     }
 

@@ -49,8 +49,9 @@ import okhttp3.Request;
  * hook's failure: the request fails with the layer's hook failure, an
  * ApproovException (an IOException) naming the hook with the original as its
  * cause, logged at error level. Only the exceptions the standard CLOSE_FAILURE
- * request decisions raise keep their Approov form, whether a custom mutator
- * inherits those decisions or calls them.
+ * token decisions raise keep their Approov form, whether a custom mutator
+ * inherits those decisions or calls them; the standard substitution decisions
+ * raise none (decided 2026-10-07).
  */
 @RunWith(RobolectricTestRunner.class)
 @Config(manifest = Config.NONE)
@@ -194,7 +195,7 @@ public class HookApproovException380Test {
     }
 
     // a custom mutator that calls the CLOSE_FAILURE decisions itself, rethrowing
-    // the decision it caught unchanged
+    // the token decision it caught unchanged
     static final class DelegatingMutator implements ApproovServiceMutator {
         @Override
         public boolean handleInterceptorFetchTokenResult(Approov.TokenFetchResult approovResults, String url)
@@ -246,9 +247,31 @@ public class HookApproovException380Test {
                     Approov.TokenFetchStatus.REJECTED);
             assertDecision(what + " token NO_NETWORK", ApproovNetworkException.class,
                     Approov.TokenFetchStatus.NO_NETWORK);
-            assertDecision(what + " secure string INTERNAL_ERROR", ApproovFetchStatusException.class,
-                    Approov.TokenFetchStatus.INTERNAL_ERROR);
         }
         assertEquals("nothing sent", 0, fixture.server.getRequestCount());
+    }
+
+    @Test
+    public void theStandardSubstitutionDecisionsNeverAbortInACustomMutator() throws Exception {
+        // decided 2026-10-07: a standard substitution decision never throws, so a
+        // custom mutator that inherits or calls it proceeds with the placeholder
+        ApproovServiceMutator[] mutators = {
+            ApproovServiceMutator.CLOSE_FAILURE, new InheritingMutator(), new DelegatingMutator()
+        };
+        int sent = 0;
+        for (ApproovServiceMutator mutator : mutators) {
+            ApproovService.setServiceMutator(mutator);
+            String what = mutator.getClass().getSimpleName();
+            for (boolean enqueued : new boolean[] {true, false}) {
+                for (String status : new String[] {"INTERNAL_ERROR", "NO_NETWORK"}) {
+                    AttesterProxyController.setNextAttestationDirectiveJson("{\"operation\": \"fetchSecureString\","
+                            + " \"response\": {\"status\": \"" + status + "\"}}");
+                    fixture.server.enqueue(new okhttp3.mockwebserver.MockResponse().setBody("ok"));
+                    RequestPathProbe.assertOk(what + " secure string " + status, probe.run(everyDecision(), enqueued));
+                    sent++;
+                }
+            }
+        }
+        assertEquals("every request sent", sent, fixture.server.getRequestCount());
     }
 }
