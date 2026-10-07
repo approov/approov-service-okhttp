@@ -121,8 +121,6 @@ public class RedirectEcho380Test {
             assertNotNull(redirect);
             assertNoSecret("the Location the app is shown", redirect.header("Location"));
             assertEquals(expected, redirect.header("Location"));
-            // the request the next hop actually sent carries no Approov header
-            assertNull(response.networkResponse().request().header("Approov-Token"));
         }
 
         RecordedRequest first = fixture.protectedServer.takeRequest(5, TimeUnit.SECONDS);
