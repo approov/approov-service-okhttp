@@ -62,7 +62,7 @@ public class LoggingLevel380Test {
             "ApproovPinningInterceptor", "ApproovMsgSign"));
 
     // a distinctive line logged at each level, and the call that logs it
-    private static final String ERROR_LINE = "addExclusionURLRegex [ error";
+    private static final String ERROR_LINE = "getDeviceID: Approov protection not enabled";
     private static final String WARNING_LINE = "before ApproovService initialization";
     private static final String INFO_LINE = "enabled in bypass mode";
     private static final String DEBUG_LINE = "setTokenHeader Probe-Token";
@@ -103,11 +103,12 @@ public class LoggingLevel380Test {
         return false;
     }
 
-    // logs one line at each level: a warning, an error, a debug line, then an
-    // information line (bypass mode initialization)
+    // logs one line at each level: a warning, an error (a direct method before
+    // initialization), a debug line, then an information line (bypass mode
+    // initialization)
     private void logOneLineAtEachLevel() {
         ApproovService.getOkHttpClient();
-        ApproovService.addExclusionURLRegex("[");
+        assertThrows(ApproovException.class, ApproovService::getDeviceID);
         ApproovService.setTokenHeader("Probe-Token", "");
         ApproovService.initialize(fixture.context, "");
     }
@@ -215,10 +216,11 @@ public class LoggingLevel380Test {
 
     @Test
     public void aLevelSetBeforeInitializeSurvivesIt() {
-        // OFF before initialize: initialize logs nothing, and an error after it neither
+        // OFF before initialize: initialize logs nothing, and the lines after it neither
         ApproovService.setLoggingLevel(ApproovLogLevel.OFF);
         ApproovService.initialize(fixture.context, LocalHttpsFixture.CONFIG, "reinit-logging-before");
-        ApproovService.addExclusionURLRegex("[");
+        ApproovService.setTokenHeader("Probe-Token", "");
+        ApproovService.getOkHttpClient();
         assertEquals("layer lines at OFF across initialize", 0, layerLogs().size());
 
         // DEBUG before initialize: debug lines still logged after it

@@ -53,10 +53,11 @@ import java.util.regex.Matcher;
  *   placeholder in place, and the backend, which is the enforcement point,
  *   decides.
  * - {@link #DEFAULT}: the mutator in force until the app installs its own, and
- *   reinstated by ApproovService.setServiceMutator(null). It is CLOSE_FAILURE in
- *   3.8.0 and becomes ALWAYS_PROCEED in 4.0.0, a breaking change kept for the
- *   major release; an app that wants a decision set to stay fixed across 4.0.0
- *   names CLOSE_FAILURE or ALWAYS_PROCEED explicitly.
+ *   reinstated by ApproovService.setServiceMutator(null). It points to whatever
+ *   the release considers default behaviour: in 3.8.0 that is CLOSE_FAILURE, and
+ *   in 4.0.0 it is planned to become the ALWAYS_PROCEED behaviour, a breaking
+ *   change kept for the major release. An app that wants a fixed behaviour names
+ *   CLOSE_FAILURE or ALWAYS_PROCEED explicitly.
  *
  * Whatever the decisions, the fetch status is reported on the status header
  * (see ApproovService.setStatusHeader) of every request that proceeds with the
@@ -153,9 +154,11 @@ public interface ApproovServiceMutator {
 
     /**
      * The out-of-the-box decisions, in force until the app installs its own mutator
-     * and reinstated by ApproovService.setServiceMutator(null): {@link #CLOSE_FAILURE}
-     * in 3.8.0, {@link #ALWAYS_PROCEED} from 4.0.0. Name one of those explicitly
-     * for decisions that stay fixed across 4.0.0.
+     * and reinstated by ApproovService.setServiceMutator(null). Declared as the
+     * interface, it points to whatever the release considers default behaviour:
+     * {@link #CLOSE_FAILURE} in 3.8.0; in 4.0.0 it is planned to become the
+     * {@link #ALWAYS_PROCEED} behaviour. An app that wants a fixed behaviour names
+     * CLOSE_FAILURE or ALWAYS_PROCEED explicitly.
      */
     public static final ApproovServiceMutator DEFAULT = CLOSE_FAILURE;
 

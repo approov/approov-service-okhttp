@@ -26,6 +26,7 @@ import com.criticalblue.approovsdk.Approov;
 import java.io.IOException;
 import java.security.cert.Certificate;
 import java.util.ArrayList;
+import java.util.Collections;
 import java.util.HashMap;
 import java.util.HashSet;
 import java.util.Iterator;
@@ -1192,13 +1193,15 @@ public class ApproovService {
      *                 to exclude them
      */
     public static synchronized void addExclusionURLRegex(String urlRegex) {
+        Pattern pattern;
         try {
-            Pattern pattern = Pattern.compile(urlRegex);
-            exclusionURLRegexs.put(urlRegex, pattern);
-            ApproovLog.d(TAG, "addExclusionURLRegex " + urlRegex);
+            pattern = Pattern.compile(urlRegex);
         } catch (PatternSyntaxException e) {
-            ApproovLog.e(TAG, "addExclusionURLRegex " + urlRegex + " error: " + e.getMessage());
+            throw new IllegalArgumentException("addExclusionURLRegex: invalid regular expression "
+                    + urlRegex + ": " + e.getDescription(), e);
         }
+        exclusionURLRegexs.put(urlRegex, pattern);
+        ApproovLog.d(TAG, "addExclusionURLRegex " + urlRegex);
     }
 
     /**
@@ -2394,6 +2397,12 @@ class ApproovPinningInterceptor implements Interceptor {
     // since the hosts that must be pinned are unknown
     private boolean rebuildRequired = false;
 
+    // the Approov domains, lowercased, listed with no pins of their own while the
+    // managed trust roots (the "*" pin set) are empty or absent: OS trust only, which
+    // is warned once per host
+    private Set<String> osTrustOnlyHosts = Collections.emptySet();
+    private final Set<String> warnedOsTrustOnlyHosts = new HashSet<>();
+
     /**
      * Construct a new pinning interceptor. If the SDK fails to provide the pins
      * they are read again before the next connection check.
@@ -2433,10 +2442,13 @@ class ApproovPinningInterceptor implements Interceptor {
             // SDK and it holds pins (SPECIFICATION 5.7(f)); initialize() rebuilds the
             // pins once protection is enabled
             certificatePinner = pinBuilder.build();
+            osTrustOnlyHosts = Collections.emptySet();
             rebuildRequired = false;
             return;
         }
         CertificatePinner pinner;
+        Set<String> osTrustOnly = new HashSet<>();
+        Set<String> pinnedHosts = new HashSet<>();
         try {
             Map<String, List<String>> allPins = ApproovService.sdk().getPins("public-key-sha256");
             if (allPins == null)
@@ -2452,6 +2464,13 @@ class ApproovPinningInterceptor implements Interceptor {
                     if (pins.isEmpty() && (allPins.get("*") != null))
                         pins = allPins.get("*");
 
+                    // no pins and no managed trust roots: OS trust only, warned once
+                    // per host
+                    if (pins.isEmpty())
+                        osTrustOnly.add(normalizeHost(domain));
+                    else
+                        pinnedHosts.add(normalizeHost(domain));
+
                     // add the required pins for the domain
                     for (String pin : pins)
                         pinBuilder = pinBuilder.add(domain, "sha256/" + pin);
@@ -2465,7 +2484,32 @@ class ApproovPinningInterceptor implements Interceptor {
             throw ApproovService.sdkFailure("Approov pins", e);
         }
         certificatePinner = pinner;
+        // pin keys match without regard to case: an empty spelling of a host never
+        // hides the pins another spelling of it has
+        osTrustOnly.removeAll(pinnedHosts);
+        osTrustOnlyHosts = osTrustOnly;
         rebuildRequired = false;
+    }
+
+    private static String normalizeHost(String host) {
+        String lower = host.toLowerCase(Locale.ROOT);
+        return lower.endsWith(".") ? lower.substring(0, lower.length() - 1) : lower;
+    }
+
+    /**
+     * Warns, once per host, that an Approov domain with no pins of its own is
+     * connected on OS trust only because the managed trust roots (the "*" pin set)
+     * are empty or absent: a valid development setup, but not a silent one. The
+     * host is named, never a pin.
+     */
+    private void warnIfOsTrustOnly(String host) {
+        String normalized = normalizeHost(host);
+        synchronized (this) {
+            if (!osTrustOnlyHosts.contains(normalized) || !warnedOsTrustOnlyHosts.add(normalized))
+                return;
+        }
+        ApproovLog.w(TAG, "Approov domain " + normalized + " has no pins and the managed trust roots are empty: "
+                + "its connections are validated by OS trust only");
     }
 
     /**
@@ -2515,6 +2559,7 @@ class ApproovPinningInterceptor implements Interceptor {
             buildPins();
 
         String host = chain.request().url().host();
+        warnIfOsTrustOnly(host);
         Connection connection = chain.connection();
         Handshake handshake = (connection != null) ? connection.handshake() : null;
         if (handshake == null) {
