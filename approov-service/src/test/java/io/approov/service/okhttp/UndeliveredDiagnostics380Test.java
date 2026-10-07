@@ -176,7 +176,10 @@ public class UndeliveredDiagnostics380Test {
     }
 
     @Test
-    public void aCleartextRequestIsLoggedAtDebugOnly() throws Exception {
+    public void aCleartextRequestIsStillAWarning() throws Exception {
+        // decided 2026-10-07: a placeholder left because the request is not https
+        // (or its token fetch returned BAD_URL) is a configuration problem and stays
+        // a warning, visible at the default level
         ApproovService.setLoggingLevel(ApproovLogLevel.INFO);
         TwoOriginFixture cleartext = new TwoOriginFixture(false, PLACEHOLDER, SECRET);
         try {
@@ -190,7 +193,13 @@ public class UndeliveredDiagnostics380Test {
                     .url(cleartext.otherUrl("/data")).header("Api-Key", PLACEHOLDER).build()).execute()) {
                 assertEquals(200, response.code());
             }
-            assertNoLineNaming("Api-Key");
+            boolean warned = false;
+            for (ShadowLog.LogItem item : ShadowLog.getLogs()) {
+                assertFalse("a value was logged: " + item.msg, item.msg.contains(PLACEHOLDER));
+                warned |= (item.type == android.util.Log.WARN) && item.msg.contains("header Api-Key")
+                        && item.msg.contains("not sent over TLS");
+            }
+            assertTrue("no warning naming the header", warned);
         } finally {
             cleartext.shutdown();
         }

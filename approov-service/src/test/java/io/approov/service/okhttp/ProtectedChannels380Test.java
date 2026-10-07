@@ -314,6 +314,67 @@ public class ProtectedChannels380Test {
                 fixture.protectedServer);
     }
 
+    // decided 2026-10-07: the mutator's abort or proceed decision on a failure status
+    // applies only to a host in the pin set; a failure on any other host is never
+    // aborted and goes out untouched, like UNKNOWN_URL
+
+    @Test
+    public void closeFailureNeverAbortsAFailureToAHostNotInThePinSet() throws Exception {
+        start(null);
+        ApproovService.setServiceMutator(ApproovServiceMutator.CLOSE_FAILURE);
+        for (String status : new String[] {"NO_NETWORK", "REJECTED", "INTERNAL_ERROR"})
+            assertFailureGetsNothing("CLOSE_FAILURE unlisted", status, fixture.otherUrl("/data"),
+                    fixture.otherServer);
+        // control: the listed host still aborts
+        assertTokenFailureAborts("CLOSE_FAILURE listed", "NO_NETWORK", ApproovNetworkException.class);
+        assertTokenFailureAborts("CLOSE_FAILURE listed", "REJECTED", ApproovFetchStatusException.class);
+    }
+
+    @Test
+    public void closeFailureNeverAbortsAFailureWithAnEmptyPinSet() throws Exception {
+        start(null);
+        pinSet("");
+        ApproovService.setServiceMutator(ApproovServiceMutator.CLOSE_FAILURE);
+        for (String status : new String[] {"NO_NETWORK", "REJECTED"})
+            assertFailureGetsNothing("CLOSE_FAILURE empty pin set", status, fixture.protectedServer.url("/data"),
+                    fixture.protectedServer);
+    }
+
+    @Test
+    public void aCustomMutatorIsNotAskedAboutAFailureToAHostNotInThePinSet() throws Exception {
+        start(null);
+        java.util.concurrent.atomic.AtomicInteger asked = new java.util.concurrent.atomic.AtomicInteger();
+        ApproovService.setServiceMutator(new ApproovServiceMutator() {
+            @Override
+            public boolean handleInterceptorFetchTokenResult(Approov.TokenFetchResult approovResults, String url)
+                    throws IOException {
+                asked.incrementAndGet();
+                throw new ConnectException("app policy: abort every failure");
+            }
+        });
+        assertFailureGetsNothing("custom unlisted", "NO_NETWORK", fixture.otherUrl("/data"), fixture.otherServer);
+        assertEquals("the fetch hook was consulted", 0, asked.get());
+    }
+
+    @Test
+    public void anUnreadablePinSetListsNoHost() throws Exception {
+        start(null);
+        ApproovService.setSdkFacadeForTesting(new RecordingSdkFacade() {
+            @Override
+            public java.util.Map<String, java.util.List<String>> getPins(String pinType) {
+                throw new IllegalStateException("no pins");
+            }
+        });
+        assertFalse(ApproovService.isApproovApiHost("localhost"));
+        ApproovService.setSdkFacadeForTesting(new RecordingSdkFacade() {
+            @Override
+            public java.util.Map<String, java.util.List<String>> getPins(String pinType) {
+                return null;
+            }
+        });
+        assertFalse(ApproovService.isApproovApiHost("localhost"));
+    }
+
     @Test
     public void theManagedTrustRootsKeyDoesNotListAHost() throws Exception {
         start(null);

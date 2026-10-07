@@ -52,7 +52,7 @@ import okhttp3.mockwebserver.RecordedRequest;
  * (core-project-approov#822), so such a request is not known to go to a
  * protected domain. No secure string is fetched, the substitution hooks are not
  * consulted, the placeholder goes out in the header and the query, and a
- * DEBUG line names the header or parameter, never the value. CLOSE_FAILURE still
+ * warning names the header or parameter, never the value. CLOSE_FAILURE still
  * aborts on BAD_URL.
  */
 @RunWith(RobolectricTestRunner.class)
@@ -138,14 +138,14 @@ public class BadUrlSubstitution380Test {
         boolean query = false;
         for (ShadowLog.LogItem item : ShadowLog.getLogs()) {
             assertFalse(what + ": secret logged: " + item.msg, item.msg.contains(SECRET));
-            if ((item.type == android.util.Log.DEBUG) && item.msg.contains("bad_url")) {
+            if ((item.type == android.util.Log.WARN) && item.msg.contains("bad_url")) {
                 assertFalse(what + ": placeholder logged: " + item.msg, item.msg.contains(PLACEHOLDER));
                 header |= item.msg.contains("header Api-Key");
                 query |= item.msg.contains("query parameter key");
             }
         }
-        assertTrue(what + ": no DEBUG line naming the header", header);
-        assertTrue(what + ": no DEBUG line naming the query parameter", query);
+        assertTrue(what + ": no warning naming the header", header);
+        assertTrue(what + ": no warning naming the query parameter", query);
     }
 
     @Test

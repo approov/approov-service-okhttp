@@ -61,14 +61,15 @@ import java.util.regex.Matcher;
  * (SPECIFICATION 1.5, decided 2026-10-07): SUCCESS is a token-protected API,
  * UNPROTECTED_URL a secrets-only API added with -noApproovToken (pinned, no
  * token required), UNKNOWN_URL a host not added to Approov, and every other
- * status a failure, which says nothing about the host. The token fetch decision
- * (handleInterceptorFetchTokenResult) may abort a request on any status; when it
+ * status a failure, which says nothing about the host. A failure for a host that
+ * is not a key of the SDK pin set (the "*" key excluded; also when the pin set is
+ * empty or cannot be read) is treated like UNKNOWN_URL: the request goes out
+ * untouched, never aborted, and no hook is consulted. Otherwise the token fetch
+ * decision (handleInterceptorFetchTokenResult) may abort a request on any status; when it
  * lets a request proceed it governs the Approov headers and the signatures: a
  * SUCCESS request gets the token, status and trace headers and is signed, a
  * failure status gets the status header only (no token header, no trace header,
- * no signatures), and only on a request to a host that is a key of the SDK pin
- * set, an Approov API domain (any other host gets nothing at all), and
- * UNKNOWN_URL and UNPROTECTED_URL get no Approov header
+ * no signatures), and UNKNOWN_URL and UNPROTECTED_URL get no Approov header
  * whatever it answers. Secure strings follow the channel, not that decision:
  * they are substituted, as the substitution decisions say, only on a SUCCESS or
  * UNPROTECTED_URL request over https, and never on UNKNOWN_URL or a failure
@@ -372,8 +373,9 @@ public interface ApproovServiceMutator {
      * secure strings, which follow the token fetch status (see the interface
      * description): true on SUCCESS adds the token, status and trace headers and
      * lets message signing sign the request; true on a failure status adds the
-     * status header only, on a request to a host in the SDK pin set (nothing at
-     * all on any other host); true on UNKNOWN_URL or UNPROTECTED_URL adds nothing.
+     * status header only; true on UNKNOWN_URL or UNPROTECTED_URL adds nothing. It
+     * is not called for a failure status on a host that is not in the SDK pin set:
+     * that request goes out untouched and is never aborted.
      * False sends the request with no Approov header (an UNPROTECTED_URL request,
      * and a SUCCESS one, still get their secure strings).
      *
