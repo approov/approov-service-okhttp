@@ -340,20 +340,139 @@ public class ProtectedChannels380Test {
                     fixture.protectedServer);
     }
 
+    // decided 2026-10-07 (custom abort off the pin set): for a failure on a host
+    // not in the pin set the fetch hook is consulted. A standard decision it throws
+    // (inherited or called) is ignored and the request goes out untouched; any
+    // other throw is the app's own opt-in abort (1.6.1 rules); true or false leave
+    // the request untouched, nothing added
+
+    // a custom mutator whose fetch hook does what the given hook does, counting calls
+    private static final class FetchHook implements ApproovServiceMutator {
+        interface Body {
+            boolean decide(Approov.TokenFetchResult results, String url) throws IOException;
+        }
+
+        final java.util.concurrent.atomic.AtomicInteger asked = new java.util.concurrent.atomic.AtomicInteger();
+        private final Body body;
+
+        FetchHook(Body body) {
+            this.body = body;
+        }
+
+        @Override
+        public boolean handleInterceptorFetchTokenResult(Approov.TokenFetchResult approovResults, String url)
+                throws IOException {
+            asked.incrementAndGet();
+            return body.decide(approovResults, url);
+        }
+    }
+
+    // the request to the unlisted host fails with exactly the given type, nothing sent
+    private <T extends Throwable> T assertUnlistedAborts(String what, String status, Class<T> type)
+            throws Exception {
+        int before = fixture.otherServer.getRequestCount();
+        nextTokenFetch(status);
+        HttpUrl url = fixture.otherUrl("/data").newBuilder().addQueryParameter("key", PLACEHOLDER).build();
+        try (Response response = ApproovService.getOkHttpClient().newCall(
+                new Request.Builder().url(url).header("Api-Key", PLACEHOLDER).build()).execute()) {
+            fail(what + " " + status + " must abort, got " + response.code());
+            return null;
+        } catch (IOException e) {
+            assertSame(what + " " + status + ": " + e, type, e.getClass());
+            assertEquals(what + " " + status + ": nothing sent", before, fixture.otherServer.getRequestCount());
+            return type.cast(e);
+        }
+    }
+
     @Test
-    public void aCustomMutatorIsNotAskedAboutAFailureToAHostNotInThePinSet() throws Exception {
+    public void aCustomMutatorsOwnThrowAbortsAFailureToAHostNotInThePinSet() throws Exception {
         start(null);
-        java.util.concurrent.atomic.AtomicInteger asked = new java.util.concurrent.atomic.AtomicInteger();
-        ApproovService.setServiceMutator(new ApproovServiceMutator() {
-            @Override
-            public boolean handleInterceptorFetchTokenResult(Approov.TokenFetchResult approovResults, String url)
-                    throws IOException {
-                asked.incrementAndGet();
-                throw new ConnectException("app policy: abort every failure");
+        FetchHook mutator = new FetchHook((results, url) -> {
+            throw new ConnectException("app policy: only my own hosts");
+        });
+        ApproovService.setServiceMutator(mutator);
+        ConnectException e = assertUnlistedAborts("custom", "NO_NETWORK", ConnectException.class);
+        assertEquals("app policy: only my own hosts", e.getMessage());
+        assertEquals("the fetch hook was consulted", 1, mutator.asked.get());
+    }
+
+    @Test
+    public void aCustomMutatorsOwnApproovExceptionIsItsHooksFailureOffThePinSet() throws Exception {
+        start(null);
+        ApproovService.setServiceMutator(new FetchHook((results, url) -> {
+            throw new ApproovFetchStatusException(results.getStatus(), "app policy");
+        }));
+        ApproovException e = assertUnlistedAborts("custom Approov type", "REJECTED", ApproovException.class);
+        assertTrue(e.getMessage(), e.getMessage().contains("handleInterceptorFetchTokenResult"));
+        assertTrue("the app's exception is the cause", e.getCause() instanceof ApproovFetchStatusException);
+    }
+
+    @Test
+    public void aCustomMutatorsRuntimeExceptionAbortsOffThePinSet() throws Exception {
+        start(null);
+        ApproovService.setServiceMutator(new FetchHook((results, url) -> {
+            throw new IllegalStateException("bug");
+        }));
+        ApproovException e = assertUnlistedAborts("custom runtime", "NO_NETWORK", ApproovException.class);
+        assertTrue("the runtime exception is the cause", e.getCause() instanceof IllegalStateException);
+    }
+
+    @Test
+    public void aStandardDecisionThrownOffThePinSetIsIgnored() throws Exception {
+        start(null);
+        FetchHook delegating = new FetchHook(ApproovServiceMutator.CLOSE_FAILURE::handleInterceptorFetchTokenResult);
+        FetchHook rethrowing = new FetchHook((results, url) -> {
+            try {
+                return ApproovServiceMutator.CLOSE_FAILURE.handleInterceptorFetchTokenResult(results, url);
+            } catch (ApproovException caught) {
+                throw caught;
             }
         });
-        assertFailureGetsNothing("custom unlisted", "NO_NETWORK", fixture.otherUrl("/data"), fixture.otherServer);
-        assertEquals("the fetch hook was consulted", 0, asked.get());
+        ApproovServiceMutator inheriting = new ApproovServiceMutator() {
+            @Override
+            public Request handleInterceptorProcessedRequest(Request request, ApproovRequestMutations changes) {
+                return request;
+            }
+        };
+        for (ApproovServiceMutator mutator : new ApproovServiceMutator[] {inheriting, delegating, rethrowing}) {
+            ApproovService.setServiceMutator(mutator);
+            for (String status : new String[] {"NO_NETWORK", "REJECTED", "INTERNAL_ERROR"})
+                assertFailureGetsNothing(mutator.getClass().getSimpleName() + " unlisted", status,
+                        fixture.otherUrl("/data"), fixture.otherServer);
+        }
+        assertEquals("the delegating hook was consulted", 3, delegating.asked.get());
+        assertEquals("the rethrowing hook was consulted", 3, rethrowing.asked.get());
+        // control: the listed host still aborts under the same mutator
+        assertTokenFailureAborts("delegating listed", "NO_NETWORK", ApproovNetworkException.class);
+    }
+
+    @Test
+    public void aCustomMutatorAnsweringTrueOrFalseOffThePinSetAddsNothing() throws Exception {
+        start(null);
+        for (boolean answer : new boolean[] {true, false}) {
+            FetchHook mutator = new FetchHook((results, url) -> answer);
+            ApproovService.setServiceMutator(mutator);
+            for (String status : new String[] {"NO_APPROOV_SERVICE", "NO_NETWORK", "REJECTED"})
+                assertFailureGetsNothing("custom " + answer + " unlisted", status, fixture.otherUrl("/data"),
+                        fixture.otherServer);
+            assertEquals("the fetch hook was consulted", 3, mutator.asked.get());
+        }
+    }
+
+    @Test
+    public void aCustomMutatorMayAbortAFailureWithAnEmptyPinSet() throws Exception {
+        start(null);
+        pinSet("");
+        ApproovService.setServiceMutator(new FetchHook((results, url) -> {
+            throw new ConnectException("app policy");
+        }));
+        nextTokenFetch("NO_NETWORK");
+        try (Response response = ApproovService.getOkHttpClient().newCall(request()).execute()) {
+            fail("the app's own abort must surface, got " + response.code());
+        } catch (ConnectException e) {
+            assertEquals("app policy", e.getMessage());
+        }
+        assertEquals("nothing sent", 0, fixture.protectedServer.getRequestCount());
     }
 
     @Test

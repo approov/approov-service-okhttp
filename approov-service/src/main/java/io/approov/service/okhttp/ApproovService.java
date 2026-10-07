@@ -246,6 +246,24 @@ public class ApproovService {
      * @throws IOException if the hook throws one, or throws a RuntimeException
      */
     static <T> T callMutator(String hook, MutatorHook<T> call) throws IOException {
+        return callMutator(hook, call, false);
+    }
+
+    /**
+     * Calls a hook of the installed service mutator on the request path, as
+     * callMutator(hook, call), except that an exception a standard decision raised
+     * during the call (see standardDecision) is ignored when asked: the call then
+     * returns null. Used where the standard decisions never abort but an app's own
+     * hook may (decided 2026-10-07: a token fetch failure for a host that is not in
+     * the SDK pin set).
+     *
+     * @param hook           the name of the hook
+     * @param call           the call into the mutator
+     * @param ignoreStandard whether a standard decision's exception is ignored
+     * @return the hook's result, or null if a standard decision's exception was ignored
+     * @throws IOException as for callMutator(hook, call)
+     */
+    static <T> T callMutator(String hook, MutatorHook<T> call, boolean ignoreStandard) throws IOException {
         Set<Throwable> previous = standardDecisions.get();
         Set<Throwable> made = Collections.newSetFromMap(new java.util.IdentityHashMap<>());
         standardDecisions.set(made);
@@ -253,8 +271,11 @@ public class ApproovService {
             return call.call();
         } catch (ApproovException e) {
             // a standard decision keeps its form, even caught and rethrown unchanged
-            if (made.contains(e))
+            if (made.contains(e)) {
+                if (ignoreStandard)
+                    return null;
                 throw e;
+            }
             throw mutatorFailure(hook, e);
         } catch (IllegalArgumentException e) {
             // OkHttp refusing a header the hook set quotes the value: never kept
@@ -916,7 +937,8 @@ public class ApproovService {
      * host, and so does a pin set the SDK fails to provide. This decides only what
      * happens to a request whose token fetch failed (decided 2026-10-07): on a
      * listed host the mutator decides whether it aborts or proceeds with the status
-     * header; any other host gets the request untouched and never aborted. The
+     * header; any other host gets the request untouched, aborted only by an app
+     * mutator's own exception from the fetch hook. The
      * token fetch status alone classifies every other request.
      *
      * @param host the request host
@@ -2027,9 +2049,15 @@ class ApproovTokenInterceptor implements Interceptor {
             // a failure status says nothing about the host, because the SDK looks the
             // domain up only after a successful fetch. A host that is not an Approov API
             // domain (not a key of the SDK pin set, or the pin set is empty or cannot be
-            // read) is treated like UNKNOWN_URL (decided 2026-10-07): the request is
-            // never aborted, the mutator is not asked, and it goes out untouched, with
-            // no Approov header and no secure string
+            // read) is treated like UNKNOWN_URL (decided 2026-10-07): it goes out
+            // untouched, with no Approov header and no secure string, whatever the
+            // fetch hook answers. The hook is still consulted, so that an app's own
+            // mutator may opt in to aborting it (an app that only talks to its own
+            // protected hosts): its own exception aborts the request (SPECIFICATION
+            // 1.6, 1.6.1), while an exception a standard decision raises, inherited or
+            // called, is ignored, since the standard mutators never abort here
+            ApproovService.callMutator("handleInterceptorFetchTokenResult",
+                    () -> mutator.handleInterceptorFetchTokenResult(tokenResults, url.toString()), true);
             ApproovLog.d(TAG, "Proceeding without a token for " + ApproovLog.loggableURL(url)
                     + ", a host not in the Approov pin set, untouched: token fetch "
                     + ApproovService.describeOutcome(approovResults));

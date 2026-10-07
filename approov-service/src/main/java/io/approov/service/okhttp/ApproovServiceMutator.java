@@ -64,7 +64,11 @@ import java.util.regex.Matcher;
  * status a failure, which says nothing about the host. A failure for a host that
  * is not a key of the SDK pin set (the "*" key excluded; also when the pin set is
  * empty or cannot be read) is treated like UNKNOWN_URL: the request goes out
- * untouched, never aborted, and no hook is consulted. Otherwise the token fetch
+ * untouched whatever handleInterceptorFetchTokenResult returns, and an exception
+ * a standard decision raises there (inherited or called) is ignored, so the
+ * standard mutators never abort it; an exception the app's own hook code throws
+ * aborts it, an opt-in for an app that only talks to its own protected hosts
+ * (decided 2026-10-07). Otherwise the token fetch
  * decision (handleInterceptorFetchTokenResult) may abort a request on any status; when it
  * lets a request proceed it governs the Approov headers and the signatures: a
  * SUCCESS request gets the token, status and trace headers and is signed, a
@@ -374,8 +378,10 @@ public interface ApproovServiceMutator {
      * description): true on SUCCESS adds the token, status and trace headers and
      * lets message signing sign the request; true on a failure status adds the
      * status header only; true on UNKNOWN_URL or UNPROTECTED_URL adds nothing. It
-     * is not called for a failure status on a host that is not in the SDK pin set:
-     * that request goes out untouched and is never aborted.
+     * is also called for a failure status on a host that is not in the SDK pin set,
+     * where the answer is ignored and the request goes out untouched: an exception
+     * a standard decision raises is ignored too, and only the app's own exception
+     * aborts it.
      * False sends the request with no Approov header (an UNPROTECTED_URL request,
      * and a SUCCESS one, still get their secure strings).
      *
