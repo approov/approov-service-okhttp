@@ -2473,7 +2473,7 @@ class ApproovPinningInterceptor implements Interceptor {
 
                     // add the required pins for the domain
                     for (String pin : pins)
-                        pinBuilder = pinBuilder.add(domain, "sha256/" + pin);
+                        pinBuilder = pinBuilder.add(normalizeHost(domain), "sha256/" + pin);
                 }
             }
             pinner = pinBuilder.build();
@@ -2558,7 +2558,12 @@ class ApproovPinningInterceptor implements Interceptor {
         if (isRebuildRequired() || getCertificatePinner().getPins().isEmpty())
             buildPins();
 
-        String host = chain.request().url().host();
+        // pins are looked up exactly per host, without regard to case and with one
+        // trailing dot ignored: the pinner holds normalized domains and is asked for
+        // the normalized host, so neither a pin key nor a request spelled with a
+        // trailing dot escapes the pins (OkHttp's CertificatePinner compares the
+        // strings as given)
+        String host = normalizeHost(chain.request().url().host());
         warnIfOsTrustOnly(host);
         Connection connection = chain.connection();
         Handshake handshake = (connection != null) ? connection.handshake() : null;
