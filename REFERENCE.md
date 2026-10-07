@@ -602,7 +602,7 @@ fun fetchToken(url: String): String
 This throws `ApproovException` if there was a problem obtaining an Approov token, an `ApproovFetchStatusException` carrying the status in `getTokenFetchStatus()` when the fetch did not succeed. This may require network access so may take some time to complete, and should not be called from the UI thread. Before `initialize` and in bypass mode it throws `ApproovException` with the message `fetchToken: Approov protection not enabled`, without calling the SDK. It does not update the pins the client applies: that happens only through requests made with the client.
 
 ## getMessageSignature
-**DEPRECATED**, replaced by `getAccountMessageSignature`.
+**DEPRECATED**, replaced by `getAccountMessageSignature`. Kept for the 3.8.x line as an alias: it returns the same value as `getAccountMessageSignature`, and its first call in the process logs a deprecation warning naming `getAccountMessageSignature`.
 
 **Java:**
 ```Java
