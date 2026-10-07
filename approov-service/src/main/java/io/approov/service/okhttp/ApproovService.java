@@ -35,6 +35,7 @@ import java.util.List;
 import java.util.Locale;
 import java.util.Map;
 import java.util.Set;
+import java.util.concurrent.atomic.AtomicBoolean;
 import java.util.regex.Matcher;
 import java.util.regex.Pattern;
 import java.util.regex.PatternSyntaxException;
@@ -550,6 +551,7 @@ public class ApproovService {
      */
     @VisibleForTesting
     static synchronized void reset() {
+        messageSignatureDeprecationLogged.set(false);
         approovServiceEnabled = false;
         approovProtectionEnabled = false;
         lastARC = "";
@@ -1376,18 +1378,27 @@ public class ApproovService {
      * enabled, then an
      * ApproovException is thrown.
      * <p>
-     * Deprecated: use getAccountMessageSignature instead
+     * A deprecated alias of getAccountMessageSignature, returning the same value.
+     * The first call in the process logs a deprecation warning naming
+     * getAccountMessageSignature.
      *
      * @param message is the message whose content is to be signed
      * @return String of the base64 encoded message signature
      * @throws ApproovException if there was a problem, or if Approov protection is
      *                          not enabled (before initialization or in bypass mode)
+     * @deprecated use getAccountMessageSignature, which this calls; kept for the
+     *             3.8.x line for apps moving from 3.5.x
      */
     @Deprecated
     public static String getMessageSignature(String message) throws ApproovException {
+        if (messageSignatureDeprecationLogged.compareAndSet(false, true))
+            ApproovLog.w(TAG, "getMessageSignature is deprecated: use getAccountMessageSignature");
         requireProtection("getMessageSignature");
         return getAccountMessageSignature(message);
     }
+
+    // whether the deprecation warning of getMessageSignature was logged in this process
+    private static final AtomicBoolean messageSignatureDeprecationLogged = new AtomicBoolean();
 
     /**
      * Gets the signature for the given message. This uses an account specific
