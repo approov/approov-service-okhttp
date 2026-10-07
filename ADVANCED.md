@@ -176,6 +176,8 @@ Configure immediately after `initialize`, before the app issues protected reques
 ApproovService.setBindingHeader("Authorization")
 ```
 
+Each request's token is bound to that request's own header value, also when requests carrying different values are in flight at once, as during an OAuth token refresh: the SDK holds one binding value for the whole app, so the package sets the value and fetches the token as one step for every request that carries the binding header, on the first attempt and whenever its protection is reapplied (a stale protection refresh, a redirect, an authenticator retry). Requests that carry no binding header are not held up by this. Before 3.8.0 two such requests could each be sent with a token bound to the other's value, which the backend rejected.
+
 `setDataHashInToken` binds arbitrary data instead. Never use both: the binding header overrides the data hash on every request.
 
 ## Secure strings
