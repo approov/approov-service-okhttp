@@ -201,15 +201,44 @@ public class ApproovService {
         T call() throws IOException;
     }
 
+    // the exceptions the standard CLOSE_FAILURE request decisions have raised during
+    // the mutator hook call in progress on this thread, by identity, or null outside
+    // a hook call (see callMutator and standardDecision)
+    private static final ThreadLocal<Set<Throwable>> standardDecisions = new ThreadLocal<>();
+
+    /**
+     * Records an exception raised by a standard CLOSE_FAILURE request decision (the
+     * interface defaults of ApproovServiceMutator, which CLOSE_FAILURE is) during
+     * the hook call in progress on this thread, so that callMutator lets it keep
+     * its Approov form whether the installed mutator inherited the decision or
+     * called it (SPECIFICATION 1.6, 1.6.1). Outside a hook call, such as a direct
+     * call by app code, it only returns the exception.
+     *
+     * @param e the exception the decision raises
+     * @return e, to be thrown
+     */
+    static <E extends ApproovException> E standardDecision(E e) {
+        Set<Throwable> made = standardDecisions.get();
+        if (made != null)
+            made.add(e);
+        return e;
+    }
+
     /**
      * Calls a hook of the installed service mutator on the request path. An
      * IOException the hook throws is the app's own abort and passes through
-     * unchanged (SPECIFICATION 1.6). Any RuntimeException, a programming error such
-     * as a null pointer or a deliberate runtime exception, is converted to an
-     * ApproovException with the original as its cause and logged at error level
-     * naming the hook, so that the request fails through OkHttp's normal error
-     * channel instead of being rethrown on the dispatcher thread for an enqueued
-     * call, which would terminate the app (SPECIFICATION 1.6.1).
+     * unchanged (SPECIFICATION 1.6), unless it is an Approov type. An
+     * ApproovException (or subclass) passes unchanged only when a standard
+     * CLOSE_FAILURE decision raised it during this call, inherited by the mutator
+     * or called by it, so that it keeps its 3.5.x form; one the app's own hook code
+     * throws, built by the app or rethrown from a direct method such as fetchToken,
+     * is the hook's failure (SPECIFICATION 1.6(b), 1.6.1). That and any
+     * RuntimeException, a programming error such as a null pointer or a deliberate
+     * runtime exception, are converted to an ApproovException with the original as
+     * its cause and logged at error level naming the hook, so that the request
+     * fails through OkHttp's normal error channel instead of being rethrown on the
+     * dispatcher thread for an enqueued call, which would terminate the app
+     * (SPECIFICATION 1.6.1).
      *
      * @param hook the name of the hook, for the log and the exception message
      * @param call the call into the mutator
@@ -217,27 +246,41 @@ public class ApproovService {
      * @throws IOException if the hook throws one, or throws a RuntimeException
      */
     static <T> T callMutator(String hook, MutatorHook<T> call) throws IOException {
+        Set<Throwable> previous = standardDecisions.get();
+        Set<Throwable> made = Collections.newSetFromMap(new java.util.IdentityHashMap<>());
+        standardDecisions.set(made);
         try {
             return call.call();
+        } catch (ApproovException e) {
+            // a standard decision keeps its form, even caught and rethrown unchanged
+            if (made.contains(e))
+                throw e;
+            throw mutatorFailure(hook, e);
         } catch (IllegalArgumentException e) {
             // OkHttp refusing a header the hook set quotes the value: never kept
             ApproovException unsafe = unsafeHeaderFromOkHttp(e);
             throw (unsafe != null) ? unsafe : mutatorFailure(hook, e);
         } catch (RuntimeException e) {
             throw mutatorFailure(hook, e);
+        } finally {
+            if (previous == null)
+                standardDecisions.remove();
+            else
+                standardDecisions.set(previous);
         }
     }
 
     /**
-     * Converts a RuntimeException thrown by a hook of the installed service mutator
-     * into an ApproovException with the original as its cause, logged at error level
-     * naming the hook (SPECIFICATION 1.6.1).
+     * Converts an exception thrown by a hook of the installed service mutator, a
+     * RuntimeException or an Approov exception that is not a standard decision,
+     * into an ApproovException with the original as its cause, logged at error
+     * level naming the hook (SPECIFICATION 1.6.1).
      *
      * @param hook the name of the hook
      * @param e    the exception the hook threw
      * @return the exception to throw
      */
-    static ApproovException mutatorFailure(String hook, RuntimeException e) {
+    static ApproovException mutatorFailure(String hook, Exception e) {
         ApproovLog.e(TAG, "ApproovServiceMutator." + hook + " threw " + e);
         return new ApproovException("ApproovServiceMutator." + hook + " failed: " + e, e);
     }

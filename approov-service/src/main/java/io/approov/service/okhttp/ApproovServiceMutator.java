@@ -76,9 +76,15 @@ import java.util.regex.Matcher;
  * Anything else a hook throws (a programming error such as a null pointer, or a
  * deliberate RuntimeException) is treated as a failed request, never as a crash:
  * the layer converts it to an ApproovException with the original as its cause and
- * logs it at error level naming the hook (SPECIFICATION 1.6.1). The aborts of CLOSE_FAILURE keep the 3.5.x Approov exception types
- * (subclasses of IOException) so that 3.8.0 does not change what an existing app
- * catches. The direct fetch APIs (fetchToken, fetchSecureString, fetchCustomJWT,
+ * logs it at error level naming the hook (SPECIFICATION 1.6.1). The aborts of
+ * CLOSE_FAILURE keep the 3.5.x Approov exception types (subclasses of IOException)
+ * so that 3.8.0 does not change what an existing app catches, in a custom mutator
+ * too, whether it inherits those decisions or calls them (for example
+ * CLOSE_FAILURE.handleInterceptorFetchTokenResult or closeFailureSubstitution).
+ * Any other Approov exception a hook throws, one the app's code built or one it
+ * rethrows from a direct method such as fetchToken, is the hook's failure like a
+ * RuntimeException: an ApproovException naming the hook with the original as its
+ * cause (SPECIFICATION 1.6(b), 1.6.1). The direct fetch APIs (fetchToken, fetchSecureString, fetchCustomJWT,
  * precheck) return a value to the caller and continue to report failures with
  * an ApproovException subclass.
  */
@@ -319,8 +325,8 @@ public interface ApproovServiceMutator {
      */
     default boolean handleInterceptorShouldProcessRequest(Request request) throws IOException {
         if (request == null)
-            throw new ApproovException(
-                    "handleInterceptorShouldProcessRequest method was passed a request that is null!");
+            throw ApproovService.standardDecision(new ApproovException(
+                    "handleInterceptorShouldProcessRequest method was passed a request that is null!"));
 
         // check if the URL matches one of the exclusion regexs and skip interceptor
         // processing in these cases
@@ -375,10 +381,10 @@ public interface ApproovServiceMutator {
                 return false;
             default:
                 if (isNetworkFailure(status))
-                    throw new ApproovNetworkException(status,
-                            "Approov token fetch for " + url + ": " + status.toString());
-                throw new ApproovFetchStatusException(status,
-                        "Approov token fetch for " + url + ": " + status.toString());
+                    throw ApproovService.standardDecision(new ApproovNetworkException(status,
+                            "Approov token fetch for " + url + ": " + status.toString()));
+                throw ApproovService.standardDecision(new ApproovFetchStatusException(status,
+                        "Approov token fetch for " + url + ": " + status.toString()));
         }
     }
 
@@ -461,8 +467,10 @@ public interface ApproovServiceMutator {
                 return false;
             default:
                 if (isNetworkFailure(status))
-                    throw new ApproovNetworkException(status, what + ": " + status.toString());
-                throw new ApproovFetchStatusException(status, what + ": " + status.toString());
+                    throw ApproovService.standardDecision(new ApproovNetworkException(status,
+                            what + ": " + status.toString()));
+                throw ApproovService.standardDecision(new ApproovFetchStatusException(status,
+                        what + ": " + status.toString()));
         }
     }
 
