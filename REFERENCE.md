@@ -170,7 +170,7 @@ The out-of-the-box mutator is `ApproovServiceMutator.DEFAULT`, and passing `null
 | :--- | :--- |
 | `ApproovServiceMutator.CLOSE_FAILURE` | the 3.5.x decisions, which are also the interface defaults: a token fetch proceeds on `SUCCESS` (token header) and `NO_APPROOV_SERVICE` (empty token header); `UNKNOWN_URL` and `UNPROTECTED_URL` send the request with no Approov headers; `NO_NETWORK`, `POOR_NETWORK` and `UNTRUSTED_NETWORK` throw `ApproovNetworkException`; every other status throws `ApproovFetchStatusException`, `REJECTED` included. A secure string substitution mirrors the token decision for the same status: it is made on `SUCCESS`; on `UNKNOWN_KEY`, `REJECTED` and `NO_APPROOV_SERVICE` the placeholder is left and the request proceeds; the network statuses throw `ApproovNetworkException` and every other status `ApproovFetchStatusException` |
 | `ApproovServiceMutator.ALWAYS_PROCEED` | never aborts: every token fetch status except `UNKNOWN_URL` and `UNPROTECTED_URL` sends the token header, empty if there is no token, and the status header; a secure string is substituted on `SUCCESS` and the placeholder is left otherwise; a cleartext (`http`) request, which the SDK answers with `BAD_URL`, is sent with an empty token header and its placeholders, never a secure string |
-| `ApproovServiceMutator.DEFAULT` | `CLOSE_FAILURE` in 3.8.0, `ALWAYS_PROCEED` from 4.0.0. Name one of the two explicitly to keep your decisions fixed across 4.0.0 |
+| `ApproovServiceMutator.DEFAULT` | points to whatever the release considers default behaviour: `CLOSE_FAILURE` in 3.8.0; in 4.0.0 it is planned to become the `ALWAYS_PROCEED` behaviour. An app that wants a fixed behaviour names `CLOSE_FAILURE` or `ALWAYS_PROCEED` explicitly |
 
 **Java:**
 ```java
@@ -505,6 +505,8 @@ void addExclusionURLRegex(String urlRegex)
 fun addExclusionURLRegex(urlRegex: String)
 ```
 
+An invalid regular expression throws `IllegalArgumentException`, with the `PatternSyntaxException` as its cause, and nothing is added (the exclusions already added are kept), as on every Approov package; 3.5.x logged it and ignored it. The exception is unchecked, so code written for 3.5.x still compiles.
+
 Note that this facility must be used with *EXTREME CAUTION* due to the impact of dynamic pinning. Pinning may be applied to all domains added using Approov, and updates to the pins are received when an Approov fetch is performed. If you exclude some URLs on domains that are protected with Approov, then these will be protected with Approov pins but without a path to update the pins until a URL is used that is not excluded. Thus you are responsible for ensuring that there is always a possibility of calling a non-excluded URL through the client: the pins this package applies are rebuilt only when such a request's token fetch reports a configuration change, and a direct call to `fetchToken` does not rebuild them. Conversely, use of those option may allow a connection to be established before any dynamic pins have been received via Approov, thus potentially opening the channel to a MitM.
 
 ## removeExclusionURLRegex
@@ -735,7 +737,7 @@ Interface with default methods, installed with `setServiceMutator`. The intercep
 | :--- | :--- |
 | `CLOSE_FAILURE` | an instance with these defaults |
 | `ALWAYS_PROCEED` | never aborts: `handleInterceptorFetchTokenResult` returns `false` for `UNKNOWN_URL` and `UNPROTECTED_URL` and `true` for every other status, the substitution decisions return `true` only for `SUCCESS` |
-| `DEFAULT` | `CLOSE_FAILURE` in 3.8.0, `ALWAYS_PROCEED` from 4.0.0 |
+| `DEFAULT` | declared as `ApproovServiceMutator`, it points to whatever the release considers default behaviour: `CLOSE_FAILURE` in 3.8.0; in 4.0.0 it is planned to become the `ALWAYS_PROCEED` behaviour. An app that wants a fixed behaviour names `CLOSE_FAILURE` or `ALWAYS_PROCEED` explicitly |
 
 No mutator signs requests; see [enableMessageSigning](#enablemessagesigning).
 

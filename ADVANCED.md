@@ -21,7 +21,7 @@ For a request to a protected API domain, the `ApproovService` interceptor fetche
 
 * `ApproovServiceMutator.CLOSE_FAILURE` keeps the 3.5.x token decisions. A failed attestation fails the request in the app with the same `ApproovException` types as 3.5.x. One decision changed: a secure string substitution now mirrors the token decision, so a `REJECTED` or `NO_APPROOV_SERVICE` secure string leaves the placeholder and the request proceeds, where 3.5.x threw.
 * `ApproovServiceMutator.ALWAYS_PROCEED` never fails a request: whatever the outcome the request is sent, and the backend, which is the enforcement point, decides.
-* `ApproovServiceMutator.DEFAULT` is the out-of-the-box mutator, which `setServiceMutator(null)` reinstates; `initialize` keeps whichever mutator is installed. **In 3.8.0 it is `CLOSE_FAILURE`. In 4.0.0 it becomes `ALWAYS_PROCEED`**, a breaking change kept for the major release. Install one of the two explicitly if you want your decisions to stay the same across 4.0.0.
+* `ApproovServiceMutator.DEFAULT` is the out-of-the-box mutator, which `setServiceMutator(null)` reinstates; `initialize` keeps whichever mutator is installed. `DEFAULT` points to whatever the release considers default behaviour: **in 3.8.0 that is `CLOSE_FAILURE`; in 4.0.0 it is planned to become the `ALWAYS_PROCEED` behaviour**, a breaking change kept for the major release. An app that wants a fixed behaviour names `CLOSE_FAILURE` or `ALWAYS_PROCEED` explicitly.
 
 | Approov fetch status | `CLOSE_FAILURE` (3.8.0 default) | `ALWAYS_PROCEED` |
 | :--- | :--- | :--- |
@@ -169,7 +169,14 @@ Requests whose URL matches an exclusion regular expression are sent untouched, w
 ApproovService.addExclusionURLRegex("https://api\\.example\\.com/health.*")
 ```
 
-Connection validation still applies to excluded requests on domains added to Approov. The validation set is updated only when a request that is not excluded fetches a token through the client and the SDK reports a configuration change; a direct `fetchToken` call does not update it. Make sure the app keeps calling some URL on each protected domain that is not excluded.
+Connection validation still applies to excluded requests on domains added to Approov. The validation set is updated only when a request that is not excluded fetches a token through the client and the SDK reports a configuration change; a direct `fetchToken` call does not update it. Make sure the app keeps calling some URL on each protected domain that is not excluded. An invalid regular expression throws `IllegalArgumentException` (unchecked, with the `PatternSyntaxException` as its cause) and adds nothing, as on every Approov package; 3.5.x logged it and carried on without the exclusion.
+
+## Connection validation
+
+The pinning interceptor validates the TLS connection to each domain you have added to Approov against the certificate public keys configured for it, falling back to the Managed Trust Roots for a domain with none of its own.
+
+* **Exact host lookup.** Keys are looked up exactly per host, without regard to case and with one trailing dot ignored: a domain added as `API.Example.com` applies to `api.example.com`, and a request to `api.example.com.` is checked like one to `api.example.com`. Approov API domains never contain wildcards (the Approov admin API accepts only letters, digits, `.` and `-`), so no key is a pattern. The `*` entry is not a host: it holds the Managed Trust Roots, used for a listed domain with no keys of its own, never for a domain that is not listed. The package passes the keys to OkHttp's `CertificatePinner`, which would read a `*.` key as a wildcard pattern, but such keys cannot occur.
+* **No Managed Trust Roots.** A domain added with no keys of its own while the Managed Trust Roots are empty or absent is validated by OS trust only, a valid development setup. It is not silent: the first connection to each such host logs a warning under `ApproovPinningInterceptor` naming the host, never a key, once per host.
 
 ## Service mutators
 
