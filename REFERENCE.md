@@ -26,7 +26,7 @@ Initializes the Approov SDK and thus enables the Approov features. The `config` 
 
 Every non-empty account ID is forwarded to the Approov SDK with the comment exactly as passed, and the SDK decides; the package does not store or compare the account ID. A first initialization succeeds. The same account ID and comment again is reported by the SDK as already initialized, and `initialize` returns at once, so every place in the process that uses Approov may call it. Anything else the SDK rejects, a different account ID or comment, or an account ID that did not reach the app intact, is the SDK's own `IllegalStateException` or `IllegalArgumentException`, thrown unchanged to the caller with the package state unchanged.
 
-`initialize` never resets configuration: the token, trace, status and binding headers, substitutions, exclusions, the service mutator, message signing and its host factories, the stale protection refresh period and the `OkHttpClient` builders keep the values set before or after it, from any caller. It changes only what [isApproovServiceEnabled](#isapproovserviceenabled) and [isApproovProtectionEnabled](#isapproovprotectionenabled) report. Initialize before the first request: a request made before any `initialize` goes out without Approov processing.
+`initialize` never resets configuration: the token, trace, status and binding headers, substitutions, exclusions, the service mutator, message signing and its host factories, the stale protection refresh period, the logging level and the `OkHttpClient` builders keep the values set before or after it, from any caller. It changes only what [isApproovServiceEnabled](#isapproovserviceenabled) and [isApproovProtectionEnabled](#isapproovprotectionenabled) report. Initialize before the first request: a request made before any `initialize` goes out without Approov processing.
 
 This is the standard form and should be used in most cases. The `comment` parameter defaults to `null` when not supplied.
 
@@ -362,6 +362,21 @@ fun getStatusHeader(): String?
 
 ## Deprecated header aliases
 `setApproovHeader(header, prefix)`, `setApproovTraceIDHeader(header)`, `getApproovTokenHeader()`, `getApproovTokenPrefix()` and `getApproovTraceIDHeader()` remain as deprecated aliases of `setTokenHeader`, `setTraceIDHeader`, `getTokenHeader`, `getTokenPrefix` and `getTraceIDHeader`, which are the names used by every Approov package.
+
+## setLoggingLevel
+Sets the level of the package's own logging, with the same levels as `approov-service-ios`: `io.approov.service.okhttp.ApproovLogLevel.OFF`, `ERROR`, `WARNING`, `INFO` (the default) and `DEBUG`. Each level includes those before it: `ERROR` writes errors only, `WARNING` adds warnings, `INFO` adds information lines such as the initialization result, and `DEBUG` adds the debug lines, among them the [loggable form](https://approov.io/docs/latest/approov-usage-documentation/#loggable-tokens) of each request's token (whose claims include the device ID) and the device ID from `getDeviceID`. `OFF` writes nothing, errors included. The level may be set at any time, before `initialize` included, takes effect for requests already in flight through clients already obtained, and is never reset by `initialize`. Passing `null` throws `IllegalArgumentException` and leaves the level unchanged. The Approov SDK's own logging is not affected.
+
+Debug logging enabled for the `ApproovService` tag, with `adb shell setprop log.tag.ApproovService DEBUG`, raises any level but `OFF` to `DEBUG` for every tag of the package, so that support can read the debug lines of an installed build, release included, without a rebuild (`adb shell setprop log.tag.ApproovService INFO` or a reboot ends it). `OFF` is final: an app that switched the package's logging off is not overridden.
+
+**Java:**
+```Java
+void setLoggingLevel(ApproovLogLevel level)
+```
+
+**Kotlin:**
+```kotlin
+fun setLoggingLevel(level: ApproovLogLevel)
+```
 
 ## setBindingHeader
 Sets a binding `header` that may be present on requests being made. This is for the [token binding](https://approov.io/docs/latest/approov-usage-documentation/#token-binding) feature. A header should be chosen whose value is unchanging for most requests (such as an Authorization header). If the `header` is present, then its SHA256 hash is supplied to Approov so the issued token can carry the corresponding `pay` claim and be bound to the value. This may then be verified by the backend API integration.

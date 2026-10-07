@@ -256,10 +256,22 @@ ApproovService.setStaleProtectionRefreshPeriod(1000)   // <= 0 disables
 
 ## Diagnostics
 
-The package never logs a token. For each fetch it logs, at debug level, the [loggable form](https://approov.io/docs/latest/approov-usage-documentation/#loggable-tokens) of the result: the token's claims plus a short fragment of its signature, which cannot be turned back into a usable token. The claim to look at is `arc`, the [Attestation Response Code](https://approov.io/docs/latest/approov-usage-documentation/#attestation-response-code): it encodes why the attestation produced the result it did, for example:
+The package never logs a token. For each fetch it logs, at debug level, which is off by default (see the logging level below), the [loggable form](https://approov.io/docs/latest/approov-usage-documentation/#loggable-tokens) of the result: the token's claims plus a short fragment of its signature, which cannot be turned back into a usable token. The claim to look at is `arc`, the [Attestation Response Code](https://approov.io/docs/latest/approov-usage-documentation/#attestation-response-code): it encodes why the attestation produced the result it did, for example:
 
 ```
 D/ApproovTokenInterceptor: Token for https://api.example.com/v1/items: {"did":"...","exp":1757400000,"arc":"IXPSB7TRK26LXE3M","sip":"a1b2c3", ...}
+```
+
+The URL in the line is the request URL without its user info, query or fragment, so no query value (a substituted secure string or personal data) is logged. To see these lines, set the level in a debug build:
+
+```Java
+ApproovService.setLoggingLevel(ApproovLogLevel.DEBUG);
+```
+
+or, without a rebuild, on any installed build including a release one, enable debug logging for the `ApproovService` tag; it raises any level but `OFF` to `DEBUG` for all of the package's tags until it is set back or the device reboots:
+
+```sh
+adb shell setprop log.tag.ApproovService DEBUG
 ```
 
 To decode an `arc`, ask the CLI for the decoding command once; it prints a `curl` with your account's API key filled in and an `<arc>` placeholder:
@@ -274,4 +286,4 @@ curl -H "Authorization: <api-key>" -H "Arc: <arc>" https://<management-url>/arc-
 
 Run it with the `arc` value from the log in place of `<arc>` and the response lists the flags behind the result, for example `emulator` or `app-not-registered`. Your account's [live metrics](https://approov.io/docs/latest/approov-usage-documentation/#metrics-graphs) show the same reasons in aggregate within a minute. While you work, a [development signing certificate](https://approov.io/docs/latest/approov-usage-documentation/#development-app-signing-certificates) lets debug builds and emulators pass attestation.
 
-The `Approov-TraceID` header is a debug header; pass it through unchanged. Log output from the package is at `DEBUG` level, with warnings and errors at their own levels, under the tags `ApproovService`, `ApproovTokenInterceptor`, `ApproovFreshness`, `ApproovPinningInterceptor` and `ApproovMsgSign`; the loggable form of each fetched token is logged and can be [checked](https://approov.io/docs/latest/approov-usage-documentation/#loggable-tokens) with the Approov CLI. These lines are written in release builds too: the loggable token carries the device ID and the client IP claims, and `getDeviceID` logs the device ID, so strip `android.util.Log.d` in your release R8 configuration if your privacy policy requires it. No token, secure string value, signature or substituted URL is logged. Prefer logging rejections from your backend's response, which saw the token and the `Approov-Status` header, over calling `getLastARC()` on the device: the device value may belong to a later attestation than the request that failed.
+The `Approov-TraceID` header is a debug header; pass it through unchanged. Log output from the package is written under the tags `ApproovService`, `ApproovTokenInterceptor`, `ApproovFreshness`, `ApproovPinningInterceptor` and `ApproovMsgSign`, gated by [setLoggingLevel](REFERENCE.md#setlogginglevel): `ApproovLogLevel.ERROR` writes errors only, `WARNING` adds warnings, `INFO` (the default) adds information lines such as the initialization result, `DEBUG` adds the debug lines, and `OFF` writes nothing, errors included. The loggable token carries the device ID and the client IP claims, and `getDeviceID` logs the device ID, so both are debug lines: at the default level a release build writes neither. The loggable form of each fetched token can be [checked](https://approov.io/docs/latest/approov-usage-documentation/#loggable-tokens) with the Approov CLI. No token, secure string value, signature, query or substituted URL is logged. Prefer logging rejections from your backend's response, which saw the token and the `Approov-Status` header, over calling `getLastARC()` on the device: the device value may belong to a later attestation than the request that failed.

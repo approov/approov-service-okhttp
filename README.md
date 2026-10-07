@@ -130,7 +130,7 @@ The headers, and what your backend does with each, are listed in [ADVANCED.md](A
 
 ## VERIFYING
 
-Run your app and make a request. The package never logs a token; it logs the [loggable form](https://approov.io/docs/latest/approov-usage-documentation/#loggable-tokens) of each result at debug level, whose `arc` claim says why the attestation produced the result it did. Decoding it is described under [diagnostics](ADVANCED.md#diagnostics). Your account's [live metrics](https://approov.io/docs/latest/approov-usage-documentation/#metrics-graphs) show the same reasons in aggregate within a minute, and a [development signing certificate](https://approov.io/docs/latest/approov-usage-documentation/#development-app-signing-certificates) lets debug builds and emulators pass attestation while you work.
+Run your app and make a request. The package never logs a token; it logs the [loggable form](https://approov.io/docs/latest/approov-usage-documentation/#loggable-tokens) of each result at debug level, whose `arc` claim says why the attestation produced the result it did. Debug lines are off by default: call `ApproovService.setLoggingLevel(ApproovLogLevel.DEBUG)` in a debug build, or run `adb shell setprop log.tag.ApproovService DEBUG` to see them on an installed build without a rebuild. Decoding the `arc` is described under [diagnostics](ADVANCED.md#diagnostics). Your account's [live metrics](https://approov.io/docs/latest/approov-usage-documentation/#metrics-graphs) show the same reasons in aggregate within a minute, and a [development signing certificate](https://approov.io/docs/latest/approov-usage-documentation/#development-app-signing-certificates) lets debug builds and emulators pass attestation while you work.
 
 ## UPGRADING FROM 3.5.x
 
@@ -146,6 +146,7 @@ By default 3.8.0 makes the same token decisions as 3.5.x and throws the same exc
 * Approov's network interceptors now run before the network interceptors your builder adds, so a logger or inspector there no longer sees a redirect before Approov strips it. Such interceptors run after signing and must not change a signed header, the URL or the body.
 * A secure string is only substituted into a request sent over `https`; a cleartext request keeps its placeholder.
 * The methods that call the SDK throw `ApproovException` (`<method>: Approov protection not enabled`) before initialization and in bypass mode, and `getOkHttpClient()` may be called before initialization.
+* The package's logging has a level, `INFO` by default, so the loggable token and the device ID, which are debug lines, are no longer logged unless you call `ApproovService.setLoggingLevel(ApproovLogLevel.DEBUG)` or run `adb shell setprop log.tag.ApproovService DEBUG`.
 
 4.0.0 will make `ALWAYS_PROCEED` the default and message signing compulsory, so your backend becomes the only place that rejects requests without a valid token. Read the [changelog](CHANGELOG.md) before upgrading and test app and backend together.
 
