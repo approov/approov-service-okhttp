@@ -139,6 +139,19 @@ Initializing with an empty string instead of the Approov account ID enables the 
 ApproovService.initialize(context, "");
 ```
 
+## Initialize, then configure
+
+Call `initialize`, check the result (it is synchronous, so there is nothing to await), then make every configuration call your app needs: the token, trace, status and binding headers, substitution headers and query parameters, exclusion regular expressions, the service mutator, message signing and its host factories, the logging level, the stale protection refresh period and so on. Make them straight after `initialize`, in the same `Application.onCreate`, before the app issues protected requests. `initialize` never resets configuration, so configuration made before it still applies, but this is the documented pattern.
+
+Initialization done for you, for example by a one-line native bootstrap in a React Native app, is supported and configures nothing: it calls `initialize` with the account ID and comment, and that is all. All configuration is made by the app afterwards.
+
+**Requests before the configuration call.** A request the package processes after `initialize` and before your configuration call uses the defaults in force at that moment: the `DEFAULT` service mutator (`CLOSE_FAILURE` in 3.8.0), the `Approov-Token` header with no prefix, no binding header, no exclusions, no substitutions (so a secure string placeholder goes out unchanged), message signing off and logging at `INFO`. A configuration change applies only to requests processed after the call; a request already in flight is not processed again. Connection validation does not depend on this order: the keys come from the Approov SDK's configuration, not from your configuration calls, and apply from initialization. Requests that can run before the app's configuration call include:
+
+* native code at startup, for example SDKs the app starts that use the package's client, and Android headless JS tasks in a React Native app;
+* JavaScript modules that fetch when they are imported, in a React Native app.
+
+Configure immediately after `initialize`, before the app issues protected requests, and keep startup requests to protected hosts after that point.
+
 ## Token binding
 
 [Token binding](https://approov.io/docs/latest/approov-usage-documentation/#token-binding) ties the Approov token to the value of a header on the request, typically an OAuth `Authorization` header, so a token cannot be replayed with different credentials. Only a hash of the value reaches Approov, as the `pay` claim of the token, which the backend verifies.

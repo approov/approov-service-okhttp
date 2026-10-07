@@ -28,7 +28,7 @@ The package supports Android 6.0 (API level 23) and later, and OkHttp 4.12 or la
 
 ## INITIALIZING
 
-Initialize `ApproovService` when your app starts, in your `Application` class's `onCreate`, before the first request, with your **Approov account ID**; a request made before initialization goes out without Approov protection. Initialization throws if the value it receives is not a complete, unaltered account ID, so wrap the call: the app then logs the problem and starts in **bypass mode**, without Approov protection, instead of failing to start. The device ID log is optional. Approov knows an installation only by its device ID, so logging it next to your own user or session identifier gives you the correlation between the two.
+Initialize `ApproovService` when your app starts, in your `Application` class's `onCreate`, before the first request, with your **Approov account ID**, and then configure it; a request made before initialization goes out without Approov protection. Initialization throws if the value it receives is not a complete, unaltered account ID, so wrap the call: the app then logs the problem and starts in **bypass mode**, without Approov protection, instead of failing to start. The device ID log is optional. Approov knows an installation only by its device ID, so logging it next to your own user or session identifier gives you the correlation between the two.
 
 ```kotlin
 import android.util.Log
@@ -47,6 +47,10 @@ class YourApp : Application() {
             Log.e("YourApp", "Approov account ID rejected; starting in bypass mode", e)
             ApproovService.initialize(applicationContext, "")
         }
+        // then configure, straight after initialize and before the app issues protected
+        // requests; only the settings your app uses, for example:
+        // ApproovService.setTokenHeader("Authorization", "Bearer ")
+        // ApproovService.enableMessageSigning()
     }
 }
 ```
@@ -72,6 +76,10 @@ public class YourApp extends Application {
             Log.e("YourApp", "Approov account ID rejected; starting in bypass mode", e);
             ApproovService.initialize(getApplicationContext(), "");
         }
+        // then configure, straight after initialize and before the app issues protected
+        // requests; only the settings your app uses, for example:
+        // ApproovService.setTokenHeader("Authorization", "Bearer ");
+        // ApproovService.enableMessageSigning();
     }
 }
 ```
@@ -86,6 +94,8 @@ approov sdk -getConfigString
 It is the same for every app in your account and is not a secret, so it can live in your source code or be delivered with your app's configuration. Whichever way it reaches the app, the whole value must arrive intact, punctuation included; that is the only thing the guard above is for. More about what it is in [ADVANCED.md](ADVANCED.md#about-the-approov-account-id).
 
 If your account ID is not available when the app starts, initialize with `""` and again with the account ID once you have it; see [bypass initialization](ADVANCED.md#bypass-initialization).
+
+`initialize` is synchronous, so check its result and then make your configuration calls (headers, secure strings, exclusions, the service mutator, message signing, the logging level and so on) straight after it, before the app issues protected requests. Initialization done elsewhere for you, for example by a one-line native bootstrap, configures nothing: it initializes with the account ID and comment only, and the configuration is still your app's to make. A request processed before your configuration call runs uses the defaults in force at that moment, and a setting applies only to requests processed after it is made. More in [ADVANCED.md](ADVANCED.md#initialize-then-configure).
 
 ## MAKING REQUESTS
 
