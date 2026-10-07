@@ -1031,30 +1031,6 @@ public class ApproovService {
     }
 
     /**
-     * Updates the data hash for token binding from any binding header present
-     * on the given request, ahead of a token fetch. The binding header
-     * presence is optional.
-     *
-     * @param request the request that may carry the binding header
-     * @throws ApproovException if the SDK fails to set the data hash
-     */
-    static void updateBindingDataHash(Request request) throws ApproovException {
-        String bindingHeader = getBindingHeader();
-        if (bindingHeader != null) {
-            // Header names are case-insensitive. A null value means the header is
-            // absent; a present-but-empty value must still be forwarded to the SDK.
-            String bindingValue = request.header(bindingHeader);
-            if (bindingValue != null) {
-                try {
-                    ApproovService.sdk().setDataHashInToken(bindingValue);
-                } catch (RuntimeException e) {
-                    throw sdkFailure("Token binding for " + bindingHeader, e);
-                }
-            }
-        }
-    }
-
-    /**
      * Forces a pinning rebuild if the given token fetch result indicates that
      * there was a dynamic configuration update, or that the SDK asks for the
      * current pins to be applied (isForceApplyPins) without a configuration
@@ -2011,14 +1987,13 @@ class ApproovTokenInterceptor implements Interceptor {
             return request;
         }
 
-        // update the data hash based on any token binding header (presence is optional)
-        ApproovService.updateBindingDataHash(request);
-
         HttpUrl url = request.url();
 
-        // request an Approov token for the request URL
-        Approov.TokenFetchResult approovResults = fetchForRequest("Approov token fetch for " + url, () ->
-                ApproovService.sdk().fetchApproovTokenAndWait(url.toString()));
+        // request an Approov token for the request URL, bound to the value of any token
+        // binding header (presence is optional); this path serves the first attempt and
+        // every reapplication at the network layer (stale refresh, redirect,
+        // authenticator retry), so all of them bind and fetch atomically
+        Approov.TokenFetchResult approovResults = bindAndFetchToken(request, url);
 
         // provide information about the obtained token or error (note "approov token
         // -check" can be used to check the validity of the token and if you use token
@@ -2446,6 +2421,65 @@ class ApproovTokenInterceptor implements Interceptor {
                 logPlaceholderLeft(warn, "Secure string not substituted in query parameter " + entry.getKey() + ": "
                         + reason + ", placeholder left");
         }
+    }
+
+    // held while a request sets its token binding value and fetches its token, and
+    // across nothing else
+    private static final Object BINDING_LOCK = new Object();
+
+    /**
+     * Fetches the token for a request, bound to the value of the token binding
+     * header if one is configured and the request carries it (okhttp D4, as
+     * approov-service-android 05a0c79). The SDK holds one binding value for the
+     * process and reads it when the fetch builds its request, so for a bound
+     * request setting the value and fetching are one step under a lock: otherwise
+     * two requests binding different values (an OAuth refresh with requests
+     * carrying the old and the new token in flight) could each get a token bound
+     * to the other's value, which the backend rejects. The lock is held across the
+     * two SDK calls only; requests without a binding value fetch concurrently as
+     * before.
+     *
+     * @param request the request that may carry the binding header
+     * @param url     the URL to fetch the token for
+     * @return the fetch result, never null
+     * @throws ApproovException if the SDK fails or returns no result
+     */
+    private static Approov.TokenFetchResult bindAndFetchToken(Request request, HttpUrl url)
+            throws ApproovException {
+        String operation = "Approov token fetch for " + url;
+        String bindingHeader = ApproovService.getBindingHeader();
+        // header names are case-insensitive; a null value means the header is
+        // absent, while a present but empty value is still bound
+        String bindingValue = (bindingHeader != null) ? request.header(bindingHeader) : null;
+        if (bindingValue == null)
+            return fetchForRequest(operation, () -> ApproovService.sdk().fetchApproovTokenAndWait(url.toString()));
+        Approov.TokenFetchResult approovResults;
+        RuntimeException bindingFailure = null;
+        RuntimeException fetchFailure = null;
+        synchronized (BINDING_LOCK) {
+            approovResults = null;
+            try {
+                ApproovService.sdk().setDataHashInToken(bindingValue);
+            } catch (RuntimeException e) {
+                bindingFailure = e;
+            }
+            if (bindingFailure == null) {
+                try {
+                    approovResults = ApproovService.sdk().fetchApproovTokenAndWait(url.toString());
+                } catch (RuntimeException e) {
+                    fetchFailure = e;
+                }
+            }
+        }
+        if (bindingFailure != null)
+            throw ApproovService.sdkFailure("Token binding for " + bindingHeader, bindingFailure);
+        Approov.TokenFetchResult results = approovResults;
+        RuntimeException failure = fetchFailure;
+        return fetchForRequest(operation, () -> {
+            if (failure != null)
+                throw failure;
+            return results;
+        });
     }
 
     /**
