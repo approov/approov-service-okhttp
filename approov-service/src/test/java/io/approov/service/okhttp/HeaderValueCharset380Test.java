@@ -85,6 +85,8 @@ public class HeaderValueCharset380Test {
     public void setUp() throws Exception {
         fixture = new LocalHttpsFixture(false);
         ApproovService.reset();
+        // redaction is checked at the most verbose level, the loggable token included
+        ApproovService.setLoggingLevel(ApproovLogLevel.DEBUG);
         ApproovService.initialize(fixture.context, LocalHttpsFixture.CONFIG, "reinit-header-charset");
         ApproovService.setOkHttpClientBuilder(fixture.trustingBuilder());
         // app instance secure strings: the SDK returns a new definition unchanged

@@ -17,7 +17,6 @@
 
 package io.approov.service.okhttp;
 
-import android.util.Log;
 import android.content.Context;
 import android.os.SystemClock;
 import androidx.annotation.VisibleForTesting;
@@ -189,7 +188,7 @@ public class ApproovService {
      * @return the exception to throw
      */
     static ApproovException sdkFailure(String operation, RuntimeException e) {
-        Log.e(TAG, operation + ": Approov SDK failure: " + e);
+        ApproovLog.e(TAG, operation + ": Approov SDK failure: " + e);
         return new ApproovException(operation + ": Approov SDK failure: " + e, e);
     }
 
@@ -237,7 +236,7 @@ public class ApproovService {
      * @return the exception to throw
      */
     static ApproovException mutatorFailure(String hook, RuntimeException e) {
-        Log.e(TAG, "ApproovServiceMutator." + hook + " threw " + e);
+        ApproovLog.e(TAG, "ApproovServiceMutator." + hook + " threw " + e);
         return new ApproovException("ApproovServiceMutator." + hook + " failed: " + e, e);
     }
 
@@ -344,7 +343,7 @@ public class ApproovService {
     static ApproovException unsafeHeaderValue(String header) {
         String message = "Approov cannot set header " + header
                 + ": its value contains a character a header value cannot carry";
-        Log.e(TAG, message);
+        ApproovLog.e(TAG, message);
         return new ApproovException(message);
     }
 
@@ -365,7 +364,7 @@ public class ApproovService {
         if (matcher.matches())
             return unsafeHeaderValue(matcher.group(1));
         String nameError = "Approov cannot set a header: its name contains a character a header name cannot carry";
-        Log.e(TAG, nameError);
+        ApproovLog.e(TAG, nameError);
         return new ApproovException(nameError);
     }
 
@@ -436,7 +435,7 @@ public class ApproovService {
                 // the SDK is initialized and protection is enabled; the pinning
                 // interceptor asks for the pins again before its next connection check
                 // and fails that connection while they cannot be read
-                Log.e(TAG, "Approov pins not built on initialization: " + e.getMessage());
+                ApproovLog.e(TAG, "Approov pins not built on initialization: " + e.getMessage());
             }
         }
     }
@@ -458,9 +457,9 @@ public class ApproovService {
             if (approovProtectionEnabled) {
                 // an empty account ID never downgrades an active Approov protection and
                 // is not forwarded to the SDK
-                Log.d(TAG, "Approov protection already enabled; ignoring initialization with an empty account ID");
+                ApproovLog.d(TAG, "Approov protection already enabled; ignoring initialization with an empty account ID");
             } else {
-                Log.i(TAG, "ApproovService enabled in bypass mode (empty account ID): Approov protection is not active");
+                ApproovLog.i(TAG, "ApproovService enabled in bypass mode (empty account ID): Approov protection is not active");
                 approovServiceEnabled = true;
             }
             return false;
@@ -473,22 +472,22 @@ public class ApproovService {
         try {
             newlyInitialized = sdk().initialize(context.getApplicationContext(), config, "auto", comment);
         } catch (RuntimeException e) {
-            Log.e(TAG, "Approov SDK initialization failed: " + e.getMessage());
+            ApproovLog.e(TAG, "Approov SDK initialization failed: " + e.getMessage());
             throw e;
         }
         boolean protectionWasEnabled = approovProtectionEnabled;
         approovServiceEnabled = true;
         approovProtectionEnabled = true;
         if (newlyInitialized)
-            Log.i(TAG, "Approov SDK initialized: Approov protection enabled");
+            ApproovLog.i(TAG, "Approov SDK initialized: Approov protection enabled");
         else
-            Log.d(TAG, "Approov SDK already initialized with the same account ID and comment");
+            ApproovLog.d(TAG, "Approov SDK already initialized with the same account ID and comment");
         if (!protectionWasEnabled) {
             try {
                 sdk().setUserProperty("approov-service-okhttp/" + BuildConfig.APPROOV_SERVICE_VERSION);
             } catch (RuntimeException e) {
                 // the property is diagnostic only and must not fail a successful initialization
-                Log.e(TAG, "Approov user property not set: " + e.getMessage());
+                ApproovLog.e(TAG, "Approov user property not set: " + e.getMessage());
             }
         }
 
@@ -569,6 +568,29 @@ public class ApproovService {
         substitutionQueryParams = new HashMap<>();
         exclusionURLRegexs = new HashMap<>();
         sdkFacade = new DefaultApproovSdkFacade();
+        ApproovLog.setLevel(ApproovLogLevel.INFO);
+    }
+
+    /**
+     * Sets the level of the service layer's logging, matching approov-service-ios:
+     * {@link ApproovLogLevel#ERROR} writes errors only, {@link ApproovLogLevel#WARNING}
+     * adds warnings, {@link ApproovLogLevel#INFO} (the default) adds information and
+     * {@link ApproovLogLevel#DEBUG} adds the debug lines, the loggable token of each
+     * request among them (its claims include the device ID). {@link ApproovLogLevel#OFF}
+     * writes nothing, errors included. The level may be set at any time, before
+     * initialize included, and initialize never resets it. Debug logging enabled for
+     * the ApproovService tag ("adb shell setprop log.tag.ApproovService DEBUG")
+     * raises any level but OFF to DEBUG without a rebuild. The Approov SDK's own
+     * logging is not affected.
+     *
+     * @param level the logging level
+     * @throws IllegalArgumentException if the level is null
+     */
+    public static void setLoggingLevel(ApproovLogLevel level) {
+        if (level == null)
+            throw new IllegalArgumentException("ApproovService.setLoggingLevel requires a non-null level");
+        ApproovLog.setLevel(level);
+        ApproovLog.d(TAG, "setLoggingLevel " + level);
     }
 
     /**
@@ -604,7 +626,7 @@ public class ApproovService {
             ApproovDefaultMessageSigning.SignatureParametersFactory defaultFactory) {
         if (defaultFactory == null)
             defaultFactory = ApproovDefaultMessageSigning.generateDefaultSignatureParametersFactory();
-        Log.d(TAG, "enableMessageSigning");
+        ApproovLog.d(TAG, "enableMessageSigning");
         messageSigning.setDefaultFactory(defaultFactory);
         messageSigningEnabled = true;
     }
@@ -615,7 +637,7 @@ public class ApproovService {
      * enableMessageSigning.
      */
     public static synchronized void disableMessageSigning() {
-        Log.d(TAG, "disableMessageSigning");
+        ApproovLog.d(TAG, "disableMessageSigning");
         messageSigningEnabled = false;
     }
 
@@ -641,7 +663,7 @@ public class ApproovService {
      */
     public static synchronized void putMessageSigningHostFactory(String hostName,
             ApproovDefaultMessageSigning.SignatureParametersFactory factory) {
-        Log.d(TAG, "putMessageSigningHostFactory " + hostName);
+        ApproovLog.d(TAG, "putMessageSigningHostFactory " + hostName);
         messageSigning.putHostFactory(hostName, factory);
     }
 
@@ -673,7 +695,7 @@ public class ApproovService {
         requireProtection("setDevKey");
         try {
             ApproovService.sdk().setDevKey(devKey);
-            Log.d(TAG, "setDevKey");
+            ApproovLog.d(TAG, "setDevKey");
         } catch (RuntimeException e) {
             throw new ApproovException(e);
         }
@@ -689,7 +711,7 @@ public class ApproovService {
      */
     private static void requireProtection(String method) throws ApproovException {
         if (!isApproovProtectionEnabled()) {
-            Log.e(TAG, method + ": Approov protection not enabled");
+            ApproovLog.e(TAG, method + ": Approov protection not enabled");
             throw new ApproovException(method + ": Approov protection not enabled");
         }
     }
@@ -707,7 +729,7 @@ public class ApproovService {
      *               for none
      */
     public static synchronized void setTokenHeader(String header, String prefix) {
-        Log.d(TAG, "setTokenHeader " + header + ", " + prefix);
+        ApproovLog.d(TAG, "setTokenHeader " + header + ", " + prefix);
         approovTokenHeader = header;
         approovTokenPrefix = (prefix != null) ? prefix : APPROOV_TOKEN_PREFIX;
     }
@@ -739,7 +761,7 @@ public class ApproovService {
      *               TraceID, or null to disable the header
      */
     public static synchronized void setTraceIDHeader(String header) {
-        Log.d(TAG, "setTraceIDHeader " + header);
+        ApproovLog.d(TAG, "setTraceIDHeader " + header);
         approovTraceIDHeader = header;
     }
 
@@ -771,7 +793,7 @@ public class ApproovService {
      *               status, or null to disable the header
      */
     public static synchronized void setStatusHeader(String header) {
-        Log.d(TAG, "setStatusHeader " + header);
+        ApproovLog.d(TAG, "setStatusHeader " + header);
         approovStatusHeader = header;
     }
 
@@ -905,11 +927,11 @@ public class ApproovService {
             } catch (RuntimeException e) {
                 throw sdkFailure("Approov dynamic configuration", e);
             }
-            Log.d(TAG, "Dynamic configuration updated");
+            ApproovLog.d(TAG, "Dynamic configuration updated");
         }
         if (configChanged || approovResults.isForceApplyPins()) {
             rebuildPins();
-            Log.d(TAG, "Pins rebuilt");
+            ApproovLog.d(TAG, "Pins rebuilt");
         }
     }
 
@@ -929,7 +951,7 @@ public class ApproovService {
      *                                  secure string substitution
      */
     public static synchronized void setBindingHeader(String header) {
-        Log.d(TAG, "setBindingHeader " + header);
+        ApproovLog.d(TAG, "setBindingHeader " + header);
         if ((header != null) && (substitutionHeaders != null) &&
                 (findSubstitutionHeaderKey(header) != null)) {
             throw new IllegalArgumentException("Header " + header +
@@ -967,7 +989,7 @@ public class ApproovService {
      *                 stale protection refresh
      */
     public static synchronized void setStaleProtectionRefreshPeriod(long periodMS) {
-        Log.d(TAG, "setStaleProtectionRefreshPeriod " + periodMS);
+        ApproovLog.d(TAG, "setStaleProtectionRefreshPeriod " + periodMS);
         staleProtectionRefreshMS = periodMS;
     }
 
@@ -1001,7 +1023,7 @@ public class ApproovService {
         if (mutator == null) {
             mutator = ApproovServiceMutator.DEFAULT;
         }
-        Log.d(TAG, "Applied ApproovServiceMutator:" + describe(mutator));
+        ApproovLog.d(TAG, "Applied ApproovServiceMutator:" + describe(mutator));
         serviceMutator = mutator;
     }
 
@@ -1036,7 +1058,7 @@ public class ApproovService {
      *                                  token binding
      */
     public static synchronized void addSubstitutionHeader(String header, String requiredPrefix) {
-        Log.d(TAG, "addSubstitutionHeader " + header + ", " + requiredPrefix);
+        ApproovLog.d(TAG, "addSubstitutionHeader " + header + ", " + requiredPrefix);
         if ((header != null) && (bindingHeader != null) && header.equalsIgnoreCase(bindingHeader)) {
             throw new IllegalArgumentException("Header " + header +
                     " cannot be used for both token binding and secure string substitution");
@@ -1060,7 +1082,7 @@ public class ApproovService {
      * @param header is the header to be removed for substitution
      */
     public static synchronized void removeSubstitutionHeader(String header) {
-        Log.d(TAG, "removeSubstitutionHeader " + header);
+        ApproovLog.d(TAG, "removeSubstitutionHeader " + header);
         String existingKey = findSubstitutionHeaderKey(header);
         if (existingKey != null)
             substitutionHeaders.remove(existingKey);
@@ -1112,13 +1134,13 @@ public class ApproovService {
      * @param key is the query parameter key name to be added for substitution
      */
     public static synchronized void addSubstitutionQueryParam(String key) {
-        Log.d(TAG, "addSubstitutionQueryParam " + key);
+        ApproovLog.d(TAG, "addSubstitutionQueryParam " + key);
         try {
             // quoted, so that a key such as "a.b" never matches another parameter
             Pattern pattern = Pattern.compile("[\\?&]" + Pattern.quote(key) + "=([^&;]+)");
             substitutionQueryParams.put(key, pattern);
         } catch (PatternSyntaxException e) {
-            Log.e(TAG, "addSubstitutionQueryParam " + key + " error: " + e.getMessage());
+            ApproovLog.e(TAG, "addSubstitutionQueryParam " + key + " error: " + e.getMessage());
         }
     }
 
@@ -1129,7 +1151,7 @@ public class ApproovService {
      * @param key is the query parameter key name to be removed for substitution
      */
     public static synchronized void removeSubstitutionQueryParam(String key) {
-        Log.d(TAG, "removeSubstitutionQueryParam " + key);
+        ApproovLog.d(TAG, "removeSubstitutionQueryParam " + key);
         substitutionQueryParams.remove(key);
     }
 
@@ -1173,9 +1195,9 @@ public class ApproovService {
         try {
             Pattern pattern = Pattern.compile(urlRegex);
             exclusionURLRegexs.put(urlRegex, pattern);
-            Log.d(TAG, "addExclusionURLRegex " + urlRegex);
+            ApproovLog.d(TAG, "addExclusionURLRegex " + urlRegex);
         } catch (PatternSyntaxException e) {
-            Log.e(TAG, "addExclusionURLRegex " + urlRegex + " error: " + e.getMessage());
+            ApproovLog.e(TAG, "addExclusionURLRegex " + urlRegex + " error: " + e.getMessage());
         }
     }
 
@@ -1187,7 +1209,7 @@ public class ApproovService {
      *                 to exclude them
      */
     public static synchronized void removeExclusionURLRegex(String urlRegex) {
-        Log.d(TAG, "removeExclusionURLRegex " + urlRegex);
+        ApproovLog.d(TAG, "removeExclusionURLRegex " + urlRegex);
         exclusionURLRegexs.remove(urlRegex);
     }
 
@@ -1226,7 +1248,7 @@ public class ApproovService {
         try {
             approovResults = ApproovService.sdk().fetchSecureStringAndWait("precheck-dummy-key", null);
             recordLastARC(approovResults);
-            Log.d(TAG, "precheck: " + approovResults.getStatus().toString());
+            ApproovLog.d(TAG, "precheck: " + approovResults.getStatus().toString());
         } catch (RuntimeException e) {
             // the fetch failed without a result, so it leaves no ARC behind; any
             // RuntimeException from the SDK, including a null result, is reported as
@@ -1258,7 +1280,7 @@ public class ApproovService {
         requireProtection("getDeviceID");
         try {
             String deviceID = ApproovService.sdk().getDeviceID();
-            Log.d(TAG, "getDeviceID: " + deviceID);
+            ApproovLog.d(TAG, "getDeviceID: " + deviceID);
             return deviceID;
         } catch (RuntimeException e) {
             throw new ApproovException(e);
@@ -1284,7 +1306,7 @@ public class ApproovService {
         requireProtection("setDataHashInToken");
         try {
             ApproovService.sdk().setDataHashInToken(data);
-            Log.d(TAG, "setDataHashInToken");
+            ApproovLog.d(TAG, "setDataHashInToken");
         } catch (RuntimeException e) {
             throw new ApproovException(e);
         }
@@ -1318,7 +1340,7 @@ public class ApproovService {
         try {
             approovResults = ApproovService.sdk().fetchApproovTokenAndWait(url);
             recordLastARC(approovResults);
-            Log.d(TAG, "fetchToken: " + approovResults.getStatus().toString());
+            ApproovLog.d(TAG, "fetchToken: " + approovResults.getStatus().toString());
         } catch (RuntimeException e) {
             // the fetch failed without a result, so it leaves no ARC behind; any
             // RuntimeException from the SDK, including a null result, is reported as
@@ -1388,7 +1410,7 @@ public class ApproovService {
         requireProtection("getAccountMessageSignature");
         try {
             String signature = ApproovService.sdk().getAccountMessageSignature(message);
-            Log.d(TAG, "getAccountMessageSignature");
+            ApproovLog.d(TAG, "getAccountMessageSignature");
             if (signature == null)
                 throw new ApproovException("no account signature available");
             return signature;
@@ -1425,7 +1447,7 @@ public class ApproovService {
         requireProtection("getInstallMessageSignature");
         try {
             String signature = ApproovService.sdk().getInstallMessageSignature(message);
-            Log.d(TAG, "getInstallMessageSignature");
+            ApproovLog.d(TAG, "getInstallMessageSignature");
             if (signature == null)
                 throw new ApproovException("no device signature available");
             return signature;
@@ -1477,7 +1499,7 @@ public class ApproovService {
         try {
             approovResults = ApproovService.sdk().fetchSecureStringAndWait(key, newDef);
             recordLastARC(approovResults);
-            Log.d(TAG, "fetchSecureString " + type + ": " + key + ", " + approovResults.getStatus().toString());
+            ApproovLog.d(TAG, "fetchSecureString " + type + ": " + key + ", " + approovResults.getStatus().toString());
         } catch (RuntimeException e) {
             // the fetch failed without a result, so it leaves no ARC behind; any
             // RuntimeException from the SDK, including a null result, is reported as
@@ -1519,7 +1541,7 @@ public class ApproovService {
         try {
             approovResults = ApproovService.sdk().fetchCustomJWTAndWait(payload);
             recordLastARC(approovResults);
-            Log.d(TAG, "fetchCustomJWT: " + approovResults.getStatus().toString());
+            ApproovLog.d(TAG, "fetchCustomJWT: " + approovResults.getStatus().toString());
         } catch (RuntimeException e) {
             // the fetch failed without a result, so it leaves no ARC behind; any
             // RuntimeException from the SDK, including a null result, is reported as
@@ -1590,9 +1612,9 @@ public class ApproovService {
         requireProtection("setInstallAttributes");
         try {
             ApproovService.sdk().setInstallAttrsInToken(attrs);
-            Log.d(TAG, "setInstallAttributes");
+            ApproovLog.d(TAG, "setInstallAttributes");
         } catch (RuntimeException e) {
-            Log.e(TAG, "setInstallAttributes failed: " + e.getMessage());
+            ApproovLog.e(TAG, "setInstallAttributes failed: " + e.getMessage());
             throw new ApproovException(e);
         }
     }
@@ -1656,7 +1678,7 @@ public class ApproovService {
      *                    Approov OkHttpClient
      */
     public static synchronized void setOkHttpClientBuilder(String builderName, OkHttpClient.Builder builder) {
-        Log.d(TAG, "OkHttp client builder set for " + builderName);
+        ApproovLog.d(TAG, "OkHttp client builder set for " + builderName);
         OkHttpClient.Builder oldBuilder = okHttpBuilders.put(builderName, builder);
         if (oldBuilder != builder)
             // force a rebuild of the client if the builder has changed
@@ -1694,7 +1716,7 @@ public class ApproovService {
             // get the builder and warn if none was available
             OkHttpClient.Builder okHttpBuilder = okHttpBuilders.get(builderName);
             if (okHttpBuilder == null) {
-                Log.d(TAG, "No builder available for " + builderName);
+                ApproovLog.d(TAG, "No builder available for " + builderName);
                 okHttpBuilder = new OkHttpClient.Builder();
             }
 
@@ -1725,10 +1747,10 @@ public class ApproovService {
             // enables protection the same client protects its requests, so a client
             // obtained early is never cached unprotected.
             if (!isApproovServiceEnabled())
-                Log.w(TAG, "Building Approov OkHttpClient for " + builderName + " before ApproovService "
+                ApproovLog.w(TAG, "Building Approov OkHttpClient for " + builderName + " before ApproovService "
                         + "initialization; requests proceed without Approov protection until it is initialized");
             else
-                Log.d(TAG, "Building new Approov OkHttpClient for " + builderName);
+                ApproovLog.d(TAG, "Building new Approov OkHttpClient for " + builderName);
             // The token interceptor runs after the app's own interceptors, so they
             // never see the protection. The network interceptors run before the
             // app's own network interceptors (a logger, an inspector, an APM agent),
@@ -1840,8 +1862,11 @@ class ApproovTokenInterceptor implements Interceptor {
 
         // provide information about the obtained token or error (note "approov token
         // -check" can be used to check the validity of the token and if you use token
-        // annotations they will appear here to determine why a request is being rejected)
-        Log.d(TAG, "Token for " + url.toString() + ": " + approovResults.getLoggableToken());
+        // annotations they will appear here to determine why a request is being rejected).
+        // The loggable token carries the device ID, so it is logged at DEBUG only, and
+        // the URL without its user info, query or fragment
+        if (ApproovLog.isDebugEnabled())
+            ApproovLog.d(TAG, "Token for " + ApproovLog.loggableURL(url) + ": " + approovResults.getLoggableToken());
 
         // force a pinning rebuild if there is any dynamic config update
         ApproovService.updatePinsIfConfigChanged(approovResults);
@@ -1909,14 +1934,14 @@ class ApproovTokenInterceptor implements Interceptor {
             String value = request.header(header);
             if ((value != null) && value.startsWith(prefix) && (value.length() > prefix.length())) {
                 if (!overTLS) {
-                    Log.w(TAG, "Secure string not substituted in header " + header
+                    ApproovLog.w(TAG, "Secure string not substituted in header " + header
                             + ": the request is not sent over TLS, placeholder left");
                     continue;
                 }
                 String key = value.substring(prefix.length());
                 approovResults = fetchForRequest("Header substitution for " + header, () ->
                         ApproovService.sdk().fetchSecureStringAndWait(key, null));
-                Log.d(TAG, "Substituting header: " + header + ", " + approovResults.getStatus().toString());
+                ApproovLog.d(TAG, "Substituting header: " + header + ", " + approovResults.getStatus().toString());
                 // a failed substitution leaves the placeholder value in the header and the
                 // request proceeds: the backend sees the placeholder and decides
                 Approov.TokenFetchResult headerResults = approovResults;
@@ -1926,13 +1951,13 @@ class ApproovTokenInterceptor implements Interceptor {
                     if (secureString == null) {
                         // a decision to substitute with no value (a custom mutator accepting
                         // a non-SUCCESS result) leaves the placeholder, never "null"
-                        Log.d(TAG, "No secure string to substitute, placeholder left in header: " + header
+                        ApproovLog.d(TAG, "No secure string to substitute, placeholder left in header: " + header
                                 + ", " + approovResults.getStatus().toString());
                     } else if (!ApproovService.isSafeHeaderValue(secureString)) {
                         // a value a header cannot carry is a substitution that produced no
                         // usable value, under every mutator (SPECIFICATION 1.4); the value
                         // is never logged
-                        Log.w(TAG, "Secure string for header " + header + " contains a character a header "
+                        ApproovLog.w(TAG, "Secure string for header " + header + " contains a character a header "
                                 + "value cannot carry, placeholder left");
                     } else {
                         aChange = true;
@@ -1966,7 +1991,7 @@ class ApproovTokenInterceptor implements Interceptor {
                 if (!matcher.find())
                     break;
                 if (!overTLS) {
-                    Log.w(TAG, "Secure string not substituted in query parameter " + queryKey
+                    ApproovLog.w(TAG, "Secure string not substituted in query parameter " + queryKey
                             + ": the request is not sent over TLS, placeholder left");
                     break;
                 }
@@ -1977,14 +2002,14 @@ class ApproovTokenInterceptor implements Interceptor {
                 String queryValue = matcher.group(1);
                 approovResults = fetchForRequest("Query parameter substitution for " + queryKey, () ->
                         ApproovService.sdk().fetchSecureStringAndWait(queryValue, null));
-                Log.d(TAG, "Substituting query parameter: " + queryKey + ", " + approovResults.getStatus().toString());
+                ApproovLog.d(TAG, "Substituting query parameter: " + queryKey + ", " + approovResults.getStatus().toString());
                 Approov.TokenFetchResult queryResults = approovResults;
                 if (ApproovService.callMutator("handleInterceptorQueryParamSubstitutionResult",
                         () -> mutator.handleInterceptorQueryParamSubstitutionResult(queryResults, queryKey))) {
                     String secureString = approovResults.getSecureString();
                     if (secureString == null) {
                         // a decision to substitute with no value leaves the placeholder
-                        Log.d(TAG, "No secure string to substitute, placeholder left in query parameter: "
+                        ApproovLog.d(TAG, "No secure string to substitute, placeholder left in query parameter: "
                                 + queryKey + ", " + approovResults.getStatus().toString());
                     } else {
                         // substitute this occurrence, then read it back from the URL as
@@ -2003,7 +2028,7 @@ class ApproovTokenInterceptor implements Interceptor {
                             replacementURL = candidateURL;
                             from = start + secureString.length();
                         } else {
-                            Log.w(TAG, "Secure string for query parameter " + queryKey + " cannot be carried "
+                            ApproovLog.w(TAG, "Secure string for query parameter " + queryKey + " cannot be carried "
                                     + "in the URL unchanged, placeholder left");
                         }
                     }
@@ -2081,7 +2106,7 @@ class ApproovTokenInterceptor implements Interceptor {
             if (processedRequest == null) {
                 // a programming error in the app's callback, treated like a runtime
                 // exception from it (SPECIFICATION 1.6.1)
-                Log.e(TAG, "ApproovServiceMutator.handleInterceptorProcessedRequest returned null");
+                ApproovLog.e(TAG, "ApproovServiceMutator.handleInterceptorProcessedRequest returned null");
                 throw new ApproovException("ApproovServiceMutator.handleInterceptorProcessedRequest returned null");
             }
             // a header the callback set or changed that a header cannot carry is the
@@ -2098,7 +2123,7 @@ class ApproovTokenInterceptor implements Interceptor {
                 }
             }
         } else {
-            Log.d(TAG, "Protection reapplied without the processed request callback of "
+            ApproovLog.d(TAG, "Protection reapplied without the processed request callback of "
                     + ApproovService.describe(mutator));
         }
 
@@ -2153,7 +2178,7 @@ class ApproovTokenInterceptor implements Interceptor {
         }
         if (approovResults == null) {
             ApproovService.recordLastARC(null);
-            Log.e(TAG, operation + ": no result from the Approov SDK");
+            ApproovLog.e(TAG, operation + ": no result from the Approov SDK");
             throw new ApproovException(operation + ": no result from the Approov SDK");
         }
         ApproovService.recordLastARC(approovResults);
@@ -2181,7 +2206,7 @@ class ApproovTokenInterceptor implements Interceptor {
             builder.header(name, value);
         } catch (IllegalArgumentException e) {
             String message = "Approov cannot set header " + name + ": not a valid header name";
-            Log.e(TAG, message);
+            ApproovLog.e(TAG, message);
             throw new ApproovException(message);
         }
     }
@@ -2293,7 +2318,7 @@ class ApproovFreshnessInterceptor implements Interceptor {
             // (a same-URL rebuild, or a server echoing them in a redirect), so the log
             // names the URL before substitution and only the origin of the attempt
             HttpUrl now = request.url();
-            Log.d(TAG, "Request rebuilt since protection was applied to " + freshness.getFetchURL() +
+            ApproovLog.d(TAG, "Request rebuilt since protection was applied to " + freshness.getFetchURL() +
                     " (now " + request.method() + " " + now.scheme() + "://" + now.host() + ":" + now.port() +
                     (urlChanged ? ", another URL" : ", the same URL") + "), reapplying Approov protection");
             // cache the mutator for the duration of the interceptor to make sure it is
@@ -2320,11 +2345,11 @@ class ApproovFreshnessInterceptor implements Interceptor {
             mutator = ApproovService.getServiceMutator();
             ApproovServiceMutator staleMutator = mutator;
             if (!ApproovService.callMutator("supportsProtectionRefresh", staleMutator::supportsProtectionRefresh)) {
-                Log.d(TAG, "Request held for " + heldMS + "ms but " + ApproovService.describe(mutator) +
+                ApproovLog.d(TAG, "Request held for " + heldMS + "ms but " + ApproovService.describe(mutator) +
                         " does not support protection refresh");
                 return chain.proceed(request);
             }
-            Log.d(TAG, "Request held for " + heldMS + "ms since Approov protection was applied, " +
+            ApproovLog.d(TAG, "Request held for " + heldMS + "ms since Approov protection was applied, " +
                     "refreshing before transmission");
             invokeProcessed = true;
         }
@@ -2377,7 +2402,7 @@ class ApproovPinningInterceptor implements Interceptor {
         try {
             buildPins();
         } catch (ApproovException e) {
-            Log.e(TAG, "Approov pins not built: " + e.getMessage());
+            ApproovLog.e(TAG, "Approov pins not built: " + e.getMessage());
         }
     }
 
@@ -2499,7 +2524,7 @@ class ApproovPinningInterceptor implements Interceptor {
             // specific one, while an unpinned host is left to the app's own policy
             if (getCertificatePinner().findMatchingPins(host).isEmpty())
                 return chain.proceed(chain.request());
-            Log.d(TAG, "Pinning failure: cleartext connection to pinned host " + host);
+            ApproovLog.d(TAG, "Pinning failure: cleartext connection to pinned host " + host);
             throw new SSLPeerUnverifiedException("Approov pinning: cleartext connection to pinned host " + host);
         }
         // check the peer certificates against the current pins for this host on every
@@ -2517,7 +2542,7 @@ class ApproovPinningInterceptor implements Interceptor {
             // request to this host on the same connection is checked again and fails
             // again, and OkHttp itself cancels the exchange of this request (closing
             // an HTTP/1 connection, which carries one request at a time).
-            Log.d(TAG, "Pinning failure: " + e.toString());
+            ApproovLog.d(TAG, "Pinning failure: " + e.toString());
             throw e;
         }
         return chain.proceed(chain.request());

@@ -59,6 +59,8 @@ public class QueryParamKey380Test {
     public void setUp() throws Exception {
         fixture = new LocalHttpsFixture(false);
         ApproovService.reset();
+        // redaction is checked at the most verbose level, the loggable token included
+        ApproovService.setLoggingLevel(ApproovLogLevel.DEBUG);
         ApproovService.initialize(fixture.context, LocalHttpsFixture.CONFIG, "reinit-query-key");
         ApproovService.setOkHttpClientBuilder(fixture.trustingBuilder());
         assertEquals("the-secret", ApproovService.fetchSecureString("PH", "the-secret"));

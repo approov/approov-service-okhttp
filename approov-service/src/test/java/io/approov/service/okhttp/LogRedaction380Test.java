@@ -55,6 +55,8 @@ public class LogRedaction380Test {
     public void setUp() throws Exception {
         fixture = new TwoOriginFixture(true, PLACEHOLDER, SECRET);
         ApproovService.reset();
+        // redaction is checked at the most verbose level, the loggable token included
+        ApproovService.setLoggingLevel(ApproovLogLevel.DEBUG);
         fixture.initialize();
         ApproovService.addSubstitutionQueryParam("key");
         ShadowLog.reset();

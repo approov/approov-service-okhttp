@@ -59,6 +59,8 @@ public class CleartextSubstitution380Test {
         // the other origin is cleartext HTTP on 127.0.0.1
         fixture = new TwoOriginFixture(false, PLACEHOLDER, SECRET);
         ApproovService.reset();
+        // redaction is checked at the most verbose level, the loggable token included
+        ApproovService.setLoggingLevel(ApproovLogLevel.DEBUG);
         fixture.initialize();
         ApproovService.setServiceMutator(ApproovServiceMutator.ALWAYS_PROCEED);
         ApproovService.addSubstitutionHeader("Api-Key", null);
