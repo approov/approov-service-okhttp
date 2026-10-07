@@ -313,7 +313,7 @@ public class ApproovService {
      * @param value the encoded value
      * @return the decoded value, or null if an escape is malformed
      */
-    private static String percentDecode(String value) {
+    static String percentDecode(String value) {
         java.io.ByteArrayOutputStream bytes = new java.io.ByteArrayOutputStream();
         for (int i = 0; i < value.length(); i++) {
             char c = value.charAt(i);
@@ -1993,6 +1993,7 @@ class ApproovTokenInterceptor implements Interceptor {
         String replacementURL = originalURL;
         Map<String, Pattern> substitutionQueryParams = ApproovService.getSubstitutionQueryParams();
         List<String> queryKeys = new ArrayList<>(substitutionQueryParams.size());
+        List<ApproovRequestFreshness.QuerySubstitution> querySubstitutions = new ArrayList<>();
         for (Map.Entry<String, Pattern> entry : substitutionQueryParams.entrySet()) {
             String queryKey = entry.getKey();
             Pattern pattern = entry.getValue();
@@ -2045,6 +2046,9 @@ class ApproovTokenInterceptor implements Interceptor {
                                 queryKeys.add(queryKey);
                             replacementURL = candidateURL;
                             from = start + secureString.length();
+                            // a digest only, to restore a value a redirect target echoes
+                            querySubstitutions.add(ApproovRequestFreshness.querySubstitution(queryKey,
+                                    queryValue, secureString));
                         } else {
                             ApproovLog.w(TAG, "Secure string for query parameter " + queryKey + " cannot be carried "
                                     + "in the URL unchanged, placeholder left");
@@ -2110,6 +2114,7 @@ class ApproovTokenInterceptor implements Interceptor {
                 for (String header : setSubstitutionHeaders.keySet())
                     installedHeaderValues.put(header, request.header(header));
                 freshness.setSubstitutions(originalHeaderValues, installedHeaderValues);
+                freshness.addQuerySubstitutions(querySubstitutions);
                 freshness.freezeChanges();
             }
         }
@@ -2238,8 +2243,13 @@ class ApproovTokenInterceptor implements Interceptor {
      * the value this layer installed: a value the app changed afterwards, for
      * example from an OkHttp authenticator, is left in place and is substituted
      * afresh when protection is reapplied. The URL is restored to its
-     * pre-substitution form only when the request has not been redirected, since a
-     * redirect target is the server's URL, not ours.
+     * pre-substitution form when the request has not been redirected. A redirect
+     * target is the server's URL and is left as the server sent it, except that a
+     * query value in it that is a secure string substituted on this request (a
+     * target that echoes the secret back, compared by digest) is restored to its
+     * placeholder, so the next hop is classified with the placeholder and receives
+     * the secure string only if it is substituted afresh for a protected https
+     * destination (SPECIFICATION 7.3).
      *
      * @param request    the request carrying the protection
      * @param freshness  the marker describing the protection
@@ -2266,8 +2276,16 @@ class ApproovTokenInterceptor implements Interceptor {
             for (String value : entry.getValue())
                 builder.addHeader(header, value);
         }
-        if (restoreURL && (changes.getOriginalURL() != null))
+        if (restoreURL && (changes.getOriginalURL() != null)) {
             builder.url(changes.getOriginalURL());
+        } else {
+            String url = request.url().toString();
+            String restored = freshness.restoreQueryPlaceholders(url);
+            if (!restored.equals(url)) {
+                ApproovLog.d(TAG, "Secure string echoed in a redirect target restored to its placeholder");
+                builder.url(restored);
+            }
+        }
         builder.tag(ApproovRequestFreshness.class, null);
         return builder.build();
     }
@@ -2353,10 +2371,10 @@ class ApproovFreshnessInterceptor implements Interceptor {
             // unchanged if within the refresh period or if the refresh is disabled
             long refreshPeriodMS = ApproovService.getStaleProtectionRefreshPeriod();
             if ((refreshPeriodMS <= 0) || (freshness.getProtectedAtMillis() < 0))
-                return chain.proceed(request);
+                return restoreEchoedLocation(chain.proceed(request), freshness);
             long heldMS = SystemClock.elapsedRealtime() - freshness.getProtectedAtMillis();
             if (heldMS <= refreshPeriodMS)
-                return chain.proceed(request);
+                return restoreEchoedLocation(chain.proceed(request), freshness);
 
             // a refresh reinvokes the mutator's processed request callback so it is
             // only performed if the mutator declares that this is safe
@@ -2365,7 +2383,7 @@ class ApproovFreshnessInterceptor implements Interceptor {
             if (!ApproovService.callMutator("supportsProtectionRefresh", staleMutator::supportsProtectionRefresh)) {
                 ApproovLog.d(TAG, "Request held for " + heldMS + "ms but " + ApproovService.describe(mutator) +
                         " does not support protection refresh");
-                return chain.proceed(request);
+                return restoreEchoedLocation(chain.proceed(request), freshness);
             }
             ApproovLog.d(TAG, "Request held for " + heldMS + "ms since Approov protection was applied, " +
                     "refreshing before transmission");
@@ -2387,9 +2405,60 @@ class ApproovFreshnessInterceptor implements Interceptor {
         // the refreshed request is already at the network layer, so its header baseline
         // is what it carries now
         ApproovRequestFreshness refreshedMarker = refreshed.tag(ApproovRequestFreshness.class);
-        if (refreshedMarker != null)
+        if (refreshedMarker != null) {
             refreshedMarker.setAppliedHeaders(refreshed.headers());
-        return chain.proceed(refreshed);
+            // the substitutions made for the earlier attempts are remembered too, so
+            // that a value of theirs a later redirect target echoes is restored
+            refreshedMarker.addQuerySubstitutions(freshness.getQuerySubstitutions());
+        }
+        return restoreEchoedLocation(chain.proceed(refreshed),
+                (refreshedMarker != null) ? refreshedMarker : freshness);
+    }
+
+    /**
+     * Restores to its placeholder every secure string substituted on the request
+     * that the server echoes in the query of the response's Location header
+     * (SPECIFICATION 7.3). It is done here, at the network layer, before OkHttp
+     * builds a redirect followup from the Location, so that the followed request
+     * (response.request() of the final response), the Location the app is shown
+     * (priorResponse(), or the response itself when redirects are not followed)
+     * and the next hop all carry the placeholder; the next hop then receives the
+     * secure string only if it is substituted afresh for a protected https
+     * destination. Nothing else in the Location is changed. The app's own network
+     * interceptors run between this one and the server, so they see the Location
+     * as the server sent it.
+     *
+     * @param response  the response to the attempt
+     * @param freshness the marker describing the protection of the attempt
+     * @return the response, with any echoed secure string restored
+     */
+    static Response restoreEchoedLocation(Response response, ApproovRequestFreshness freshness) {
+        List<String> locations = response.headers("Location");
+        if (locations.isEmpty())
+            return response;
+        List<String> restored = new ArrayList<>(locations.size());
+        boolean changed = false;
+        for (String location : locations) {
+            String value = freshness.restoreQueryPlaceholders(location);
+            changed |= !value.equals(location);
+            restored.add(value);
+        }
+        if (!changed)
+            return response;
+        try {
+            Response.Builder builder = response.newBuilder().removeHeader("Location");
+            for (String value : restored)
+                builder.addHeader("Location", value);
+            HttpUrl from = response.request().url();
+            ApproovLog.d(TAG, "Secure string echoed in the Location of a response from " + from.scheme() + "://"
+                    + from.host() + ":" + from.port() + " restored to its placeholder");
+            return builder.build();
+        } catch (IllegalArgumentException e) {
+            // never reached: a placeholder is taken from a URL OkHttp built, which is
+            // printable ASCII; the Location is then left as the server sent it
+            ApproovLog.e(TAG, "Cannot restore the placeholder in a Location header");
+            return response;
+        }
     }
 }
 
