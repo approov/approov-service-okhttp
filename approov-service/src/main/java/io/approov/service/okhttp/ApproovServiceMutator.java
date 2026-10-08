@@ -121,7 +121,8 @@ public interface ApproovServiceMutator {
     /**
      * Determines if a token fetch status is a network failure, meaning that the attestation could not be
      * performed because of the network rather than because of the app or device. These are NO_NETWORK,
-     * POOR_NETWORK and UNTRUSTED_NETWORK, which reports a fundamental TLS trust failure.
+     * POOR_NETWORK and UNTRUSTED_NETWORK, which reports a fundamental TLS trust failure, and MITM_DETECTED,
+     * which only an SDK before 3.8.0 reports.
      *
      * @param status is the token fetch status to classify
      * @return true if the status is a network failure, false otherwise
@@ -132,9 +133,10 @@ public interface ApproovServiceMutator {
             case POOR_NETWORK:
                 return true;
             default:
-                // TODO replace with "case UNTRUSTED_NETWORK:" once the layer depends on the 3.8.0 SDK, as matching
-                // by name compiles against the SDK enums both with and without it
-                return "UNTRUSTED_NETWORK".equals(status.name());
+                // TODO replace with "case UNTRUSTED_NETWORK:" and drop MITM_DETECTED once the layer depends on the
+                // 3.8.0 SDK, as matching by name compiles against the SDK enums both with and without them
+                String name = status.name();
+                return "UNTRUSTED_NETWORK".equals(name) || "MITM_DETECTED".equals(name);
         }
     }
 
@@ -272,7 +274,7 @@ public interface ApproovServiceMutator {
      * Decides how to handle the token fetch result from a call to Approov.fetchApproovTokenAndWait() from
      * within the interceptor. The default proceeds on SUCCESS, adding the token header, and on
      * NO_APPROOV_SERVICE, with the status reported on the status header in both cases. UNKNOWN_URL and
-     * UNPROTECTED_URL proceed with no Approov headers, NO_NETWORK, POOR_NETWORK and UNTRUSTED_NETWORK throw
+     * UNPROTECTED_URL proceed with no Approov headers, the network failures (see isNetworkFailure) throw
      * ApproovNetworkException and every other status throws ApproovFetchStatusException.
      * <p>
      * The result decides the Approov headers and the message signing, never the secure strings, which are
