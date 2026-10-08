@@ -63,10 +63,14 @@ class ApproovRequestFreshness {
     // placeholders can be restored when the protection is stripped
     private volatile Map<String, List<String>> originalHeaderValues;
 
-    // a SHA-256 digest of the value each substituted header was given, so that a placeholder is only
-    // restored if the header still holds what we installed; a digest is held so that we keep no copy
-    // of a secure string
+    // a SHA-256 digest of the value each substituted header was given, a secure string or a failure
+    // status, so that a placeholder is only restored if the header still holds what we installed; a
+    // digest is held so that we keep no copy of a secure string
     private volatile Map<String, String> installedHeaderDigests;
+
+    // the URL before any query parameter was given a secure string or a failure status, or null if the
+    // URL was not changed
+    private volatile String originalURL;
 
     /**
      * Constructs a marker for protection applied to a request.
@@ -84,6 +88,7 @@ class ApproovRequestFreshness {
         this.appliedHeaders = null;
         this.originalHeaderValues = Collections.emptyMap();
         this.installedHeaderDigests = Collections.emptyMap();
+        this.originalURL = null;
     }
 
     // getters and setters for the protection state
@@ -150,6 +155,10 @@ class ApproovRequestFreshness {
         return originalHeaderValues;
     }
 
+    String getOriginalURL() {
+        return originalURL;
+    }
+
     /**
      * Determines if a header still holds the value this layer installed by substitution.
      *
@@ -163,14 +172,18 @@ class ApproovRequestFreshness {
     }
 
     /**
-     * Records the secure string substitutions applied to the request.
+     * Records the substitutions applied to the request, of secure strings and of failure statuses written in
+     * place of placeholders.
      *
      * @param originalHeaderValues is the complete values each header had before substitution
      * @param installedHeaderValues is the value each header carries after substitution, as stored on the
      * built request (OkHttp trims header values), of which only a digest is kept
+     * @param originalURL is the URL before any query parameter substitution, or null if the URL was not changed
      */
-    void setSubstitutions(Map<String, List<String>> originalHeaderValues, Map<String, String> installedHeaderValues) {
+    void setSubstitutions(Map<String, List<String>> originalHeaderValues, Map<String, String> installedHeaderValues,
+            String originalURL) {
         this.originalHeaderValues = originalHeaderValues;
+        this.originalURL = originalURL;
         Map<String, String> digests = new java.util.LinkedHashMap<>(installedHeaderValues.size());
         for (Map.Entry<String, String> entry : installedHeaderValues.entrySet())
             digests.put(entry.getKey(), digestOf(entry.getValue()));

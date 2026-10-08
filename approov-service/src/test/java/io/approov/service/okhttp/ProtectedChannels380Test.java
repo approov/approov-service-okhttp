@@ -60,8 +60,8 @@ import okhttp3.mockwebserver.RecordedRequest;
  *   API domain, a key of the SDK pin set; any other host gets nothing at all.
  *
  * A secure string fetch decides only its own substitution: under both standard
- * mutators SUCCESS substitutes and every other status keeps the placeholder, and
- * the request proceeds. The status header always describes the token fetch.
+ * mutators SUCCESS substitutes, every other status is written in place of the
+ * placeholder (decided 2026-10-08), and the request proceeds. The status header always describes the token fetch.
  */
 @RunWith(RobolectricTestRunner.class)
 @Config(manifest = Config.NONE)
@@ -592,12 +592,14 @@ public class ProtectedChannels380Test {
     }
 
     // ---------------------------------------------------------------------------
-    // secure string fetch status: SUCCESS substitutes, everything else keeps the
-    // placeholder and the request proceeds under both standard mutators
+    // secure string fetch status: SUCCESS substitutes, everything else is written
+    // in place of the placeholder and the request proceeds under both standard
+    // mutators
     // ---------------------------------------------------------------------------
 
-    private void assertSecureStringFailureKeepsPlaceholder(String what, String status, boolean header,
+    private void assertSecureStringFailureProceeds(String what, String status, boolean header,
             String tokenStatus) throws Exception {
+        String expected = status.toLowerCase(java.util.Locale.ROOT);
         fixture.protectedServer.enqueue(new MockResponse().setBody("ok"));
         HttpUrl.Builder url = fixture.protectedServer.url("/data").newBuilder();
         Request.Builder builder = new Request.Builder();
@@ -614,9 +616,9 @@ public class ProtectedChannels380Test {
         }
         recorded = fixture.protectedServer.takeRequest(5, TimeUnit.SECONDS);
         if (header)
-            assertEquals(what + " " + status + ": header", PLACEHOLDER, recorded.getHeader("Api-Key"));
+            assertEquals(what + " " + status + ": header", expected, recorded.getHeader("Api-Key"));
         else
-            assertEquals(what + " " + status + ": query", PLACEHOLDER, recorded.getRequestUrl().queryParameter("key"));
+            assertEquals(what + " " + status + ": query", expected, recorded.getRequestUrl().queryParameter("key"));
         if ("success".equals(tokenStatus)) {
             assertFalse(what + " " + status + ": token", recorded.getHeader("Approov-Token").isEmpty());
             assertEquals(what + " " + status + ": the status header reports the token fetch", "success",
@@ -634,8 +636,8 @@ public class ProtectedChannels380Test {
         for (ApproovServiceMutator mutator : mutators) {
             ApproovService.setServiceMutator(mutator);
             for (String status : SECURE_STRING_FAILURES) {
-                assertSecureStringFailureKeepsPlaceholder(String.valueOf(mutator), status, true, "success");
-                assertSecureStringFailureKeepsPlaceholder(String.valueOf(mutator), status, false, "success");
+                assertSecureStringFailureProceeds(String.valueOf(mutator), status, true, "success");
+                assertSecureStringFailureProceeds(String.valueOf(mutator), status, false, "success");
             }
         }
     }
@@ -648,8 +650,8 @@ public class ProtectedChannels380Test {
                 ApproovServiceMutator.ALWAYS_PROCEED}) {
             ApproovService.setServiceMutator(mutator);
             for (String status : new String[] {"NO_NETWORK", "REJECTED", "INTERNAL_ERROR"}) {
-                assertSecureStringFailureKeepsPlaceholder(String.valueOf(mutator), status, true, null);
-                assertSecureStringFailureKeepsPlaceholder(String.valueOf(mutator), status, false, null);
+                assertSecureStringFailureProceeds(String.valueOf(mutator), status, true, null);
+                assertSecureStringFailureProceeds(String.valueOf(mutator), status, false, null);
             }
         }
         // control: a successful secure string fetch on that channel substitutes

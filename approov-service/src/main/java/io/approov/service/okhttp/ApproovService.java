@@ -1023,7 +1023,9 @@ public class ApproovService {
      * easy migration to the use of secure strings. It applies to every request processed after the
      * call, through any client already obtained. A required prefix may be specified to deal with cases
      * such as the use of "Bearer " prefixed before values in an authorization header. Note that a secure
-     * string is only substituted into a request sent over TLS.
+     * string is only substituted into a request sent over TLS. If the secure string fetch fails and the
+     * request proceeds, the fetch status in lowercase (such as "rejected" or "unknown_key") is placed after
+     * the prefix instead.
      *
      * @param header is the header to be marked for substitution
      * @param requiredPrefix is any required prefix to the value being substituted or null if not required
@@ -1091,7 +1093,8 @@ public class ApproovService {
      * instead. This allows easy migration to the use of secure strings. It applies to every request
      * processed after the call, through any client already obtained. The key is matched as a literal
      * string and every occurrence of it in the query is substituted. Note that a secure string is only
-     * substituted into a request sent over TLS.
+     * substituted into a request sent over TLS. If the secure string fetch fails and the request proceeds,
+     * the fetch status in lowercase (such as "rejected" or "unknown_key") becomes the value instead.
      *
      * @param key is the query parameter key name to be added for substitution
      */
@@ -1660,7 +1663,8 @@ class ApproovTokenInterceptor implements Interceptor {
      * Applies Approov protection to a request. A token is fetched for the request URL and the protection
      * its status allows is applied: on a token-protected API (SUCCESS) the token, trace and status headers,
      * the secure strings and any message signatures; on a secrets-only API (UNPROTECTED_URL) the secure
-     * strings only; and on a failure status the service mutator lets proceed the status header only. The
+     * strings only; and on a failure status the service mutator lets proceed the status header only. A
+     * secure string that cannot be fetched has its status written in place of its placeholder. The
      * returned request carries an ApproovRequestFreshness marker describing the protection applied, so
      * that the network layer can strip and reapply it. A request that is not processed is returned
      * unchanged with no marker.
@@ -1767,12 +1771,14 @@ class ApproovTokenInterceptor implements Interceptor {
         // we now deal with any header substitutions, which may require further fetches but these should be
         // using cached results; the original values are kept so that the substitution can be undone if the
         // protection is reapplied. A secure string is only substituted on a token-protected or secrets-only
-        // API over TLS, so that a redirect to another URL carrying the placeholder never receives the secret,
-        // and every placeholder left is logged by name, never by value
+        // API over TLS, so that a redirect to another URL carrying the placeholder never receives the secret.
+        // A failed fetch the request continues on puts its status in place of the placeholder, as evidence
+        // for the backend, and every placeholder not given a secure string is logged by name, never by value
         String noSecureStrings = undelivered;
         boolean noSecureStringsWarns = isConfigurationReason(url, tokenStatus);
         Map<String, String> substitutionHeaders = ApproovService.getSubstitutionHeaders();
         Map<String, String> setSubstitutionHeaders = new LinkedHashMap<>(substitutionHeaders.size());
+        List<String> secureStringHeaders = new ArrayList<>(substitutionHeaders.size());
         Map<String, List<String>> originalHeaderValues = new LinkedHashMap<>(substitutionHeaders.size());
         for (Map.Entry<String, String> entry : substitutionHeaders.entrySet()) {
             String header = entry.getKey();
@@ -1789,25 +1795,30 @@ class ApproovTokenInterceptor implements Interceptor {
                 approovResults = fetchForRequest("Header substitution for " + header, () ->
                         ApproovService.sdk().fetchSecureStringAndWait(key, null));
                 ApproovLog.d(TAG, "Substituting header: " + header + ", " + approovResults.getStatus().toString());
-                // a failed substitution leaves the placeholder in the header and the request proceeds
+                // the request proceeds unless the mutator throws, and a decision to substitute with no value is
+                // treated like a decision not to substitute, so the header never carries "null"
                 Approov.TokenFetchResult headerResults = approovResults;
-                if (ApproovService.callMutator("handleInterceptorHeaderSubstitutionResult",
-                        () -> mutator.handleInterceptorHeaderSubstitutionResult(headerResults, header))) {
-                    String secureString = approovResults.getSecureString();
-                    if (secureString == null) {
-                        // a decision to substitute with no value leaves the placeholder, never "null"
-                        ApproovLog.d(TAG, "Secure string not substituted in header " + header
-                                + ": no secure string for " + approovResults.getStatus().toString()
-                                + ", placeholder left");
-                    } else if (!ApproovService.isSafeHeaderValue(secureString)) {
+                boolean substitute = ApproovService.callMutator("handleInterceptorHeaderSubstitutionResult",
+                        () -> mutator.handleInterceptorHeaderSubstitutionResult(headerResults, header));
+                String secureString = approovResults.getSecureString();
+                String failureStatus = failureStatusValue(approovResults);
+                if (substitute && (secureString != null)) {
+                    if (!ApproovService.isSafeHeaderValue(secureString)) {
                         // a value a header cannot carry leaves the placeholder and is never logged
                         ApproovLog.w(TAG, "Secure string not substituted in header " + header
                                 + ": invalid character in value, placeholder left");
                     } else {
                         setSubstitutionHeaders.put(header, prefix + secureString);
+                        secureStringHeaders.add(header);
                         // keep every value of the header, in order, so that all can be restored
                         originalHeaderValues.put(header, new ArrayList<>(request.headers(header)));
                     }
+                } else if (failureStatus != null) {
+                    // the failure status replaces the placeholder, after any required prefix
+                    ApproovLog.d(TAG, "Secure string not substituted in header " + header + ": secure string fetch "
+                            + ApproovService.describeOutcome(approovResults) + ", status sent in its place");
+                    setSubstitutionHeaders.put(header, prefix + failureStatus);
+                    originalHeaderValues.put(header, new ArrayList<>(request.headers(header)));
                 } else {
                     ApproovLog.d(TAG, "Secure string not substituted in header " + header + ": secure string fetch "
                             + ApproovService.describeOutcome(approovResults) + ", placeholder left");
@@ -1847,30 +1858,35 @@ class ApproovTokenInterceptor implements Interceptor {
                 approovResults = fetchForRequest("Query parameter substitution for " + queryKey, () ->
                         ApproovService.sdk().fetchSecureStringAndWait(queryValue, null));
                 ApproovLog.d(TAG, "Substituting query parameter: " + queryKey + ", " + approovResults.getStatus().toString());
+                // the request proceeds unless the mutator throws, and a decision to substitute with no value is
+                // treated like a decision not to substitute
                 Approov.TokenFetchResult queryResults = approovResults;
-                if (ApproovService.callMutator("handleInterceptorQueryParamSubstitutionResult",
-                        () -> mutator.handleInterceptorQueryParamSubstitutionResult(queryResults, queryKey))) {
-                    String secureString = approovResults.getSecureString();
-                    if (secureString == null) {
-                        // a decision to substitute with no value leaves the placeholder
-                        ApproovLog.d(TAG, "Secure string not substituted in query parameter " + queryKey
-                                + ": no secure string for " + approovResults.getStatus().toString()
-                                + ", placeholder left");
+                boolean substitute = ApproovService.callMutator("handleInterceptorQueryParamSubstitutionResult",
+                        () -> mutator.handleInterceptorQueryParamSubstitutionResult(queryResults, queryKey));
+                String secureString = approovResults.getSecureString();
+                String failureStatus = failureStatusValue(approovResults);
+                if (substitute && (secureString != null)) {
+                    // substitute this occurrence and read it back from the URL as OkHttp stores it, leaving
+                    // the placeholder if OkHttp would not carry the value unchanged; the value is never logged
+                    String candidateURL = new StringBuilder(replacementURL).replace(start, from,
+                            secureString).toString();
+                    if (ApproovService.isCarriedInQuery(candidateURL, pattern, occurrence, secureString)) {
+                        if (!queryKeys.contains(queryKey))
+                            queryKeys.add(queryKey);
+                        replacementURL = candidateURL;
+                        from = start + secureString.length();
                     } else {
-                        // substitute this occurrence and read it back from the URL as OkHttp stores it, leaving
-                        // the placeholder if OkHttp would not carry the value unchanged; the value is never logged
-                        String candidateURL = new StringBuilder(replacementURL).replace(start, from,
-                                secureString).toString();
-                        if (ApproovService.isCarriedInQuery(candidateURL, pattern, occurrence, secureString)) {
-                                if (!queryKeys.contains(queryKey))
-                                queryKeys.add(queryKey);
-                            replacementURL = candidateURL;
-                            from = start + secureString.length();
-                        } else {
-                            ApproovLog.w(TAG, "Secure string not substituted in query parameter " + queryKey
-                                    + ": not carried unchanged in the URL, placeholder left");
-                        }
+                        ApproovLog.w(TAG, "Secure string not substituted in query parameter " + queryKey
+                                + ": not carried unchanged in the URL, placeholder left");
                     }
+                } else if (failureStatus != null) {
+                    // the failure status replaces this occurrence of the placeholder
+                    ApproovLog.d(TAG, "Secure string not substituted in query parameter " + queryKey
+                            + ": secure string fetch " + ApproovService.describeOutcome(approovResults)
+                            + ", status sent in its place");
+                    replacementURL = new StringBuilder(replacementURL).replace(start, from,
+                            failureStatus).toString();
+                    from = start + failureStatus.length();
                 } else {
                     ApproovLog.d(TAG, "Secure string not substituted in query parameter " + queryKey
                             + ": secure string fetch " + ApproovService.describeOutcome(approovResults)
@@ -1906,13 +1922,15 @@ class ApproovTokenInterceptor implements Interceptor {
             setHeader(builder, setStatusHeaderKey, setStatusHeaderValue);
             changes.setStatusHeaderKey(setStatusHeaderKey);
         }
-        if (!setSubstitutionHeaders.isEmpty()) {
-            for (Map.Entry<String, String> entry : setSubstitutionHeaders.entrySet()) {
-                // substitute the header
-                setHeader(builder, entry.getKey(), entry.getValue());
-            }
-            changes.setSubstitutionHeaderKeys(new ArrayList<>(setSubstitutionHeaders.keySet()));
+        // the mutations list only the headers and query parameters given a secure string, while a failure
+        // status written in place of a placeholder is still restored when the protection is stripped
+        for (Map.Entry<String, String> entry : setSubstitutionHeaders.entrySet()) {
+            // substitute the header
+            setHeader(builder, entry.getKey(), entry.getValue());
         }
+        if (!secureStringHeaders.isEmpty())
+            changes.setSubstitutionHeaderKeys(secureStringHeaders);
+        String restoreURL = null;
         if (!originalURL.equals(replacementURL)) {
             try {
                 builder.url(replacementURL);
@@ -1921,7 +1939,9 @@ class ApproovTokenInterceptor implements Interceptor {
                 // cause is kept
                 throw new ApproovException("Query parameter substitution for " + queryKeys + ": invalid URL");
             }
-            changes.setSubstitutionQueryParamResults(originalURL, queryKeys);
+            restoreURL = originalURL;
+            if (!queryKeys.isEmpty())
+                changes.setSubstitutionQueryParamResults(originalURL, queryKeys);
         }
 
         // tag the request so that the freshness interceptor can determine at the network layer whether the
@@ -1930,12 +1950,13 @@ class ApproovTokenInterceptor implements Interceptor {
         builder.tag(ApproovRequestFreshness.class, freshness);
         request = builder.build();
 
-        // record the substituted values as they are actually stored on the request (OkHttp trims header
-        // values when they are set) so that stripping can recognise a header it installed
+        // record the substituted values, secure strings and failure statuses, as they are actually stored on
+        // the request (OkHttp trims header values when they are set) so that stripping can recognise a header
+        // it installed, and the URL before any query parameter was replaced
         Map<String, String> installedHeaderValues = new LinkedHashMap<>(setSubstitutionHeaders.size());
         for (String header : setSubstitutionHeaders.keySet())
             installedHeaderValues.put(header, request.header(header));
-        freshness.setSubstitutions(originalHeaderValues, installedHeaderValues);
+        freshness.setSubstitutions(originalHeaderValues, installedHeaderValues, restoreURL);
         freshness.freezeChanges();
 
         // call the processed request callback, unless protection is being reapplied under a mutator whose
@@ -1980,6 +2001,20 @@ class ApproovTokenInterceptor implements Interceptor {
         freshness.setAppliedMethod(processedRequest.method());
 
         return processedRequest;
+    }
+
+    /**
+     * Gets the value written in place of a placeholder whose secure string fetch failed while the request
+     * continues, which is the status as the status header reports it, such as "unknown_key". SUCCESS has
+     * none, as it substitutes the secure string.
+     *
+     * @param approovResults is the secure string fetch result
+     * @return the status to write in place of the placeholder, or null for SUCCESS
+     */
+    private static String failureStatusValue(Approov.TokenFetchResult approovResults) {
+        if (approovResults.getStatus() == Approov.TokenFetchStatus.SUCCESS)
+            return null;
+        return ApproovService.buildStatusHeaderValue(approovResults);
     }
 
     /**
@@ -2172,7 +2207,8 @@ class ApproovTokenInterceptor implements Interceptor {
     /**
      * Removes the Approov protection described by a freshness marker from a request: the token, trace and
      * status headers, the headers added by the processed request callback, the marker itself, and the
-     * secure string substitutions, whose placeholder values are restored. A substituted header is only
+     * secure string substitutions and failure statuses written in place of placeholders, whose placeholder
+     * values are restored. A substituted header is only
      * restored if it still holds the value this layer installed, so a value the app changed afterwards (such
      * as from an OkHttp authenticator) is left in place. The URL is only restored if the request was not
      * redirected, since a redirect target is the URL of the server.
@@ -2207,8 +2243,8 @@ class ApproovTokenInterceptor implements Interceptor {
         }
 
         // restore the URL if required and remove the marker
-        if (restoreURL && (changes.getOriginalURL() != null))
-            builder.url(changes.getOriginalURL());
+        if (restoreURL && (freshness.getOriginalURL() != null))
+            builder.url(freshness.getOriginalURL());
         builder.tag(ApproovRequestFreshness.class, null);
         return builder.build();
     }

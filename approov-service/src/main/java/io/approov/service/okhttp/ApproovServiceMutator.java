@@ -34,8 +34,8 @@ import java.util.regex.Matcher;
  * aborts a request on a token fetch failure other than NO_APPROOV_SERVICE. ALWAYS_PROCEED never aborts a
  * request and reports the token fetch status on the status header instead, leaving the backend to decide.
  * DEFAULT is the mutator in force until the app installs its own, which is CLOSE_FAILURE. Under both
- * standard mutators a secure string that cannot be obtained never aborts a request, but leaves the
- * placeholder in place. Note that a mutator never enables or disables message signing.
+ * standard mutators a secure string that cannot be obtained never aborts a request, and the placeholder is
+ * replaced by the fetch status. Note that a mutator never enables or disables message signing.
  * <p>
  * An app that wants a request aborted for some further outcome overrides the relevant interceptor hook
  * and throws a standard network stack exception (an IOException such as java.net.ConnectException), not
@@ -49,8 +49,8 @@ public interface ApproovServiceMutator {
      * Decisions that abort a request on a token fetch failure, which are also the interface defaults. A
      * request proceeds on SUCCESS and NO_APPROOV_SERVICE, UNKNOWN_URL and UNPROTECTED_URL get no Approov
      * header, and every other token fetch status throws an ApproovException subclass. A secure string is
-     * substituted on SUCCESS, while any other secure string status leaves the placeholder and the request
-     * proceeds.
+     * substituted on SUCCESS, while any other secure string status is written in place of the placeholder
+     * and the request proceeds.
      */
     public static final ApproovServiceMutator CLOSE_FAILURE = new ApproovServiceMutator() {
         @Override
@@ -69,7 +69,7 @@ public interface ApproovServiceMutator {
     /**
      * Decisions that never abort a request. Every token fetch status except UNKNOWN_URL and UNPROTECTED_URL
      * proceeds with the status header (and, on SUCCESS, the token and trace headers), and a secure string
-     * is only substituted on SUCCESS, the placeholder being left in place otherwise.
+     * is only substituted on SUCCESS, any other status being written in place of the placeholder.
      */
     public static final ApproovServiceMutator ALWAYS_PROCEED = new ApproovServiceMutator() {
         @Override
@@ -318,11 +318,14 @@ public interface ApproovServiceMutator {
      * Approov.fetchSecureStringAndWait which passed in the current header value (minus a prefix) as the
      * key. This method is called once per header being processed for substitution, and only for a request
      * to a token-protected or secrets-only API over https. The default substitutes the header on SUCCESS
-     * and leaves it unchanged on any other status, with the request proceeding.
+     * and skips it on any other status, with the request proceeding. When the request proceeds without a
+     * secure string, the fetch status in lowercase (as on the status header) replaces the placeholder after
+     * any required prefix, such as "Bearer rejected" or "Bearer unknown_key".
      *
      * @param approovResults is the TokenFetchResult from Approov
      * @param header is the header being substituted
-     * @return true if substitution should proceed, false if it should be skipped
+     * @return true if substitution should proceed, false if it should be skipped, which is the same as true
+     * when there is no secure string
      * @throws IOException if an overriding implementation aborts the request with a standard network stack
      * exception, which the default never does
      */
@@ -337,11 +340,14 @@ public interface ApproovServiceMutator {
      * Approov.fetchSecureStringAndWait which passed in the query value of a matching query key. This method
      * is called once for each matched query parameter being processed for substitution, and only for a
      * request to a token-protected or secrets-only API over https. The default substitutes the query
-     * parameter on SUCCESS and leaves the placeholder on any other status, with the request proceeding.
+     * parameter on SUCCESS and skips it on any other status, with the request proceeding. When the request
+     * proceeds without a secure string, the fetch status in lowercase (as on the status header) replaces the
+     * placeholder, such as "rejected" or "unknown_key".
      *
      * @param approovResults is the TokenFetchResult from Approov
      * @param queryKey is the query parameter key being substituted
-     * @return true if substitution should proceed, false if it should be skipped
+     * @return true if substitution should proceed, false if it should be skipped, which is the same as true
+     * when there is no secure string
      * @throws IOException if an overriding implementation aborts the request with a standard network stack
      * exception, which the default never does
      */
@@ -351,13 +357,13 @@ public interface ApproovServiceMutator {
     }
 
     /**
-     * Decides a secure string substitution for both standard mutators, substituting on SUCCESS and leaving
-     * the placeholder for any other status. It never throws, as a standard mutator never aborts a request
-     * because of a secure string, and the placeholder reaching the backend is the evidence.
+     * Decides a secure string substitution for both standard mutators, substituting on SUCCESS and skipping
+     * it for any other status. It never throws, as a standard mutator never aborts a request because of a
+     * secure string, and the status written in place of the placeholder is the evidence for the backend.
      *
      * @param approovResults is the secure string fetch result
      * @param what is the substitution being decided, which does not affect the decision
-     * @return true to substitute, false to leave the placeholder
+     * @return true to substitute, false to skip the substitution
      */
     static boolean closeFailureSubstitution(Approov.TokenFetchResult approovResults, String what) {
         return approovResults.getStatus() == Approov.TokenFetchStatus.SUCCESS;

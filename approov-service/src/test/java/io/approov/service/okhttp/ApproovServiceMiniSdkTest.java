@@ -26,6 +26,7 @@ import java.security.MessageDigest;
 import java.util.ArrayList;
 import java.util.Base64;
 import java.util.List;
+import java.util.Locale;
 import java.util.Map;
 import java.util.UUID;
 import com.criticalblue.approovsdk.Approov;
@@ -458,13 +459,12 @@ public class ApproovServiceMiniSdkTest {
 
     /**
      * T37-07 / M37-08: a secure string failure after a successful token fetch
-     * proceeds instead of throwing. The header keeps its placeholder value, the
-     * token is still sent, and the status header still reports the token fetch
-     * ("success"): substitution failures are not reported, the placeholder is the
-     * evidence.
+     * proceeds instead of throwing. The header carries the secure string fetch
+     * status in place of its placeholder (decided 2026-10-08), the token is still
+     * sent, and the status header still reports the token fetch ("success").
      */
     @Test
-    public void testSecureStringHeaderRejectionProceedsWithPlaceholder() throws Exception {
+    public void testSecureStringHeaderRejectionProceedsWithStatus() throws Exception {
         String targetHost = getTargetHost();
         reinitializeService(scenarioJson(uniqueCaseName("subst-rejected"),
             "\"protectedDomains\": [\"" + targetHost + "\"]," +
@@ -483,17 +483,18 @@ public class ApproovServiceMiniSdkTest {
             String token = getHeader(reply, "Approov-Token");
             assertNotNull(token);
             assertFalse(token.isEmpty());
-            assertEquals("header-key", getHeader(reply, "Api-Key"));
+            assertEquals("rejected", getHeader(reply, "Api-Key"));
             assertEquals("success", getHeader(reply, "Approov-Status"));
         }
     }
 
     /**
-     * T37-07: a secure string query parameter failure proceeds with the placeholder
-     * left in the URL, and an unknown key is treated the same way.
+     * T37-07: a secure string query parameter failure proceeds with the fetch
+     * status in place of the placeholder (decided 2026-10-08), and an unknown key
+     * is treated the same way.
      */
     @Test
-    public void testSecureStringQueryFailureProceedsWithPlaceholder() throws Exception {
+    public void testSecureStringQueryFailureProceedsWithStatus() throws Exception {
         String targetHost = getTargetHost();
         reinitializeService(scenarioJson(uniqueCaseName("query-failed"),
             "\"protectedDomains\": [\"" + targetHost + "\"]," +
@@ -508,7 +509,7 @@ public class ApproovServiceMiniSdkTest {
         try (Response response = client.newCall(request).execute()) {
             assertEquals(200, response.code());
             JSONObject reply = new JSONObject(response.body().string());
-            assertTrue(reply.getString("url").contains("api_key=query-key"));
+            assertTrue(reply.getString("url"), reply.getString("url").contains("api_key=no_approov_service"));
             assertEquals("success", getHeader(reply, "Approov-Status"));
             String token = getHeader(reply, "Approov-Token");
             assertNotNull(token);
@@ -519,7 +520,7 @@ public class ApproovServiceMiniSdkTest {
         try (Response response = client.newCall(unknown).execute()) {
             assertEquals(200, response.code());
             JSONObject reply = new JSONObject(response.body().string());
-            assertTrue(reply.getString("url").contains("api_key=not-a-secure-string"));
+            assertTrue(reply.getString("url"), reply.getString("url").contains("api_key=unknown_key"));
             assertEquals("success", getHeader(reply, "Approov-Status"));
         }
     }
@@ -527,11 +528,11 @@ public class ApproovServiceMiniSdkTest {
     /**
      * TR 3: a custom mutator may decide to substitute for a non-SUCCESS secure
      * string result, which carries no secure string. A substitute decision with no
-     * value leaves the header placeholder untouched (never the literal "null"
-     * after the prefix) and the request proceeds, as in approov-service-android.
+     * value is treated like a decision not to substitute: the fetch status follows
+     * the prefix (never the literal "null") and the request proceeds.
      */
     @Test
-    public void testHeaderSubstituteDecisionWithNoValueKeepsPlaceholder() throws Exception {
+    public void testHeaderSubstituteDecisionWithNoValueCarriesStatus() throws Exception {
         String targetHost = getTargetHost();
         reinitializeService(scenarioJson(uniqueCaseName("subst-header-no-value"),
             "\"protectedDomains\": [\"" + targetHost + "\"]," +
@@ -557,7 +558,7 @@ public class ApproovServiceMiniSdkTest {
         try (Response response = client.newCall(request).execute()) {
             assertEquals(200, response.code());
             JSONObject reply = new JSONObject(response.body().string());
-            assertEquals("Key header-key", getHeader(reply, "Api-Key"));
+            assertEquals("Key rejected", getHeader(reply, "Api-Key"));
             String token = getHeader(reply, "Approov-Token");
             assertNotNull(token);
             assertFalse(token.isEmpty());
@@ -567,11 +568,11 @@ public class ApproovServiceMiniSdkTest {
 
     /**
      * TR 3: a substitute decision for a query parameter with no secure string
-     * leaves the placeholder in the URL and the request proceeds, rather than
+     * puts the fetch status in the URL and the request proceeds, rather than
      * throwing a NullPointerException out of the interceptor.
      */
     @Test
-    public void testQuerySubstituteDecisionWithNoValueKeepsPlaceholder() throws Exception {
+    public void testQuerySubstituteDecisionWithNoValueCarriesStatus() throws Exception {
         String targetHost = getTargetHost();
         reinitializeService(scenarioJson(uniqueCaseName("subst-query-no-value"),
             "\"protectedDomains\": [\"" + targetHost + "\"]," +
@@ -596,7 +597,7 @@ public class ApproovServiceMiniSdkTest {
         try (Response response = client.newCall(request).execute()) {
             assertEquals(200, response.code());
             JSONObject reply = new JSONObject(response.body().string());
-            assertTrue(reply.getString("url").contains("api_key=query-key"));
+            assertTrue(reply.getString("url"), reply.getString("url").contains("api_key=rejected"));
             assertFalse(reply.getString("url").contains("api_key=null"));
             String token = getHeader(reply, "Approov-Token");
             assertNotNull(token);
@@ -1065,10 +1066,10 @@ public class ApproovServiceMiniSdkTest {
     /**
      * Every CLOSE_FAILURE substitution decision, for headers and query parameters,
      * under CLOSE_FAILURE and under DEFAULT (setServiceMutator(null)). SUCCESS
-     * substitutes; every other secure string status leaves the placeholder and the
-     * request proceeds with the token and a "success" status header (decided
-     * 2026-10-07: a standard mutator never aborts a request because of a secure
-     * string; until then the network statuses and the remaining failures threw).
+     * substitutes; every other secure string status is written in place of the
+     * placeholder (decided 2026-10-08) and the request
+     * proceeds with the token and a "success" status header (decided 2026-10-07: a
+     * standard mutator never aborts a request because of a secure string).
      */
     @Test
     public void testCloseFailureSubstitutionDecisions() throws Exception {
@@ -1093,22 +1094,23 @@ public class ApproovServiceMiniSdkTest {
             reply = send(client, query);
             assertTrue(reply.getString("url"), reply.getString("url").contains("api_key=the-secret"));
 
-            // a value that is not a secure string key is left in place
+            // a value that is not a secure string key is replaced by unknown_key
             reply = send(client, new Request.Builder().url(getTargetURL()).header("Api-Key", "not-a-key").build());
-            assertEquals("not-a-key", getHeader(reply, "Api-Key"));
+            assertEquals("unknown_key", getHeader(reply, "Api-Key"));
             assertFalse(getHeader(reply, "Approov-Token").isEmpty());
             reply = send(client, new Request.Builder().url(getTargetURL() + "?api_key=not-a-key").build());
-            assertTrue(reply.getString("url"), reply.getString("url").contains("api_key=not-a-key"));
+            assertTrue(reply.getString("url"), reply.getString("url").contains("api_key=unknown_key"));
 
             for (String status : new String[] {"UNKNOWN_KEY", "REJECTED", "NO_APPROOV_SERVICE"}) {
+                String expected = status.toLowerCase(Locale.ROOT);
                 setDirective("{\"operation\": \"fetchSecureString\", \"response\": {\"status\": \"" + status + "\"}}");
                 reply = send(client, header);
-                assertEquals(status + " keeps the placeholder", "the-key", getHeader(reply, "Api-Key"));
+                assertEquals(status + " in place of the placeholder", expected, getHeader(reply, "Api-Key"));
                 assertFalse(status + " still carries the token", getHeader(reply, "Approov-Token").isEmpty());
                 assertEquals(status, "success", getHeader(reply, "Approov-Status"));
                 setDirective("{\"operation\": \"fetchSecureString\", \"response\": {\"status\": \"" + status + "\"}}");
                 reply = send(client, query);
-                assertTrue(status + ": " + reply.getString("url"), reply.getString("url").contains("api_key=the-key"));
+                assertTrue(status + ": " + reply.getString("url"), reply.getString("url").contains("api_key=" + expected));
                 assertFalse(status + " still carries the token", getHeader(reply, "Approov-Token").isEmpty());
                 assertEquals(status, "success", getHeader(reply, "Approov-Status"));
             }
@@ -1116,13 +1118,14 @@ public class ApproovServiceMiniSdkTest {
             for (String status : new String[] {"NO_NETWORK", "POOR_NETWORK", "UNTRUSTED_NETWORK",
                     "INTERNAL_ERROR", "BAD_URL", "DISABLED"}) {
                 int before = attempts.get();
+                String expected = status.toLowerCase(Locale.ROOT);
                 setDirective("{\"operation\": \"fetchSecureString\", \"response\": {\"status\": \"" + status + "\"}}");
                 reply = send(client, header);
-                assertEquals(status + " keeps the placeholder", "the-key", getHeader(reply, "Api-Key"));
+                assertEquals(status + " in place of the placeholder", expected, getHeader(reply, "Api-Key"));
                 assertEquals(status, "success", getHeader(reply, "Approov-Status"));
                 setDirective("{\"operation\": \"fetchSecureString\", \"response\": {\"status\": \"" + status + "\"}}");
                 reply = send(client, query);
-                assertTrue(status + ": " + reply.getString("url"), reply.getString("url").contains("api_key=the-key"));
+                assertTrue(status + ": " + reply.getString("url"), reply.getString("url").contains("api_key=" + expected));
                 assertEquals(status + " proceeds", before + 2, attempts.get());
             }
         }
@@ -1130,8 +1133,8 @@ public class ApproovServiceMiniSdkTest {
 
     /**
      * T37-01, T37-02, T37-07: ALWAYS_PROCEED aborts for no status. A failed secure
-     * string substitution of any status leaves the placeholder, the request goes
-     * out with the token, and the status header reports the token fetch.
+     * string substitution puts its status in place of the placeholder, the request
+     * goes out with the token, and the status header reports the token fetch.
      */
     @Test
     public void testAlwaysProceedNeverAbortsASubstitution() throws Exception {
@@ -1147,13 +1150,14 @@ public class ApproovServiceMiniSdkTest {
         for (String status : new String[] {"REJECTED", "NO_NETWORK", "POOR_NETWORK", "UNTRUSTED_NETWORK",
                 "NO_APPROOV_SERVICE", "INTERNAL_ERROR", "UNKNOWN_KEY"}) {
             setDirective("{\"operation\": \"fetchSecureString\", \"response\": {\"status\": \"" + status + "\"}}");
+            String expected = status.toLowerCase(Locale.ROOT);
             JSONObject reply = send(client, new Request.Builder().url(getTargetURL()).header("Api-Key", "the-key").build());
-            assertEquals(status, "the-key", getHeader(reply, "Api-Key"));
+            assertEquals(status, expected, getHeader(reply, "Api-Key"));
             assertFalse(status, getHeader(reply, "Approov-Token").isEmpty());
             assertEquals(status, "success", getHeader(reply, "Approov-Status"));
             setDirective("{\"operation\": \"fetchSecureString\", \"response\": {\"status\": \"" + status + "\"}}");
             reply = send(client, new Request.Builder().url(getTargetURL() + "?api_key=the-key").build());
-            assertTrue(status, reply.getString("url").contains("api_key=the-key"));
+            assertTrue(status, reply.getString("url").contains("api_key=" + expected));
         }
     }
 

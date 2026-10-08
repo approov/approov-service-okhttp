@@ -139,7 +139,8 @@ public class ApproovRequestMutations {
     }
 
     /**
-     * Gets the list of headers that were substituted with secure strings.
+     * Gets the list of headers that were substituted with secure strings. A header whose secure string
+     * fetch failed, carrying the fetch status in place of its placeholder, is not listed.
      *
      * @return the list of substituted header keys
      */
@@ -157,16 +158,18 @@ public class ApproovRequestMutations {
     }
 
     /**
-     * Gets the original URL before any query parameter substitutions.
+     * Gets the original URL before any query parameter substitutions, if a query parameter was substituted
+     * with a secure string.
      *
-     * @return the original URL
+     * @return the original URL, or null if no query parameter was substituted with a secure string
      */
     public String getOriginalURL() {
         return originalURL;
     }
 
     /**
-     * Gets the list of query parameter keys that were substituted with secure strings.
+     * Gets the list of query parameter keys that were substituted with secure strings. A query parameter
+     * whose secure string fetch failed, carrying the fetch status in place of its placeholder, is not listed.
      *
      * @return the list of substituted query parameter keys
      */
