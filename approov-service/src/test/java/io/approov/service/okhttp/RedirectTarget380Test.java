@@ -33,7 +33,10 @@ import org.robolectric.annotation.Config;
 import java.util.concurrent.TimeUnit;
 
 import okhttp3.HttpUrl;
+import okhttp3.Interceptor;
+import okhttp3.MediaType;
 import okhttp3.Request;
+import okhttp3.RequestBody;
 import okhttp3.Response;
 import okhttp3.mockwebserver.MockResponse;
 import okhttp3.mockwebserver.RecordedRequest;
@@ -47,7 +50,9 @@ import okhttp3.mockwebserver.RecordedRequest;
  * first host's, secure strings only for a protected https target, signatures for
  * the new request; an unprotected target gets nothing. The target URL itself is
  * left exactly as the server sent it, including a secret the server echoed into it:
- * an echo is the server's responsibility and the layer does not restore it.
+ * an echo is the server's responsibility and the layer does not restore it. Its
+ * query values are never looked up, even under a substitution query parameter, so
+ * only the app's own placeholders are substituted for a protected target.
  */
 @RunWith(RobolectricTestRunner.class)
 @Config(manifest = Config.NONE)
@@ -156,12 +161,74 @@ public class RedirectTarget380Test {
         assertTrue("a token is fetched for the target URL: " + sdk.snapshot(),
                 sdk.snapshot().contains("fetchApproovTokenAndWait:" + target));
         assertEquals("a protected https target gets the secure string afresh", SECRET, second.getHeader("Api-Key"));
-        assertEquals("a protected https target gets the secure string afresh", SECRET,
+        assertEquals("the target query is the server's and is never substituted", PLACEHOLDER,
                 second.getRequestUrl().queryParameter("key"));
         assertNull("Authorization is not carried to another origin", second.getHeader("Authorization"));
         String signatureInput = second.getHeader("Signature-Input");
         assertNotNull("the target request is signed afresh", signatureInput);
         assertTrue("the signature covers the target request: " + signatureInput,
                 !signatureInput.equals(first.getHeader("Signature-Input")));
+    }
+
+    @Test
+    public void aRedirectTargetQueryIsNeverLookedUpEvenUnderASubstitutionParameter() throws Exception {
+        start(true);
+        // the server puts in the Location a value that is not a secure string key and one that is
+        HttpUrl target = fixture.otherUrl("/other").newBuilder()
+                .addQueryParameter("key", "server-value")
+                .addQueryParameter("x", "1")
+                .addQueryParameter("key", PLACEHOLDER).build();
+        fixture.protectedServer.enqueue(new MockResponse().setResponseCode(302).setHeader("Location", target));
+        fixture.otherServer.enqueue(new MockResponse().setBody("ok"));
+
+        try (Response response = ApproovService.getOkHttpClient().newCall(firstRequest()).execute()) {
+            assertEquals(200, response.code());
+            assertEquals("the target URL is the server's", target, response.request().url());
+        }
+
+        RecordedRequest first = fixture.protectedServer.takeRequest(5, TimeUnit.SECONDS);
+        assertEquals("control: the first hop is substituted", SECRET, first.getRequestUrl().queryParameter("key"));
+
+        RecordedRequest second = fixture.otherServer.takeRequest(5, TimeUnit.SECONDS);
+        assertEquals("the target query is sent exactly as the server sent it",
+                target.encodedPath() + "?" + target.encodedQuery(), second.getPath());
+        assertEquals("the target carries its own token", TARGET_TOKEN, second.getHeader("Approov-Token"));
+        assertEquals("the app's header placeholder is substituted for the target", SECRET,
+                second.getHeader("Api-Key"));
+        assertTrue("no secure string is fetched for a value the server sent: " + sdk.snapshot(),
+                !sdk.snapshot().contains("fetchSecureStringAndWait:server-value"));
+    }
+
+    @Test
+    public void aSameUrlRedirectSubstitutesTheAppQueryPlaceholderAgain() throws Exception {
+        start(true);
+        // a 303 back to the URL the request was sent to, as the server received it, turns it into a GET of the
+        // app's own URL, so its query placeholder is restored and substituted again
+        HttpUrl[] sent = new HttpUrl[1];
+        Interceptor redirectToSelf = chain -> {
+            Response response = chain.proceed(chain.request());
+            if (sent[0] != null)
+                return response;
+            sent[0] = chain.request().url();
+            return response.newBuilder().code(303).message("See Other").header("Location", sent[0].toString()).build();
+        };
+        ApproovService.setOkHttpClientBuilder(fixture.trustingBuilder().addNetworkInterceptor(redirectToSelf));
+        fixture.protectedServer.enqueue(new MockResponse().setBody("first"));
+        fixture.protectedServer.enqueue(new MockResponse().setBody("ok"));
+        Request post = firstRequest().newBuilder().post(RequestBody.create("{}", MediaType.parse("application/json")))
+                .build();
+
+        try (Response response = ApproovService.getOkHttpClient().newCall(post).execute()) {
+            assertEquals(200, response.code());
+        }
+
+        fixture.protectedServer.takeRequest(5, TimeUnit.SECONDS);
+        RecordedRequest second = fixture.protectedServer.takeRequest(5, TimeUnit.SECONDS);
+        assertEquals("GET", second.getMethod());
+        assertEquals("the app's query placeholder is substituted again", SECRET,
+                second.getRequestUrl().queryParameter("key"));
+        assertEquals("the app's header placeholder is substituted again", SECRET, second.getHeader("Api-Key"));
+        assertEquals("secure strings fetched for each attempt: " + sdk.snapshot(), 4,
+                sdk.count("fetchSecureStringAndWait"));
     }
 }

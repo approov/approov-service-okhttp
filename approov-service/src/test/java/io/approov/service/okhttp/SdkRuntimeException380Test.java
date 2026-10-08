@@ -301,7 +301,7 @@ public class SdkRuntimeException380Test {
         // refreshed at the network layer by the freshness interceptor
         for (Supplier<RuntimeException> failure : FAILURES) {
             Request protectedRequest = ApproovTokenInterceptor.applyProtection(get("/p"),
-                    ApproovService.getServiceMutator(), null, true);
+                    ApproovService.getServiceMutator(), null, true, true);
             assertNotNull(protectedRequest.tag(ApproovRequestFreshness.class));
             // the request is held well beyond the refresh period
             org.robolectric.shadows.ShadowSystemClock.advanceBy(java.time.Duration.ofSeconds(60));

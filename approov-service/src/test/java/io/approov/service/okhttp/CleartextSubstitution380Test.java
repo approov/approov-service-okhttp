@@ -126,11 +126,17 @@ public class CleartextSubstitution380Test {
         assertEquals("/steal", second.getRequestUrl().encodedPath());
         assertEquals("secret sent in cleartext", PLACEHOLDER, second.getHeader("Api-Key"));
         assertEquals("secret sent in cleartext", PLACEHOLDER, second.getRequestUrl().queryParameter("key"));
-        assertWarned();
+        // the query of the redirect target is the server's, so it holds no placeholder to warn about
+        assertWarned(false);
     }
 
     // a warning names the header and the parameter, never the value
     private void assertWarned() {
+        assertWarned(true);
+    }
+
+    // a warning names the header and, if the query is the app's own, the parameter, never the value
+    private void assertWarned(boolean appQuery) {
         boolean header = false;
         boolean query = false;
         for (ShadowLog.LogItem item : ShadowLog.getLogs()) {
@@ -142,6 +148,6 @@ public class CleartextSubstitution380Test {
             }
         }
         assertTrue("no warning naming the header", header);
-        assertTrue("no warning naming the query parameter", query);
+        assertEquals("a warning naming the query parameter", appQuery, query);
     }
 }

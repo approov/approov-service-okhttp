@@ -52,6 +52,7 @@ import okhttp3.mockwebserver.RecordedRequest;
  * lets proceed carries the status header only. A redirect to another origin is
  * stripped and then classified for its target: a secrets-only target gets its
  * secure strings and nothing else, a target not added to Approov gets nothing.
+ * The query of a redirect target is the server's and is never substituted.
  */
 @RunWith(RobolectricTestRunner.class)
 @Config(manifest = Config.NONE)
@@ -114,10 +115,16 @@ public class ChannelReapply380Test {
     }
 
     private static void assertSecretsOnly(String what, RecordedRequest recorded) {
+        assertSecretsOnly(what, recorded, SECRET);
+    }
+
+    // a secrets-only request carrying the secret in the header and the expected query value, which is the
+    // server's own on a redirect target
+    private static void assertSecretsOnly(String what, RecordedRequest recorded, String query) {
         assertNotNull(what + ": not delivered", recorded);
         LocalHttpsFixture.assertNoApproovHeaders(recorded);
         assertEquals(what + ": secret in the header", SECRET, recorded.getHeader("Api-Key"));
-        assertEquals(what + ": secret in the query", SECRET, recorded.getRequestUrl().queryParameter("key"));
+        assertEquals(what + ": query", query, recorded.getRequestUrl().queryParameter("key"));
     }
 
     // ---------------------------------------------------------------------------
@@ -203,7 +210,8 @@ public class ChannelReapply380Test {
         RecordedRequest first = fixture.protectedServer.takeRequest(5, TimeUnit.SECONDS);
         assertEquals("control: the first hop is token-protected", "success", first.getHeader("Approov-Status"));
         RecordedRequest second = fixture.otherServer.takeRequest(5, TimeUnit.SECONDS);
-        assertSecretsOnly("secrets-only redirect target", second);
+        // the target query is the server's, so it is never looked up, even under a substitution parameter
+        assertSecretsOnly("secrets-only redirect target", second, PLACEHOLDER);
         assertNull("Authorization is not carried to another origin", second.getHeader("Authorization"));
     }
 
@@ -238,7 +246,7 @@ public class ChannelReapply380Test {
         assertSecretsOnly("first hop", fixture.protectedServer.takeRequest(5, TimeUnit.SECONDS));
         RecordedRequest second = fixture.protectedServer.takeRequest(5, TimeUnit.SECONDS);
         assertEquals("/next", second.getRequestUrl().encodedPath());
-        assertSecretsOnly("same-origin redirect", second);
+        assertSecretsOnly("same-origin redirect, the target query the server's", second, PLACEHOLDER);
         assertEquals("Authorization stays on the same origin", "Bearer app-credential",
                 second.getHeader("Authorization"));
     }

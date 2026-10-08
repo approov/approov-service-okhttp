@@ -1656,7 +1656,7 @@ class ApproovTokenInterceptor implements Interceptor {
         // not changed mid-flight
         ApproovServiceMutator mutator = ApproovService.getServiceMutator();
         ApproovDefaultMessageSigning signing = ApproovService.getActiveMessageSigning();
-        return chain.proceed(applyProtection(chain.request(), mutator, signing, true));
+        return chain.proceed(applyProtection(chain.request(), mutator, signing, true, true));
     }
 
     /**
@@ -1667,17 +1667,20 @@ class ApproovTokenInterceptor implements Interceptor {
      * secure string that cannot be fetched has its status written in place of its placeholder. The
      * returned request carries an ApproovRequestFreshness marker describing the protection applied, so
      * that the network layer can strip and reapply it. A request that is not processed is returned
-     * unchanged with no marker.
+     * unchanged with no marker. The query of a redirect target is the server's, so its values are never
+     * looked up as secure string keys, even under a substitution query parameter.
      *
      * @param request is the request to protect, carrying no Approov protection
      * @param mutator is the service mutator to consult
      * @param signing is the message signing to apply, or null if message signing is disabled
      * @param invokeProcessed is true if the processed request callback of the mutator may be invoked
+     * @param appQuery is true if the query of the request URL is the app's own, false if it is a redirect
+     * target the server sent
      * @return the protected request
      * @throws IOException if the request is to be aborted
      */
     static Request applyProtection(Request request, ApproovServiceMutator mutator,
-            ApproovDefaultMessageSigning signing, boolean invokeProcessed) throws IOException {
+            ApproovDefaultMessageSigning signing, boolean invokeProcessed, boolean appQuery) throws IOException {
         // first check if we are to proceed with any Approov processing
         Request unprotected = request;
         if (!ApproovService.callMutator("handleInterceptorShouldProcessRequest",
@@ -1718,20 +1721,20 @@ class ApproovTokenInterceptor implements Interceptor {
                     () -> mutator.handleInterceptorFetchTokenResult(tokenResults, url.toString()), true);
             ApproovLog.d(TAG, "Proceeding untouched for " + ApproovLog.loggableURL(url)
                     + ", not in the Approov pin set: token fetch " + ApproovService.describeOutcome(approovResults));
-            logUndeliveredPlaceholders(request, undelivered, isConfigurationReason(url, tokenStatus));
+            logUndeliveredPlaceholders(request, undelivered, isConfigurationReason(url, tokenStatus), appQuery);
             return request;
         }
         boolean proceedWithHeaders = ApproovService.callMutator("handleInterceptorFetchTokenResult",
                 () -> mutator.handleInterceptorFetchTokenResult(tokenResults, url.toString()));
         if (tokenStatus == Approov.TokenFetchStatus.UNKNOWN_URL) {
             // a host not added to Approov has nothing added or substituted, whatever the mutator decided
-            logUndeliveredPlaceholders(request, undelivered, isConfigurationReason(url, tokenStatus));
+            logUndeliveredPlaceholders(request, undelivered, isConfigurationReason(url, tokenStatus), appQuery);
             return request;
         }
         if (failure && !proceedWithHeaders) {
             // the mutator decided to send the request untouched on a failure status, so it also carries
             // no secure strings
-            logUndeliveredPlaceholders(request, undelivered, isConfigurationReason(url, tokenStatus));
+            logUndeliveredPlaceholders(request, undelivered, isConfigurationReason(url, tokenStatus), appQuery);
             return request;
         }
         if (failure)
@@ -1827,10 +1830,12 @@ class ApproovTokenInterceptor implements Interceptor {
         }
 
         // we now deal with any query parameter substitutions, which may require further fetches but these
-        // should be using cached results
+        // should be using cached results; the query of a redirect target is the server's, so none of its
+        // values is looked up or replaced, whatever its parameter names
         String originalURL = request.url().toString();
         String replacementURL = originalURL;
-        Map<String, Pattern> substitutionQueryParams = ApproovService.getSubstitutionQueryParams();
+        Map<String, Pattern> substitutionQueryParams = appQuery ? ApproovService.getSubstitutionQueryParams()
+                : Collections.<String, Pattern>emptyMap();
         List<String> queryKeys = new ArrayList<>(substitutionQueryParams.size());
         for (Map.Entry<String, Pattern> entry : substitutionQueryParams.entrySet()) {
             String queryKey = entry.getKey();
@@ -2066,8 +2071,10 @@ class ApproovTokenInterceptor implements Interceptor {
      * @param request is the request carrying any placeholders
      * @param reason is why no secure string is delivered, or null if they are
      * @param warn is true if the reason is a configuration problem
+     * @param appQuery is true if the query of the request URL is the app's own, false if it is a redirect
+     * target the server sent, whose query parameters are not placeholders
      */
-    private static void logUndeliveredPlaceholders(Request request, String reason, boolean warn) {
+    private static void logUndeliveredPlaceholders(Request request, String reason, boolean warn, boolean appQuery) {
         if ((reason == null) || !ApproovLog.isEnabled(warn ? ApproovLogLevel.WARNING : ApproovLogLevel.DEBUG))
             return;
 
@@ -2079,10 +2086,10 @@ class ApproovTokenInterceptor implements Interceptor {
                         + ", placeholder left");
         }
 
-        // log the substitution query parameters found in the query, after the first '?' and before any '#'
+        // log the substitution query parameters found in the app's query, after the first '?' and before any '#'
         String url = request.url().toString();
         int from = url.indexOf('?');
-        if (from < 0)
+        if (!appQuery || (from < 0))
             return;
         int hash = url.indexOf('#', from);
         for (Map.Entry<String, Pattern> entry : ApproovService.getSubstitutionQueryParams().entrySet()) {
@@ -2334,10 +2341,13 @@ class ApproovFreshnessInterceptor implements Interceptor {
         }
 
         // strip the protection described by the marker and apply it afresh for the current URL, restoring the
-        // URL before substitution unless the request was redirected; the original request keeps its own
-        // marker so that a retry of it by OkHttp is refreshed again rather than sent with stale headers
+        // URL before substitution unless the request was redirected; a redirect target URL is the server's,
+        // so only the app's own query placeholders, restored on the URL protection was applied to, are
+        // substituted; the original request keeps its own marker so that a retry of it by OkHttp is refreshed
+        // again rather than sent with stale headers
         Request stripped = ApproovTokenInterceptor.stripProtection(request, freshness, !urlChanged);
-        Request refreshed = ApproovTokenInterceptor.applyProtection(stripped, mutator, signing, invokeProcessed);
+        Request refreshed = ApproovTokenInterceptor.applyProtection(stripped, mutator, signing, invokeProcessed,
+                !urlChanged);
         // the refreshed request is already at the network layer, so its header baseline is what it carries now
         ApproovRequestFreshness refreshedMarker = refreshed.tag(ApproovRequestFreshness.class);
         if (refreshedMarker != null)
