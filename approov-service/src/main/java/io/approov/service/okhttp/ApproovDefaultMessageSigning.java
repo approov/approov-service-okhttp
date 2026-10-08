@@ -179,7 +179,7 @@ public class ApproovDefaultMessageSigning {
      * @throws ApproovException if a signature algorithm is unsupported
      */
     private Request signOrFail(Request request, ApproovRequestMutations changes) throws ApproovException {
-        if (changes == null || changes.getTokenHeaderKey() == null) {
+        if ((changes == null) || (changes.getTokenHeaderKey() == null)) {
             // the request doesn't have an Approov token header, so we don't need to sign it
             return request;
         }
@@ -620,7 +620,7 @@ public class ApproovDefaultMessageSigning {
             // ignore null bodies, one shot bodies, or bodies of unknown length as these will likely require
             // more specific knowledge, while an empty body has a digest like any other
             RequestBody body = provider.request.body();
-            if (body == null || body.isOneShot()) {
+            if ((body == null) || body.isOneShot()) {
                 return false;
             } else {
                 try {
@@ -684,7 +684,7 @@ public class ApproovDefaultMessageSigning {
             // the algorithm is left unset so that one signature per configured algorithm is produced over
             // these same parameters, while a subclass may set an explicit algorithm for a single signature
             SignatureParameters requestParameters = new SignatureParameters(baseParameters);
-            if (addCreated || expiresLifetime > 0) {
+            if (addCreated || (expiresLifetime > 0)) {
                 long currentTime = System.currentTimeMillis() / 1000;
                 if (addCreated) {
                     requestParameters.setCreated(currentTime);
@@ -696,10 +696,10 @@ public class ApproovDefaultMessageSigning {
             if (addApproovTokenHeader) {
                 requestParameters.addComponentIdentifier(changes.getTokenHeaderKey());
             }
-            if (addApproovTraceIDHeader && changes.getTraceIDHeaderKey() != null) {
+            if (addApproovTraceIDHeader && (changes.getTraceIDHeaderKey() != null)) {
                 requestParameters.addComponentIdentifier(changes.getTraceIDHeaderKey());
             }
-            if (addApproovStatusHeader && changes.getStatusHeaderKey() != null) {
+            if (addApproovStatusHeader && (changes.getStatusHeaderKey() != null)) {
                 requestParameters.addComponentIdentifier(changes.getStatusHeaderKey());
             }
             for (String headerName : optionalHeaders) {
@@ -872,16 +872,16 @@ public class ApproovDefaultMessageSigning {
         // decodes application/x-www-form-urlencoded text where + is a space and %XX a byte of UTF-8, keeping
         // a malformed escape as it is
         private static String formDecode(String text) {
-            if (text.indexOf('%') < 0 && text.indexOf('+') < 0)
+            if ((text.indexOf('%') < 0) && (text.indexOf('+') < 0))
                 return text;
             Buffer out = new Buffer();
             for (int i = 0; i < text.length(); ) {
                 int c = text.codePointAt(i);
                 if (c == '+') {
                     out.writeByte(' ');
-                } else if (c == '%' && i + 2 < text.length()
-                        && Character.digit(text.charAt(i + 1), 16) >= 0
-                        && Character.digit(text.charAt(i + 2), 16) >= 0) {
+                } else if ((c == '%') && (i + 2 < text.length())
+                        && (Character.digit(text.charAt(i + 1), 16) >= 0)
+                        && (Character.digit(text.charAt(i + 2), 16) >= 0)) {
                     out.writeByte((Character.digit(text.charAt(i + 1), 16) << 4)
                             | Character.digit(text.charAt(i + 2), 16));
                     i += 3;
@@ -901,8 +901,8 @@ public class ApproovDefaultMessageSigning {
             StringBuilder out = new StringBuilder(bytes.length);
             for (byte b : bytes) {
                 int c = b & 0xff;
-                if ((c >= 'a' && c <= 'z') || (c >= 'A' && c <= 'Z') || (c >= '0' && c <= '9')
-                        || c == '*' || c == '-' || c == '.' || c == '_') {
+                if (((c >= 'a') && (c <= 'z')) || ((c >= 'A') && (c <= 'Z')) || ((c >= '0') && (c <= '9'))
+                        || (c == '*') || (c == '-') || (c == '.') || (c == '_')) {
                     out.append((char) c);
                 } else {
                     out.append('%').append(HEX_DIGITS[c >> 4]).append(HEX_DIGITS[c & 0xf]);
