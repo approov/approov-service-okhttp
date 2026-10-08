@@ -473,7 +473,7 @@ public class ApproovService {
         if (config.isEmpty()) {
             if (approovProtectionEnabled) {
                 // an empty account ID never downgrades active Approov protection and is not passed to the SDK
-                ApproovLog.d(TAG, "Initialization with an empty account ID ignored: Approov protection enabled");
+                ApproovLog.i(TAG, "initialize: empty config ignored, Approov protection already enabled");
             } else {
                 ApproovLog.i(TAG, "ApproovService enabled in bypass mode: Approov protection not active");
                 approovServiceEnabled = true;
@@ -838,7 +838,7 @@ public class ApproovService {
             pins = sdk().getPins("public-key-sha256");
         } catch (RuntimeException e) {
             // a pin set that cannot be read lists no host
-            ApproovLog.d(TAG, "Approov pins could not be read: " + e);
+            ApproovLog.e(TAG, "Approov SDK getPins failed: " + e);
             return false;
         }
         if (pins == null)
@@ -2545,15 +2545,22 @@ class ApproovPinningInterceptor implements Interceptor {
             return chain.proceed(request);
         }
 
-        // the pins may not have been available when this interceptor was constructed (the SDK only holds
-        // pins once a token has been fetched) so build them now if there are still none, or if the last
-        // attempt to read them failed
-        if (isRebuildRequired() || getCertificatePinner().getPins().isEmpty())
-            buildPins();
-
         // the pins are looked up for the normalized host, so that neither a pin key nor a request spelled with
         // a different case or a trailing dot escapes the pins
         String host = normalizeHost(chain.request().url().host());
+
+        // the pins may not have been available when this interceptor was constructed (the SDK only holds
+        // pins once a token has been fetched) so build them now if there are still none, or if the last
+        // attempt to read them failed, failing the connection closed if they cannot be read
+        if (isRebuildRequired() || getCertificatePinner().getPins().isEmpty()) {
+            try {
+                buildPins();
+            } catch (ApproovException e) {
+                Throwable cause = (e.getCause() != null) ? e.getCause() : e;
+                ApproovLog.e(TAG, "Approov pinning: pins unavailable for " + host + ": " + cause);
+                throw new ApproovException("Approov pinning: pins unavailable for " + host, cause);
+            }
+        }
         warnIfOsTrustOnly(host);
         Connection connection = chain.connection();
         Handshake handshake = (connection != null) ? connection.handshake() : null;
@@ -2562,7 +2569,7 @@ class ApproovPinningInterceptor implements Interceptor {
             // reached without TLS, while an unpinned host is left to the app's own policy
             if (getCertificatePinner().findMatchingPins(host).isEmpty())
                 return chain.proceed(chain.request());
-            ApproovLog.d(TAG, "Pinning failure: cleartext connection to pinned host " + host);
+            ApproovLog.w(TAG, "Approov pinning: cleartext connection to pinned host " + host);
             throw new SSLPeerUnverifiedException("Approov pinning: cleartext connection to pinned host " + host);
         }
 
@@ -2573,8 +2580,9 @@ class ApproovPinningInterceptor implements Interceptor {
             getCertificatePinner().check(host, certs);
         } catch (SSLPeerUnverifiedException e) {
             // only this request fails and the connection is not closed, since OkHttp may have coalesced this
-            // host onto the HTTP/2 connection of another host
-            ApproovLog.d(TAG, "Pinning failure: " + e.toString());
+            // host onto the HTTP/2 connection of another host; the OkHttp message quotes the pins, so only the
+            // host is logged
+            ApproovLog.e(TAG, "Approov pinning: no pin matches for " + host);
             throw e;
         }
         return chain.proceed(chain.request());
