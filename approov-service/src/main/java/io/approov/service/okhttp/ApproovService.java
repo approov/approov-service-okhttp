@@ -1683,7 +1683,11 @@ class ApproovTokenInterceptor implements Interceptor {
         // not changed mid-flight
         ApproovServiceMutator mutator = ApproovService.getServiceMutator();
         ApproovDefaultMessageSigning signing = ApproovService.getActiveMessageSigning();
-        return chain.proceed(applyProtection(chain.request(), mutator, signing, true, true));
+
+        // a processed request is tagged so that a response to an attempt carrying a substituted query secure
+        // string is kept out of the app's cache, and the app is given the server's own Cache-Control
+        Request sent = OkHttpCacheBypass.tag(applyProtection(chain.request(), mutator, signing, true, true));
+        return OkHttpCacheBypass.restore(sent, chain.proceed(sent));
     }
 
     /**
@@ -2320,13 +2324,25 @@ class ApproovFreshnessInterceptor implements Interceptor {
 
     @Override
     public Response intercept(Chain chain) throws IOException {
-        Request request = chain.request();
+        // a response to an attempt carrying a substituted query secure string is kept out of the app's cache
+        Request sent = protectAttempt(chain.request());
+        return OkHttpCacheBypass.markAttempt(sent, chain.proceed(sent));
+    }
 
+    /**
+     * Gets a network attempt as it is to be sent: unchanged, with its protection refreshed if it was held
+     * too long, or protected afresh if OkHttp or the app rebuilt it.
+     *
+     * @param request is the network attempt
+     * @return the attempt to send
+     * @throws IOException if the request is to be aborted
+     */
+    private Request protectAttempt(Request request) throws IOException {
         // only requests given protection by the ApproovTokenInterceptor carry a freshness marker and are
         // candidates for a refresh or a reclassification
         ApproovRequestFreshness freshness = request.tag(ApproovRequestFreshness.class);
         if (freshness == null)
-            return chain.proceed(request);
+            return request;
 
         // an attempt whose URL, method or headers differ from those the protection was applied to was rebuilt
         // by OkHttp or the app (a redirect, or an Authenticator retrying a 401), so it is protected afresh as
@@ -2368,10 +2384,10 @@ class ApproovFreshnessInterceptor implements Interceptor {
             // refresh is disabled
             long refreshPeriodMS = ApproovService.getStaleProtectionRefreshPeriod();
             if ((refreshPeriodMS <= 0) || (freshness.getProtectedAtMillis() < 0))
-                return chain.proceed(request);
+                return request;
             long heldMS = SystemClock.elapsedRealtime() - freshness.getProtectedAtMillis();
             if (heldMS <= refreshPeriodMS)
-                return chain.proceed(request);
+                return request;
 
             // a refresh reinvokes the processed request callback of the mutator so it is only performed if
             // the mutator declares that this is safe
@@ -2379,7 +2395,7 @@ class ApproovFreshnessInterceptor implements Interceptor {
             ApproovServiceMutator staleMutator = mutator;
             if (!ApproovService.callMutator("supportsProtectionRefresh", staleMutator::supportsProtectionRefresh)) {
                 ApproovLog.d(TAG, "refreshProtection: held " + heldMS + "ms, mutator does not support refresh");
-                return chain.proceed(request);
+                return request;
             }
             ApproovLog.d(TAG, "refreshProtection: held " + heldMS + "ms, refreshing before transmission");
             invokeProcessed = true;
@@ -2397,7 +2413,7 @@ class ApproovFreshnessInterceptor implements Interceptor {
         ApproovRequestFreshness refreshedMarker = refreshed.tag(ApproovRequestFreshness.class);
         if (refreshedMarker != null)
             refreshedMarker.setAppliedHeaders(refreshed.headers());
-        return chain.proceed(refreshed);
+        return refreshed;
     }
 }
 
