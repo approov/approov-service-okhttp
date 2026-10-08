@@ -164,6 +164,46 @@ public class UndeliveredDiagnostics380Test {
     }
 
     @Test
+    public void aTokenFailureSentWithNoApproovHeaderIsLoggedAtDebug() throws Exception {
+        // a custom mutator that lets a failure proceed with no Approov header at all
+        ApproovService.setServiceMutator(new ApproovServiceMutator() {
+            @Override
+            public boolean handleInterceptorFetchTokenResult(com.criticalblue.approovsdk.Approov.TokenFetchResult
+                    approovResults, String url) {
+                return approovResults.getStatus() == com.criticalblue.approovsdk.Approov.TokenFetchStatus.SUCCESS;
+            }
+        });
+        ApproovService.setLoggingLevel(ApproovLogLevel.DEBUG);
+        send("fetchApproovToken", "REJECTED");
+        assertDebugLine(diagnostics(), "Approov token fetch for localhost: REJECTED", ARC, REASONS,
+                "proceeding with no Approov header");
+    }
+
+    @Test
+    public void anAbortIgnoredForAHostNotInThePinSetIsLoggedAtDebug() throws Exception {
+        // CLOSE_FAILURE throws for REJECTED, which is ignored for a host that is not an Approov API domain
+        ApproovService.setServiceMutator(ApproovServiceMutator.CLOSE_FAILURE);
+        ApproovService.setLoggingLevel(ApproovLogLevel.DEBUG);
+        AttesterProxyController.setNextAttestationDirectiveJson("{\"operation\": \"fetchApproovToken\","
+                + " \"response\": {\"status\": \"REJECTED\"}}");
+        fixture.otherServer.enqueue(new MockResponse().setBody("ok"));
+        ShadowLog.reset();
+        try (Response response = ApproovService.getOkHttpClient().newCall(
+                new Request.Builder().url(fixture.otherUrl("/data")).build()).execute()) {
+            assertEquals(200, response.code());
+        }
+        boolean logged = false;
+        for (ShadowLog.LogItem item : ShadowLog.getLogs()) {
+            if (item.msg.equals("handleInterceptorFetchTokenResult: abort ignored for 127.0.0.1, "
+                    + "not an Approov API domain")) {
+                assertEquals("logged above DEBUG: " + item.msg, android.util.Log.DEBUG, item.type);
+                logged = true;
+            }
+        }
+        assertTrue("no DEBUG line for the ignored abort", logged);
+    }
+
+    @Test
     public void nothingIsLoggedAtInfo() throws Exception {
         // INFO is the default level
         ApproovService.setLoggingLevel(ApproovLogLevel.INFO);

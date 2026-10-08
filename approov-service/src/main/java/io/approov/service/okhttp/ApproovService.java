@@ -804,6 +804,25 @@ public class ApproovService {
     }
 
     /**
+     * Describes a fetch result for a log line or an exception message as the status name and any ARC and
+     * rejection reasons, such as "REJECTED, ARC 1A2B, rejection reasons rooted". It never includes a token,
+     * a secure string or a placeholder.
+     *
+     * @param approovResults is the fetch result
+     * @return the description of the fetch result
+     */
+    static String describeStatus(Approov.TokenFetchResult approovResults) {
+        StringBuilder sb = new StringBuilder(approovResults.getStatus().name());
+        String arc = approovResults.getARC();
+        if ((arc != null) && !arc.isEmpty())
+            sb.append(", ARC ").append(arc);
+        String reasons = approovResults.getRejectionReasons();
+        if ((reasons != null) && !reasons.isEmpty())
+            sb.append(", rejection reasons ").append(reasons);
+        return sb.toString();
+    }
+
+    /**
      * Determines if a host is an Approov API domain, that is a key of the SDK public-key-sha256 pin set
      * other than the "*" managed trust roots key, compared without regard to case and ignoring one
      * trailing dot. An empty pin set, or one the SDK fails to provide, lists no host. This only decides
@@ -1717,8 +1736,11 @@ class ApproovTokenInterceptor implements Interceptor {
             // a failure status says nothing about the host, so a host that is not an Approov API domain is
             // treated like UNKNOWN_URL and the request is sent untouched; the hook is still consulted so that
             // an app's own mutator may abort it, while the standard decisions never do
-            ApproovService.callMutator("handleInterceptorFetchTokenResult",
+            Boolean decision = ApproovService.callMutator("handleInterceptorFetchTokenResult",
                     () -> mutator.handleInterceptorFetchTokenResult(tokenResults, url.toString()), true);
+            if (decision == null)
+                ApproovLog.d(TAG, "handleInterceptorFetchTokenResult: abort ignored for " + url.host()
+                        + ", not an Approov API domain");
             ApproovLog.d(TAG, "Proceeding untouched for " + ApproovLog.loggableURL(url)
                     + ", not in the Approov pin set: token fetch " + ApproovService.describeOutcome(approovResults));
             logUndeliveredPlaceholders(request, undelivered, isConfigurationReason(url, tokenStatus), appQuery);
@@ -1734,6 +1756,8 @@ class ApproovTokenInterceptor implements Interceptor {
         if (failure && !proceedWithHeaders) {
             // the mutator decided to send the request untouched on a failure status, so it also carries
             // no secure strings
+            ApproovLog.d(TAG, "Approov token fetch for " + url.host() + ": "
+                    + ApproovService.describeStatus(approovResults) + ", proceeding with no Approov header");
             logUndeliveredPlaceholders(request, undelivered, isConfigurationReason(url, tokenStatus), appQuery);
             return request;
         }
