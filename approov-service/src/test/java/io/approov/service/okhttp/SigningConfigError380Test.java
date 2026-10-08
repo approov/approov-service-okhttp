@@ -94,7 +94,7 @@ public class SigningConfigError380Test {
             RequestPathProbe.Outcome outcome = probe.run(get(), enqueued);
             ApproovDefaultMessageSigning.RequiredBodyDigestException e = RequestPathProbe.assertFailure(what,
                     outcome, ApproovDefaultMessageSigning.RequiredBodyDigestException.class);
-            assertEquals(what, "Failed to create required body digest", e.getMessage());
+            assertEquals(what, "Message signing: required body digest not generated", e.getMessage());
         }
         assertEquals("a failed request never reaches the network", 0, fixture.server.getRequestCount());
     }
@@ -128,7 +128,7 @@ public class SigningConfigError380Test {
             ApproovException e = RequestPathProbe.assertFailure(what, probe.run(get(), enqueued),
                     ApproovException.class);
             assertTrue(what + ": " + e.getMessage(),
-                    e.getMessage().contains("Unsupported algorithm identifier: rsa-v1_5-sha256"));
+                    e.getMessage().contains("Message signing: unsupported algorithm identifier: rsa-v1_5-sha256"));
         }
         assertEquals("a failed request never reaches the network", 0, fixture.server.getRequestCount());
     }

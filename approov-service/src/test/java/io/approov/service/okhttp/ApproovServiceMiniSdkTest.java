@@ -276,7 +276,7 @@ public class ApproovServiceMiniSdkTest {
             ApproovService.addSubstitutionHeader("authorization", "Bearer ");
             fail("Expected conflicting substitution header to be rejected");
         } catch (IllegalArgumentException e) {
-            assertTrue(e.getMessage().contains("already used for token binding"));
+            assertTrue(e.getMessage().contains("addSubstitutionHeader authorization: already the binding header"));
         }
         assertTrue(ApproovService.getSubstitutionHeaders().isEmpty());
     }
@@ -293,7 +293,7 @@ public class ApproovServiceMiniSdkTest {
             ApproovService.setBindingHeader("authorization");
             fail("Expected conflicting binding header to be rejected");
         } catch (IllegalArgumentException e) {
-            assertTrue(e.getMessage().contains("already used for secure string substitution"));
+            assertTrue(e.getMessage().contains("setBindingHeader authorization: already a substitution header"));
         }
         assertNull(ApproovService.getBindingHeader());
         assertEquals("Bearer ", ApproovService.getSubstitutionHeaders().get("Authorization"));

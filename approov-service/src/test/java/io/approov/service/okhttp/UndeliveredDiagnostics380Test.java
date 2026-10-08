@@ -127,10 +127,11 @@ public class UndeliveredDiagnostics380Test {
         send("fetchApproovToken", "REJECTED");
         List<ShadowLog.LogItem> lines = diagnostics();
         // the request proceeding on the failure
-        assertDebugLine(lines, "rejected", ARC, REASONS, "without a token");
+        assertDebugLine(lines, "Approov token fetch for localhost: REJECTED", ARC, REASONS,
+                "proceeding with the status header only");
         // the secure strings the failure channel does not deliver, by name
-        assertDebugLine(lines, "header Api-Key", "rejected", ARC, REASONS);
-        assertDebugLine(lines, "query parameter key", "rejected", ARC, REASONS);
+        assertDebugLine(lines, "header Api-Key", "token fetch status REJECTED", ARC, REASONS);
+        assertDebugLine(lines, "query parameter key", "token fetch status REJECTED", ARC, REASONS);
         for (ShadowLog.LogItem item : lines)
             assertEquals(item.msg, android.util.Log.DEBUG, item.type);
     }
@@ -140,7 +141,8 @@ public class UndeliveredDiagnostics380Test {
         ApproovService.setLoggingLevel(ApproovLogLevel.DEBUG);
         send("fetchSecureString", "REJECTED");
         List<ShadowLog.LogItem> lines = diagnostics();
-        assertDebugLine(lines, "header Api-Key", "rejected", ARC, REASONS);
+        assertDebugLine(lines, "header Api-Key", "secure string fetch status REJECTED", ARC, REASONS,
+                "status sent in its place");
         for (ShadowLog.LogItem item : lines)
             assertEquals(item.msg, android.util.Log.DEBUG, item.type);
     }
@@ -158,9 +160,10 @@ public class UndeliveredDiagnostics380Test {
             assertEquals(200, response.code());
         }
         List<ShadowLog.LogItem> lines = diagnostics();
-        assertDebugLine(lines, "not in the Approov pin set", "no_approov_service", ARC);
-        assertDebugLine(lines, "header Api-Key", "no_approov_service", ARC);
-        assertDebugLine(lines, "query parameter key", "no_approov_service", ARC);
+        assertDebugLine(lines, "Approov token fetch for 127.0.0.1: NO_APPROOV_SERVICE", ARC,
+                "not an Approov API domain, proceeding untouched");
+        assertDebugLine(lines, "header Api-Key", "token fetch status NO_APPROOV_SERVICE", ARC);
+        assertDebugLine(lines, "query parameter key", "token fetch status NO_APPROOV_SERVICE", ARC);
     }
 
     @Test
@@ -237,7 +240,7 @@ public class UndeliveredDiagnostics380Test {
             for (ShadowLog.LogItem item : ShadowLog.getLogs()) {
                 assertFalse("a value was logged: " + item.msg, item.msg.contains(PLACEHOLDER));
                 warned |= (item.type == android.util.Log.WARN) && item.msg.contains("header Api-Key")
-                        && item.msg.contains("not sent over TLS");
+                        && item.msg.contains("request is not https");
             }
             assertTrue("no warning naming the header", warned);
         } finally {

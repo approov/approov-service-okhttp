@@ -156,8 +156,8 @@ public interface ApproovServiceMutator {
             throw new ApproovNetworkException(status, "precheck: " + status.toString());
         switch (status) {
             case REJECTED:
-                throw new ApproovRejectionException(
-                        "precheck: " + status.toString() + ": " + arc + " " + rejectionReasons, arc, rejectionReasons);
+                throw new ApproovRejectionException("precheck: " + ApproovService.describeStatus(approovResults),
+                        arc, rejectionReasons);
             case SUCCESS:
             case UNKNOWN_KEY:
                 break;
@@ -208,7 +208,7 @@ public interface ApproovServiceMutator {
         switch (status) {
             case REJECTED:
                 throw new ApproovRejectionException("fetchSecureString " + operation + " for " + key + ": "
-                        + status.toString() + ": " + arc + " " + rejectionReasons, arc, rejectionReasons);
+                        + ApproovService.describeStatus(approovResults), arc, rejectionReasons);
             case SUCCESS:
             case UNKNOWN_KEY:
                 break;
@@ -234,9 +234,8 @@ public interface ApproovServiceMutator {
             throw new ApproovNetworkException(status, "fetchCustomJWT: " + status.toString());
         switch (status) {
             case REJECTED:
-                throw new ApproovRejectionException(
-                        "fetchCustomJWT: " + status.toString() + ": " + arc + " " + rejectionReasons, arc,
-                        rejectionReasons);
+                throw new ApproovRejectionException("fetchCustomJWT: " + ApproovService.describeStatus(approovResults),
+                        arc, rejectionReasons);
             case SUCCESS:
                 break;
             default:
@@ -306,11 +305,11 @@ public interface ApproovServiceMutator {
                 // host is a secrets-only API that needs no token
                 return false;
             default:
+                // only the host is named, as the path and query may hold personal data or a secret
+                String message = "Approov token fetch for " + ApproovService.loggableHost(url) + ": " + status;
                 if (isNetworkFailure(status))
-                    throw ApproovService.standardDecision(new ApproovNetworkException(status,
-                            "Approov token fetch for " + url + ": " + status.toString()));
-                throw ApproovService.standardDecision(new ApproovFetchStatusException(status,
-                        "Approov token fetch for " + url + ": " + status.toString()));
+                    throw ApproovService.standardDecision(new ApproovNetworkException(status, message));
+                throw ApproovService.standardDecision(new ApproovFetchStatusException(status, message));
         }
     }
 

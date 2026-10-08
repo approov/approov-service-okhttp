@@ -142,7 +142,7 @@ public class CleartextSubstitution380Test {
         for (ShadowLog.LogItem item : ShadowLog.getLogs()) {
             assertFalse("secret logged: " + item.msg, item.msg.contains(SECRET));
             if (item.type == android.util.Log.WARN && item.msg.contains("placeholder left")
-                    && (item.msg.contains("not sent over TLS") || item.msg.contains("bad_url"))) {
+                    && (item.msg.contains("request is not https") || item.msg.contains("BAD_URL"))) {
                 header |= item.msg.contains("header Api-Key");
                 query |= item.msg.contains("query parameter key");
             }

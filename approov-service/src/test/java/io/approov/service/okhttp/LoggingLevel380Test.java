@@ -63,8 +63,8 @@ public class LoggingLevel380Test {
 
     // a distinctive line logged at each level, and the call that logs it
     private static final String ERROR_LINE = "getDeviceID: Approov protection not enabled";
-    private static final String WARNING_LINE = "before ApproovService initialization";
-    private static final String INFO_LINE = "enabled in bypass mode";
+    private static final String WARNING_LINE = "not protected until initialized";
+    private static final String INFO_LINE = "initialize: bypass mode";
     private static final String DEBUG_LINE = "setTokenHeader Probe-Token";
 
     private static final String QUERY_VALUE = "query-value-never-logged";

@@ -138,7 +138,7 @@ public class BadUrlSubstitution380Test {
         boolean query = false;
         for (ShadowLog.LogItem item : ShadowLog.getLogs()) {
             assertFalse(what + ": secret logged: " + item.msg, item.msg.contains(SECRET));
-            if ((item.type == android.util.Log.WARN) && item.msg.contains("bad_url")) {
+            if ((item.type == android.util.Log.WARN) && item.msg.contains("token fetch status BAD_URL")) {
                 assertFalse(what + ": placeholder logged: " + item.msg, item.msg.contains(PLACEHOLDER));
                 header |= item.msg.contains("header Api-Key");
                 query |= item.msg.contains("query parameter key");

@@ -164,7 +164,7 @@ public class ApproovDefaultMessageSigning {
         try {
             return signOrFail(request, changes);
         } catch (RuntimeException e) {
-            ApproovLog.e(TAG, "Message signing failed - proceeding unsigned: " + e);
+            ApproovLog.e(TAG, "Message signing: failed to add the signatures, proceeding unsigned: " + e);
             return request;
         }
     }
@@ -199,7 +199,7 @@ public class ApproovDefaultMessageSigning {
         } catch (RequiredBodyDigestException e) {
             throw e;
         } catch (Exception e) {
-            ApproovLog.e(TAG, "Failed to build signature parameters - proceeding unsigned: " + e);
+            ApproovLog.e(TAG, "Message signing: failed to build signature parameters, proceeding unsigned: " + e);
             return request;
         }
         if (params == null) {
@@ -216,13 +216,22 @@ public class ApproovDefaultMessageSigning {
         } else {
             // a factory with no algorithm enabled throws IllegalStateException here, which leaves the
             // request unsigned
-            algs = factory.getAlgs();
+            try {
+                algs = factory.getAlgs();
+            } catch (RuntimeException e) {
+                ApproovLog.e(TAG, "Message signing: no usable algorithm, proceeding unsigned: " + e);
+                return request;
+            }
+            if ((algs == null) || algs.isEmpty()) {
+                ApproovLog.e(TAG, "Message signing: no usable algorithm, proceeding unsigned: empty algorithm list");
+                return request;
+            }
         }
         for (String alg : algs) {
             // an unsupported algorithm is a configuration error and aborts the request, as an IOException so
             // that an enqueued call reports it to onFailure
             if (!ALG_ES256.equals(alg) && !ALG_HS256.equals(alg))
-                throw new ApproovException("Unsupported algorithm identifier: " + alg);
+                throw new ApproovException("Message signing: unsupported algorithm identifier: " + alg);
         }
 
         // generate a signature per algorithm over the same covered components, each with its own signature
@@ -238,14 +247,14 @@ public class ApproovDefaultMessageSigning {
             try {
                 message = new SignatureBaseBuilder(algParams, provider).createSignatureBase();
             } catch (Exception e) {
-                ApproovLog.e(TAG, "Failed to build signature base - proceeding unsigned: " + e);
+                ApproovLog.e(TAG, "Message signing: failed to build the signature base, proceeding unsigned: " + e);
                 return request;
             }
             String sigId = ALG_ES256.equals(alg) ? SIG_ID_INSTALL : SIG_ID_ACCOUNT;
             byte[] signature = ALG_ES256.equals(alg) ? installSignature(message) : accountSignature(message);
             if (signature == null) {
                 // this signature could not be produced so we proceed with any other
-                ApproovLog.e(TAG, "Skipping " + sigId + " message signature");
+                ApproovLog.e(TAG, "Message signing: skipping the " + sigId + " signature");
                 continue;
             }
             signatures.put(sigId, ByteSequenceItem.valueOf(signature));
@@ -253,7 +262,7 @@ public class ApproovDefaultMessageSigning {
             messages.put(sigId, message);
         }
         if (signatures.isEmpty()) {
-            ApproovLog.e(TAG, "No message signature could be produced - proceeding unsigned");
+            ApproovLog.e(TAG, "Message signing: no signature produced, proceeding unsigned");
             return request;
         }
 
@@ -278,7 +287,7 @@ public class ApproovDefaultMessageSigning {
                 }
                 signedBuilder.header("Signature-Base-Digest", Dictionary.valueOf(digests).serialize());
             } catch (NoSuchAlgorithmException e) {
-                ApproovLog.d(TAG, "Failed to get digest algorithm - no debug entry " + e);
+                ApproovLog.d(TAG, "Message signing: digest algorithm unavailable, no debug entry: " + e);
             }
         }
         Request signed = signedBuilder.build();
@@ -297,25 +306,25 @@ public class ApproovDefaultMessageSigning {
         try {
             base64 = ApproovService.getInstallMessageSignature(message);
         } catch (ApproovException e) {
-            ApproovLog.e(TAG, "Failed to get InstallMessageSignature: " + e);
+            ApproovLog.e(TAG, "Message signing: install signature unavailable: " + e);
             return null;
         }
         if (base64.isEmpty()) {
-            ApproovLog.e(TAG, "InstallMessageSignature is empty");
+            ApproovLog.e(TAG, "Message signing: install signature unavailable");
             return null;
         }
         byte[] signature;
         try {
             signature = Base64.decode(base64, Base64.NO_WRAP);
         } catch (Exception e) {
-            ApproovLog.e(TAG, "Failed to decode base64 signature: " + e);
+            ApproovLog.e(TAG, "Message signing: install signature not base64: " + e);
             return null;
         }
         // decode the signature from ASN.1 DER format
         try {
             return es256DerToRaw(signature);
         } catch (Exception e) {
-            ApproovLog.e(TAG, "Failed to decode ASN.1 DER ES256 signature", e);
+            ApproovLog.e(TAG, "Message signing: install signature not ASN.1 DER ES256: " + e);
             return null;
         }
     }
@@ -355,17 +364,17 @@ public class ApproovDefaultMessageSigning {
         try {
             base64 = ApproovService.getAccountMessageSignature(message);
         } catch (ApproovException e) {
-            ApproovLog.e(TAG, "Failed to get AccountMessageSignature: " + e);
+            ApproovLog.e(TAG, "Message signing: account signature unavailable: " + e);
             return null;
         }
         if (base64.isEmpty()) {
-            ApproovLog.e(TAG, "AccountMessageSignature is empty");
+            ApproovLog.e(TAG, "Message signing: account signature unavailable");
             return null;
         }
         try {
             return Base64.decode(base64, Base64.NO_WRAP);
         } catch (Exception e) {
-            ApproovLog.e(TAG, "Failed to decode base64 signature: " + e);
+            ApproovLog.e(TAG, "Message signing: account signature not base64: " + e);
             return null;
         }
     }
@@ -709,7 +718,7 @@ public class ApproovDefaultMessageSigning {
             }
             if (bodyDigestAlgorithm != null) {
                 if (!generateBodyDigest(provider, requestParameters) && bodyDigestRequired) {
-                    throw new RequiredBodyDigestException("Failed to create required body digest");
+                    throw new RequiredBodyDigestException("Message signing: required body digest not generated");
                 }
             }
             return requestParameters;

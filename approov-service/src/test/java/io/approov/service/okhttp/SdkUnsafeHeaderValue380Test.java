@@ -96,7 +96,7 @@ public class SdkUnsafeHeaderValue380Test {
                 ApproovException e = RequestPathProbe.assertFailure(label, probe.run(request(), enqueued),
                         ApproovException.class);
                 assertTrue(label + ": an SDK problem naming the header: " + e.getMessage(),
-                        e.getMessage().contains("Approov SDK problem: " + what + " for header " + header));
+                        e.getMessage().contains("Approov header " + header + ": invalid character in SDK " + what));
                 assertFalse(label + ": reported as the app's configuration: " + e.getMessage(),
                         e.getMessage().contains(APP_CONFIG_MESSAGE));
                 assertNotQuoted(label, e, marker);
