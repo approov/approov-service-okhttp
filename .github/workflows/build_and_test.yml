@@ -46,6 +46,9 @@ jobs:
         uses: actions/checkout@v5
         with:
           repository: approov/core-service-layers-testing
+          # 3.8.0 line: the spec branch carries the mini-SDK that reports URL
+          # statuses like the real SDK; main still serves the 3.5.x layers
+          ref: spec/close-failure-default
           token: ${{ secrets.CORE_SERVICE_LAYERS_TESTING_PAT }}
           path: core-service-layers-testing
 
