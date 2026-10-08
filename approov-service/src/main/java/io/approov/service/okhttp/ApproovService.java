@@ -959,7 +959,12 @@ public class ApproovService {
 
         // rebuild the pins once if either is indicated
         if (configChanged || approovResults.isForceApplyPins()) {
-            rebuildPins();
+            try {
+                rebuildPins();
+            } catch (ApproovException e) {
+                ApproovLog.e(TAG, e.getMessage());
+                throw e;
+            }
             ApproovLog.d(TAG, "Pins rebuild requested");
         }
     }
@@ -1523,7 +1528,7 @@ public class ApproovService {
      * order is always ApproovService then pinning interceptor.
      *
      * @throws ApproovException if the SDK fails to provide the pins, in which case every connection check
-     * fails until they can be read
+     * fails until they can be read; it is not logged here, so the caller logs it
      */
     static void rebuildPins() throws ApproovException {
         ApproovPinningInterceptor interceptor;
@@ -2456,7 +2461,7 @@ class ApproovPinningInterceptor implements Interceptor {
      * need to update the pinning information, and the next connection check uses the new pins.
      *
      * @throws ApproovException if the SDK fails to provide the pins, in which case the current pins are kept
-     * and every connection check fails until a rebuild succeeds
+     * and every connection check fails until a rebuild succeeds; it is not logged here, so the caller logs it
      */
     public void buildPins() throws ApproovException {
         // read the protection state before taking this lock, as the lock order is always ApproovService then
@@ -2514,9 +2519,9 @@ class ApproovPinningInterceptor implements Interceptor {
             pinner = pinBuilder.build();
         } catch (RuntimeException e) {
             // a pin set that cannot be read fails closed, keeping the current pins and failing every
-            // connection check until it can be read
+            // connection check until it can be read; each caller logs the failure once, in its own context
             rebuildRequired = true;
-            throw ApproovService.sdkFailure("getPins", e);
+            throw new ApproovException("Approov SDK getPins failed: " + e, e);
         }
         certificatePinner = pinner;
         // a host with pins under any spelling is never OS trust only
@@ -2588,14 +2593,18 @@ class ApproovPinningInterceptor implements Interceptor {
 
         // the pins may not have been available when this interceptor was constructed (the SDK only holds
         // pins once a token has been fetched) so build them now if there are still none, or if the last
-        // attempt to read them failed, failing the connection closed if they cannot be read
+        // attempt to read them failed, failing the connection closed with the platform pinning exception if
+        // they cannot be read
         if (isRebuildRequired() || getCertificatePinner().getPins().isEmpty()) {
             try {
                 buildPins();
             } catch (ApproovException e) {
                 Throwable cause = (e.getCause() != null) ? e.getCause() : e;
                 ApproovLog.e(TAG, "Approov pinning: pins unavailable for " + host + ": " + cause);
-                throw new ApproovException("Approov pinning: pins unavailable for " + host, cause);
+                SSLPeerUnverifiedException failure = new SSLPeerUnverifiedException(
+                        "Approov pinning: pins unavailable for " + host);
+                failure.initCause(cause);
+                throw failure;
             }
         }
         warnIfOsTrustOnly(host);

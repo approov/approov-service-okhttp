@@ -44,6 +44,8 @@ import java.util.function.Supplier;
 import java.util.regex.Matcher;
 import java.util.regex.Pattern;
 
+import javax.net.ssl.SSLPeerUnverifiedException;
+
 import okhttp3.Request;
 import okhttp3.mockwebserver.MockResponse;
 import okhttp3.mockwebserver.RecordedRequest;
@@ -54,7 +56,9 @@ import okhttp3.mockwebserver.RecordedRequest;
  * freshness and pinning interceptors, binding, substitutions and the pin
  * rebuild) it surfaces as an ApproovException, an IOException, with the SDK's
  * exception as its cause: execute() throws it and an enqueued call receives it in
- * onFailure, with nothing rethrown on the dispatcher thread.
+ * onFailure, with nothing rethrown on the dispatcher thread. Pins that cannot be
+ * read for a connection check are a pinning failure, an SSLPeerUnverifiedException
+ * naming the host with the SDK's exception as its cause.
  * A failure of a message signing SDK call is inside the signing fail-open:
  * the request proceeds without that signature. The direct
  * methods throw an ApproovException with the SDK's exception as its cause.
@@ -213,6 +217,14 @@ public class SdkRuntimeException380Test {
      */
     private void assertRequestPathFailure(String method, int fromCall, int expectedServerRequests,
             Arrangement arrangement) throws Exception {
+        assertRequestPathFailure(method, fromCall, expectedServerRequests, ApproovException.class, arrangement);
+    }
+
+    /**
+     * As above, asserting that the app sees the given IOException type.
+     */
+    private <T extends java.io.IOException> void assertRequestPathFailure(String method, int fromCall,
+            int expectedServerRequests, Class<T> type, Arrangement arrangement) throws Exception {
         for (Supplier<RuntimeException> failure : FAILURES) {
             for (boolean enqueued : new boolean[] {true, false}) {
                 int before = fixture.server.getRequestCount();
@@ -223,8 +235,7 @@ public class SdkRuntimeException380Test {
                 String what = method + " " + (enqueued ? "enqueue" : "execute");
                 RuntimeException thrown = sdk.lastThrown;
                 assertNotNull(what + ": the SDK was never reached: " + outcome, thrown);
-                ApproovException e = RequestPathProbe.assertFailure(what + " " + thrown, outcome,
-                        ApproovException.class);
+                T e = RequestPathProbe.assertFailure(what + " " + thrown, outcome, type);
                 assertSame(what + ": the cause is the SDK's exception", thrown, e.getCause());
                 assertEquals(what + ": requests that reached the server", expectedServerRequests,
                         fixture.server.getRequestCount() - before);
@@ -261,10 +272,15 @@ public class SdkRuntimeException380Test {
     }
 
     @Test
-    public void pinRebuildOnConnectionCheckFailureIsAnIOException() throws Exception {
+    public void pinRebuildOnConnectionCheckFailureIsAPinningFailure() throws Exception {
         // localhost has no pins, so every connection check asks the SDK for them
         assertTrue(ApproovService.getCertificatePinner().getPins().isEmpty());
-        assertRequestPathFailure("getPins", 1, 0, () -> get("/p"));
+        assertRequestPathFailure("getPins", 1, 0, SSLPeerUnverifiedException.class, () -> get("/p"));
+        sdk.fail("getPins", FAILURES.get(0), 1);
+        RequestPathProbe.Outcome outcome = probe.run(get("/p"), false);
+        sdk.clear();
+        assertEquals("Approov pinning: pins unavailable for localhost", RequestPathProbe.assertFailure("message",
+                outcome, SSLPeerUnverifiedException.class).getMessage());
     }
 
     @Test
@@ -332,12 +348,15 @@ public class SdkRuntimeException380Test {
     }
 
     @Test
-    public void nullPinsAreAnIOException() throws Exception {
+    public void nullPinsAreAPinningFailure() throws Exception {
         for (boolean enqueued : new boolean[] {true, false}) {
             sdk.returnNull("getPins");
             RequestPathProbe.Outcome outcome = probe.run(get("/p"), enqueued);
             sdk.clear();
-            RequestPathProbe.assertFailure("null pins", outcome, ApproovException.class);
+            SSLPeerUnverifiedException e = RequestPathProbe.assertFailure("null pins", outcome,
+                    SSLPeerUnverifiedException.class);
+            assertEquals("Approov pinning: pins unavailable for localhost", e.getMessage());
+            assertNotNull("the cause is kept", e.getCause());
         }
         assertEquals(0, fixture.server.getRequestCount());
     }

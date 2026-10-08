@@ -23,6 +23,8 @@ import static org.junit.Assert.assertThrows;
 import static org.junit.Assert.assertTrue;
 import static org.junit.Assert.fail;
 
+import android.util.Log;
+
 import com.criticalblue.approovsdk.Approov;
 import com.criticalblue.minisdk.testing.AttesterProxyController;
 
@@ -34,8 +36,12 @@ import org.robolectric.RobolectricTestRunner;
 import org.robolectric.annotation.Config;
 import org.robolectric.shadows.ShadowLog;
 
+import java.util.ArrayList;
+import java.util.Collections;
 import java.util.List;
 import java.util.Map;
+
+import javax.net.ssl.SSLPeerUnverifiedException;
 
 import okhttp3.Request;
 import okhttp3.Response;
@@ -135,14 +141,23 @@ public class CanonicalMessages380Test {
             }
         });
         assertThrows(ApproovException.class, ApproovService::rebuildPins);
+        ShadowLog.reset();
         try (Response response = ApproovService.getOkHttpClient().newCall(
                 new Request.Builder().url(fixture.protectedServer.url("/p")).build()).execute()) {
             fail("a connection whose pins cannot be read must fail, got " + response.code());
-        } catch (ApproovException e) {
+        } catch (SSLPeerUnverifiedException e) {
             assertEquals("Approov pinning: pins unavailable for localhost", e.getMessage());
             assertSame(thrown, e.getCause());
         }
-        assertTrue(logged("Approov pinning: pins unavailable for localhost: " + thrown));
+
+        // the failure is logged once, at error level
+        List<String> lines = new ArrayList<>();
+        for (ShadowLog.LogItem item : ShadowLog.getLogs()) {
+            if ((item.msg != null) && item.msg.contains(thrown.toString()))
+                lines.add(item.type + " " + item.msg);
+        }
+        assertEquals(Collections.singletonList(Log.ERROR + " Approov pinning: pins unavailable for localhost: "
+                + thrown), lines);
     }
 
     @Test
