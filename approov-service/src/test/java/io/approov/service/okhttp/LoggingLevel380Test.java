@@ -49,7 +49,7 @@ import okhttp3.mockwebserver.MockResponse;
  * errors, WARNING adds warnings, INFO (the default) adds information and DEBUG
  * adds debug lines, the loggable token of each request among them. OFF writes
  * nothing from the layer, errors included. The level is configuration, so
- * initialize never resets it (SPECIFICATION 5.7). Debug logging enabled for the
+ * initialize never resets it. Debug logging enabled for the
  * ApproovService tag (adb shell setprop log.tag.ApproovService DEBUG, which
  * ShadowLog.setLoggable stands in for) raises any level but OFF to DEBUG, so
  * support can read the debug lines of a release build without a rebuild.

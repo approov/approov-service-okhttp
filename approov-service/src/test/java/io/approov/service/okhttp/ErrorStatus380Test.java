@@ -38,7 +38,7 @@ import org.robolectric.annotation.Config;
 
 /**
  * The direct methods report a failure by throwing the layer's Approov exception
- * with the SDK status available on it (SPECIFICATION 1.8): every exception they
+ * with the SDK status available on it: every exception they
  * throw for a fetch status is an ApproovFetchStatusException whose
  * getTokenFetchStatus() is that status. The network statuses throw
  * ApproovNetworkException, REJECTED from a secure string, custom JWT or precheck

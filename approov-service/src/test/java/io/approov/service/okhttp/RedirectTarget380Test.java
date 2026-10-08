@@ -39,7 +39,7 @@ import okhttp3.mockwebserver.MockResponse;
 import okhttp3.mockwebserver.RecordedRequest;
 
 /**
- * SPECIFICATION 7.3 (decided 2026-10-07): the layer protects only the API the app
+ * The layer protects only the API the app
  * defines. A redirect to another origin is stripped of everything the layer added
  * (token, status, trace, signatures, substituted header values back to the app's
  * placeholders; OkHttp drops Authorization) and then evaluated from the start as a

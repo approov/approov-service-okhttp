@@ -51,7 +51,7 @@ public class ApproovServiceMiniSdkTest {
     public void setUp() {
         context = ApplicationProvider.getApplicationContext();
         AttesterProxyController.reset();
-        // initialize never resets configuration in 3.8.0 (SPECIFICATION 5.7(b)), so
+        // initialize never resets configuration in 3.8.0, so
         // each test starts from a clean layer state
         ApproovService.reset();
         ApproovService.initialize(context, validInitialConfig, "reinit-okhttp-tests");
@@ -797,7 +797,7 @@ public class ApproovServiceMiniSdkTest {
     }
 
     /**
-     * T37-03 / SPECIFICATION 2.2: UNTRUSTED_NETWORK (the 3.8.0 replacement of
+     * UNTRUSTED_NETWORK (the 3.8.0 replacement of
      * MITM_DETECTED) is a network failure for the direct methods: fetchToken,
      * fetchSecureString, fetchCustomJWT and precheck throw ApproovNetworkException.
      */
@@ -828,7 +828,7 @@ public class ApproovServiceMiniSdkTest {
     }
 
     /**
-     * T37-03 / SPECIFICATION 2.2: on the request path UNTRUSTED_NETWORK proceeds like
+     * On the request path UNTRUSTED_NETWORK proceeds like
      * NO_NETWORK under ALWAYS_PROCEED, with no token header and the lowercased
      * status, and is not signed (decided 2026-10-07). An interception on the
      * attestation path no longer blocks the request.
@@ -1032,12 +1032,12 @@ public class ApproovServiceMiniSdkTest {
     }
 
     /**
-     * SPECIFICATION 6.2: every CLOSE_FAILURE token fetch decision, the 3.5.x ones.
+     * Every CLOSE_FAILURE token fetch decision, the 3.5.x ones.
      * SUCCESS adds the token, NO_APPROOV_SERVICE the status header only, UNKNOWN_URL and
      * UNPROTECTED_URL send no Approov headers, the network statuses throw the
      * network exception and every other status the fetch status exception, with no
-     * request reaching the wire. setProceedOnNetworkFail is removed in 3.8.0
-     * (SPECIFICATION 5.2): the network statuses always throw under CLOSE_FAILURE.
+     * request reaching the wire. setProceedOnNetworkFail is removed in 3.8.0:
+     * the network statuses always throw under CLOSE_FAILURE.
      */
     @Test
     public void testCloseFailureTokenFetchDecisions() throws Exception {
@@ -1413,7 +1413,7 @@ public class ApproovServiceMiniSdkTest {
     }
 
     /**
-     * SPECIFICATION 3.1, 5.7(b): a host factory replaces the default factory for its
+     * A host factory replaces the default factory for its
      * host (matched without regard to case), removing it reinstates the default,
      * and initialize() keeps the signing switch and the host factories.
      */
@@ -1995,7 +1995,7 @@ public class ApproovServiceMiniSdkTest {
 
     /**
      * Finding 2: a redirect from a protected host to one not added to Approov must not carry
-     * the protected host's token, status or signatures (SPECIFICATION 1.5, 7.1).
+     * the protected host's token, status or signatures.
      */
     @Test
     public void testRedirectToHostNotInApproovRemovesProtectionOnWire() throws Exception {
@@ -2121,8 +2121,8 @@ public class ApproovServiceMiniSdkTest {
     /**
      * Findings 5 and 6 / T37-17: every interceptor hook, including the pinning hook,
      * declares IOException so that an opt-in abort can be a standard network
-     * exception, and a delegating override can declare it (SPECIFICATION 6.3).
-     * Message signing is not a mutator (SPECIFICATION 3.1, 5.5), so it has no
+     * exception, and a delegating override can declare it.
+     * Message signing is not a mutator, so it has no
      * processed request override of its own.
      */
     @Test
@@ -2151,7 +2151,7 @@ public class ApproovServiceMiniSdkTest {
 
     /**
      * Finding 1: a pin rebuild that lands while a request is being checked against
-     * the old pins applies to the next request (SPECIFICATION 2.4, 2.5). There is no
+     * the old pins applies to the next request. There is no
      * verdict cache, so nothing reached against the old pins is reused.
      */
     @Test
@@ -2501,7 +2501,7 @@ public class ApproovServiceMiniSdkTest {
     }
 
     /**
-     * T37-09 / SPECIFICATION 5.4: no failure cache. A request after a failed fetch is
+     * No failure cache. A request after a failed fetch is
      * given a token as soon as the SDK provides one again; nothing in the layer
      * replays the failure.
      */
@@ -2525,7 +2525,7 @@ public class ApproovServiceMiniSdkTest {
     }
 
     /**
-     * T37-10 / SPECIFICATION 5.2: the removed APIs are absent from the public surface
+     * The removed APIs are absent from the public surface
      * and the deprecated ones that must stay are present.
      */
     @Test
@@ -2596,7 +2596,7 @@ public class ApproovServiceMiniSdkTest {
     }
 
     /**
-     * T37-12 / SPECIFICATION 2.3: a cleartext connection (no TLS handshake) to a host
+     * A cleartext connection (no TLS handshake) to a host
      * with pins fails with the platform pinning exception, never an Approov type; to a
      * host without pins it proceeds.
      */
@@ -2627,7 +2627,7 @@ public class ApproovServiceMiniSdkTest {
     }
 
     /**
-     * SPECIFICATION 2.4: pins are rebuilt lazily until they exist and not afterwards.
+     * Pins are rebuilt lazily until they exist and not afterwards.
      */
     @Test
     public void testPinsNotRebuiltOnEveryRequestOncePresent() throws Exception {
@@ -2748,7 +2748,7 @@ public class ApproovServiceMiniSdkTest {
     }
 
     /**
-     * SPECIFICATION 2.5: after a pin rebuild the next request to a host is checked
+     * After a pin rebuild the next request to a host is checked
      * against the new pins, even over a handshake that passed against the old ones.
      */
     @Test

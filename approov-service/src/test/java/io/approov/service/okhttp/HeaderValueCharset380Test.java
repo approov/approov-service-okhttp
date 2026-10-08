@@ -40,7 +40,7 @@ import okhttp3.mockwebserver.MockResponse;
 import okhttp3.mockwebserver.RecordedRequest;
 
 /**
- * SPECIFICATION 1.4 (added 2026-10-05): a secure string whose value an HTTP
+ * A secure string whose value an HTTP
  * header cannot carry (anything outside tab and printable ASCII: a non-ASCII or
  * DEL value set in the account, or anything an app set with a new definition) is
  * a substitution that produced no usable value under every mutator. The
@@ -50,7 +50,7 @@ import okhttp3.mockwebserver.RecordedRequest;
  * OkHttp percent-encodes a non-ASCII or DEL value there, which the backend
  * decodes, so such a value is substituted. A value the app itself supplies that a
  * header cannot carry (a token prefix, a header its mutator sets) is the app's
- * configuration error (SPECIFICATION 1.7(a)) and fails the request without
+ * configuration error and fails the request without
  * quoting the value.
  */
 @RunWith(RobolectricTestRunner.class)

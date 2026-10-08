@@ -43,7 +43,7 @@ import java.util.function.Supplier;
 import okhttp3.Request;
 
 /**
- * SPECIFICATION 1.6(b), 1.6.1 (added 2026-10-07): an Approov-typed exception (an
+ * An Approov-typed exception (an
  * ApproovException or a subclass) that an app's service mutator hook throws, one
  * it built or one it rethrows from a direct method such as fetchToken, is the
  * hook's failure: the request fails with the layer's hook failure, an

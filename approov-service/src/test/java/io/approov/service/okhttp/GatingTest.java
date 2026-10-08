@@ -28,7 +28,7 @@ public class GatingTest {
 
     @Test
     public void testGetOkHttpClientBeforeInitialization() {
-        // SPECIFICATION 5.7(f): the client is available before initialize and its
+        // the client is available before initialize and its
         // requests go out without Approov processing until protection is enabled
         assertNotNull(ApproovService.getOkHttpClient());
         assertSame(ApproovService.getOkHttpClient(), ApproovService.getOkHttpClient());
@@ -49,7 +49,7 @@ public class GatingTest {
 
     @Test
     public void testGetMethodsBeforeInitialization() {
-        // SPECIFICATION 5.7(b): configuration may be read and set before initialize
+        // configuration may be read and set before initialize
         assertTrue(ApproovService.getSubstitutionHeaders().isEmpty());
         assertTrue(ApproovService.getSubstitutionQueryParams().isEmpty());
         assertTrue(ApproovService.getExclusionURLRegexs().isEmpty());

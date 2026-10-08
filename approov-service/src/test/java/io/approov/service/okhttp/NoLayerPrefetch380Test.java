@@ -42,7 +42,7 @@ import java.util.Collections;
  * The layer starts no prefetch of its own (SPECIFICATION 5.2, changed
  * 2026-10-04): prefetch() is removed and initialize starts no fetch, the
  * platform SDK manages prefetching. getLastARC reports the last fetch the layer
- * made and performs none (SPECIFICATION 5.3). Mirrors approov-service-android's
+ * made and performs none. Mirrors approov-service-android's
  * NoLayerPrefetch380Test.
  */
 @RunWith(RobolectricTestRunner.class)
@@ -115,7 +115,7 @@ public class NoLayerPrefetch380Test {
 
     @Test
     public void getLastARCIsClearedByADirectFetchThatFailedWithoutAResult() throws Exception {
-        // SPECIFICATION 5.3: the ARC belongs to the most recent fetch, so a direct
+        // the ARC belongs to the most recent fetch, so a direct
         // method whose SDK call threw (no result, no ARC) leaves none behind
         ApproovService.initialize(context, CONFIG, "reinit-no-prefetch");
         AttesterProxyController.setNextAttestationDirectiveJson(

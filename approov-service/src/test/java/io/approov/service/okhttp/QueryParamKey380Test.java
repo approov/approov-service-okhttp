@@ -39,7 +39,7 @@ import okhttp3.Response;
 import okhttp3.mockwebserver.MockResponse;
 
 /**
- * SPECIFICATION 1.4 (e41153e): a substitution query parameter key is matched as
+ * A substitution query parameter key is matched as
  * a literal string, not as a regular expression, and every occurrence of it is
  * substituted, each value looked up as its own placeholder key and read back on
  * its own. A key may contain '.', which as a pattern would match any character

@@ -47,14 +47,14 @@ import okhttp3.Request;
 import okhttp3.mockwebserver.MockResponse;
 
 /**
- * SPECIFICATION 1.6.1: a RuntimeException thrown by the app's own service mutator
+ * A RuntimeException thrown by the app's own service mutator
  * never escapes the request path as such. The layer converts it to an
  * ApproovException, an IOException, with the original as its cause, logs it at
  * error level naming the hook, and the request fails through OkHttp's normal
  * error channel: execute() throws it and an enqueued call receives it in
  * onFailure, with nothing rethrown on the dispatcher thread and nothing sent. An
  * IOException a hook throws is the app's opt-in abort and passes through
- * unchanged (SPECIFICATION 1.6).
+ * unchanged.
  */
 @RunWith(RobolectricTestRunner.class)
 @Config(manifest = Config.NONE)

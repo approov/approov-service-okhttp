@@ -37,7 +37,7 @@ import okhttp3.Request;
 import okhttp3.mockwebserver.MockResponse;
 
 /**
- * SPECIFICATION 1.6.1 (added 2026-10-07): a token or trace ID the Approov SDK
+ * A token or trace ID the Approov SDK
  * issued that contains a character a header cannot carry is reported as an SDK
  * problem naming the header, never as the app's configuration error (1.4,
  * 1.7(a)), and the value is never quoted. A token prefix the app set that a
@@ -62,7 +62,7 @@ public class SdkUnsafeHeaderValue380Test {
                 + "\"pins\": {\"public-key-sha256\": {\"localhost\": []}}}}}");
         ApproovService.reset();
         // the default level: at DEBUG the SDK's loggable token, which carries the
-        // trace ID, is logged by design (SPECIFICATION 5.10)
+        // trace ID, is logged by design
         ApproovService.initialize(fixture.context, LocalHttpsFixture.CONFIG, "reinit-sdk-unsafe-header");
         ApproovService.setOkHttpClientBuilder(fixture.trustingBuilder());
         probe = new RequestPathProbe(fixture);

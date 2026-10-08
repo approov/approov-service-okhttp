@@ -76,7 +76,7 @@ import okhttp3.mockwebserver.MockResponse;
 import okhttp3.mockwebserver.RecordedRequest;
 
 /**
- * TESTING_REQUIREMENTS "Target URI Is The Wire URL" (SPECIFICATION 3.3, 3.5): a
+ * TESTING_REQUIREMENTS "Target URI Is The Wire URL": a
  * signed request whose URL has a {@code |}, a {@code %20}, a literal {@code %25},
  * a non-ASCII character, or characters {@code java.net.URI} rejects reaches the
  * wire, and both signatures verify against a signature base rebuilt only from

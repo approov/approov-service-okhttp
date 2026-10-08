@@ -54,11 +54,10 @@ import okhttp3.mockwebserver.RecordedRequest;
  * freshness and pinning interceptors, binding, substitutions and the pin
  * rebuild) it surfaces as an ApproovException, an IOException, with the SDK's
  * exception as its cause: execute() throws it and an enqueued call receives it in
- * onFailure, with nothing rethrown on the dispatcher thread (SPECIFICATION 1.6).
- * A failure of a message signing SDK call is inside the signing fail-open
- * (SPECIFICATION 3.5): the request proceeds without that signature. The direct
- * methods throw an ApproovException with the SDK's exception as its cause
- * (SPECIFICATION 1.8).
+ * onFailure, with nothing rethrown on the dispatcher thread.
+ * A failure of a message signing SDK call is inside the signing fail-open:
+ * the request proceeds without that signature. The direct
+ * methods throw an ApproovException with the SDK's exception as its cause.
  */
 @RunWith(RobolectricTestRunner.class)
 @Config(manifest = Config.NONE)
@@ -344,7 +343,7 @@ public class SdkRuntimeException380Test {
     }
 
     // ==================================================================================
-    // message signing: SDK failures are inside the fail-open (SPECIFICATION 3.5)
+    // message signing: SDK failures are inside the fail-open
     // ==================================================================================
 
     private static List<String> members(String header) {
@@ -423,7 +422,7 @@ public class SdkRuntimeException380Test {
     }
 
     // ==================================================================================
-    // direct methods (SPECIFICATION 1.8)
+    // direct methods
     // ==================================================================================
 
     private interface DirectCall {

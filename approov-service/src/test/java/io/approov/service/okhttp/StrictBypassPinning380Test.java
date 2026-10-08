@@ -125,7 +125,7 @@ public class StrictBypassPinning380Test {
                 .url(fixture.server.url("/v1")).build()).execute()) {
             fail("the wrong pin must fail the connection once protected, got " + response.code());
         } catch (SSLPeerUnverifiedException expected) {
-            // the platform's standard pinning exception (SPECIFICATION 2.3)
+            // the platform's standard pinning exception
         }
         assertEquals("nothing sent after the pin failure", 1, fixture.server.getRequestCount());
         assertTrue(sdk.count("getPins") > 0);

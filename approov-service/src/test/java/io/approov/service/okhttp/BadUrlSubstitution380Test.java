@@ -45,7 +45,7 @@ import okhttp3.mockwebserver.MockResponse;
 import okhttp3.mockwebserver.RecordedRequest;
 
 /**
- * SPECIFICATION 1.5, 6.2 (added 2026-10-07): a request whose token fetch returned
+ * A request whose token fetch returned
  * BAD_URL never receives a secure string, under every mutator that lets it
  * proceed, ALWAYS_PROCEED and custom mutators included, even when its URL is
  * https. The SDK reports BAD_URL for a URL it cannot parse

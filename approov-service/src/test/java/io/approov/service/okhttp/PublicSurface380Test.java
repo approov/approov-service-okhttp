@@ -61,7 +61,7 @@ public class PublicSurface380Test {
 
     @Test
     public void enabledFlagsUseThe380NamesWithNoAliases() {
-        // SPECIFICATION 5.7(c): isInitialized and isApproovEnabled are removed
+        // isInitialized and isApproovEnabled are removed
         assertTrue(hasPublicMethod(ApproovService.class, "isApproovServiceEnabled"));
         assertTrue(hasPublicMethod(ApproovService.class, "isApproovProtectionEnabled"));
         assertFalse(hasPublicMethod(ApproovService.class, "isInitialized"));
@@ -70,7 +70,7 @@ public class PublicSurface380Test {
 
     @Test
     public void proceedOnNetworkFailIsRemoved() {
-        // SPECIFICATION 5.2 (changed 2026-10-04): a decision on the network statuses
+        // a decision on the network statuses
         // belongs to the mutator, ALWAYS_PROCEED or the app's own
         assertFalse(hasPublicMethod(ApproovService.class, "setProceedOnNetworkFail"));
         assertFalse(hasPublicMethod(ApproovService.class, "getProceedOnNetworkFail"));
