@@ -158,6 +158,7 @@ By default 3.8.0 makes the same token decisions as 3.5.x and throws the same exc
 * A secure string is only substituted into a request sent over `https`; a cleartext request keeps its placeholder.
 * The methods that call the SDK throw `ApproovException` (`<method>: Approov protection not enabled`) before initialization and in bypass mode, and `getOkHttpClient()` may be called before initialization.
 * `getMessageSignature` remains as a deprecated alias of `getAccountMessageSignature`, returning the same value and logging a deprecation warning once per process; call `getAccountMessageSignature`.
+* `ApproovDefaultMessageSigning.RequiredBodyDigestException` is an `ApproovException`, so a checked `IOException`, where it was an `IllegalStateException`.
 * `addExclusionURLRegex` with an invalid regular expression throws `IllegalArgumentException` (unchecked) where 3.5.x logged the error and ignored it.
 * The package's logging has a level, `INFO` by default, so the loggable token and the device ID, which are debug lines, are no longer logged unless you call `ApproovService.setLoggingLevel(ApproovLogLevel.DEBUG)` or run `adb shell setprop log.tag.ApproovService DEBUG`.
 
