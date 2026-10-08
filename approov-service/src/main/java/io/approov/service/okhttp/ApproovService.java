@@ -360,8 +360,7 @@ public class ApproovService {
      * @return the exception to throw
      */
     static ApproovException unsafeHeaderValue(String header) {
-        String message = "Approov cannot set header " + header
-                + ": its value contains a character a header value cannot carry";
+        String message = "Approov header " + header + ": invalid character in value";
         ApproovLog.e(TAG, message);
         return new ApproovException(message);
     }
@@ -371,13 +370,12 @@ public class ApproovService {
      * is an SDK problem rather than an app configuration error. It is logged at error level and returned
      * as an ApproovException naming the header, never quoting the value.
      *
-     * @param what is what the SDK issued, such as "a token"
+     * @param what is what the SDK issued, such as "token"
      * @param header is the header name
      * @return the exception to throw
      */
     static ApproovException unsafeSdkValue(String what, String header) {
-        String message = "Approov SDK problem: the Approov SDK issued " + what + " that header " + header
-                + " cannot carry: it contains a character outside tab and printable ASCII";
+        String message = "Approov SDK problem: " + what + " for header " + header + " has an invalid character";
         ApproovLog.e(TAG, message);
         return new ApproovException(message);
     }
@@ -397,7 +395,7 @@ public class ApproovService {
         Matcher matcher = OKHTTP_HEADER_VALUE_ERROR.matcher(message);
         if (matcher.matches())
             return unsafeHeaderValue(matcher.group(1));
-        String nameError = "Approov cannot set a header: its name contains a character a header name cannot carry";
+        String nameError = "Approov header: invalid character in name";
         ApproovLog.e(TAG, nameError);
         return new ApproovException(nameError);
     }
@@ -470,14 +468,14 @@ public class ApproovService {
         if (context == null)
             throw new IllegalArgumentException("ApproovService.initialize requires a non-null context");
         if (config == null)
-            throw new IllegalArgumentException("config must not be null; pass \"\" for bypass mode");
+            throw new IllegalArgumentException("ApproovService.initialize requires a non-null config");
 
         if (config.isEmpty()) {
             if (approovProtectionEnabled) {
                 // an empty account ID never downgrades active Approov protection and is not passed to the SDK
-                ApproovLog.d(TAG, "Approov protection already enabled; ignoring initialization with an empty account ID");
+                ApproovLog.d(TAG, "Initialization with an empty account ID ignored: Approov protection enabled");
             } else {
-                ApproovLog.i(TAG, "ApproovService enabled in bypass mode (empty account ID): Approov protection is not active");
+                ApproovLog.i(TAG, "ApproovService enabled in bypass mode: Approov protection not active");
                 approovServiceEnabled = true;
             }
             return false;
@@ -952,8 +950,8 @@ public class ApproovService {
         ApproovLog.d(TAG, "setBindingHeader " + header);
         if ((header != null) && (substitutionHeaders != null) &&
                 (findSubstitutionHeaderKey(header) != null)) {
-            throw new IllegalArgumentException("Header " + header +
-                    " cannot be used for both token binding and secure string substitution");
+            throw new IllegalArgumentException("setBindingHeader " + header +
+                    ": already used for secure string substitution");
         }
         bindingHeader = header;
     }
@@ -1005,7 +1003,7 @@ public class ApproovService {
         if (mutator == null) {
             mutator = ApproovServiceMutator.DEFAULT;
         }
-        ApproovLog.d(TAG, "Applied ApproovServiceMutator:" + describe(mutator));
+        ApproovLog.d(TAG, "setServiceMutator " + describe(mutator));
         serviceMutator = mutator;
     }
 
@@ -1034,8 +1032,8 @@ public class ApproovService {
     public static synchronized void addSubstitutionHeader(String header, String requiredPrefix) {
         ApproovLog.d(TAG, "addSubstitutionHeader " + header + ", " + requiredPrefix);
         if ((header != null) && (bindingHeader != null) && header.equalsIgnoreCase(bindingHeader)) {
-            throw new IllegalArgumentException("Header " + header +
-                    " cannot be used for both token binding and secure string substitution");
+            throw new IllegalArgumentException("addSubstitutionHeader " + header +
+                    ": already used for token binding");
         }
 
         // header names are case-insensitive so remove any equivalent entry first, keeping the casing of the
@@ -1601,7 +1599,7 @@ public class ApproovService {
             // is never cached unprotected
             if (!isApproovServiceEnabled())
                 ApproovLog.w(TAG, "Building Approov OkHttpClient for " + builderName + " before ApproovService "
-                        + "initialization; requests proceed without Approov protection until it is initialized");
+                        + "initialization: no Approov protection until it is initialized");
             else
                 ApproovLog.d(TAG, "Building new Approov OkHttpClient for " + builderName);
 
@@ -1714,9 +1712,8 @@ class ApproovTokenInterceptor implements Interceptor {
             // an app's own mutator may abort it, while the standard decisions never do
             ApproovService.callMutator("handleInterceptorFetchTokenResult",
                     () -> mutator.handleInterceptorFetchTokenResult(tokenResults, url.toString()), true);
-            ApproovLog.d(TAG, "Proceeding without a token for " + ApproovLog.loggableURL(url)
-                    + ", a host not in the Approov pin set, untouched: token fetch "
-                    + ApproovService.describeOutcome(approovResults));
+            ApproovLog.d(TAG, "Proceeding untouched for " + ApproovLog.loggableURL(url)
+                    + ", not in the Approov pin set: token fetch " + ApproovService.describeOutcome(approovResults));
             logUndeliveredPlaceholders(request, undelivered, isConfigurationReason(url, tokenStatus));
             return request;
         }
@@ -1799,12 +1796,13 @@ class ApproovTokenInterceptor implements Interceptor {
                     String secureString = approovResults.getSecureString();
                     if (secureString == null) {
                         // a decision to substitute with no value leaves the placeholder, never "null"
-                        ApproovLog.d(TAG, "No secure string to substitute, placeholder left in header: " + header
-                                + ", " + approovResults.getStatus().toString());
+                        ApproovLog.d(TAG, "Secure string not substituted in header " + header
+                                + ": no secure string for " + approovResults.getStatus().toString()
+                                + ", placeholder left");
                     } else if (!ApproovService.isSafeHeaderValue(secureString)) {
                         // a value a header cannot carry leaves the placeholder and is never logged
-                        ApproovLog.w(TAG, "Secure string for header " + header + " contains a character a header "
-                                + "value cannot carry, placeholder left");
+                        ApproovLog.w(TAG, "Secure string not substituted in header " + header
+                                + ": invalid character in value, placeholder left");
                     } else {
                         setSubstitutionHeaders.put(header, prefix + secureString);
                         // keep every value of the header, in order, so that all can be restored
@@ -1855,8 +1853,9 @@ class ApproovTokenInterceptor implements Interceptor {
                     String secureString = approovResults.getSecureString();
                     if (secureString == null) {
                         // a decision to substitute with no value leaves the placeholder
-                        ApproovLog.d(TAG, "No secure string to substitute, placeholder left in query parameter: "
-                                + queryKey + ", " + approovResults.getStatus().toString());
+                        ApproovLog.d(TAG, "Secure string not substituted in query parameter " + queryKey
+                                + ": no secure string for " + approovResults.getStatus().toString()
+                                + ", placeholder left");
                     } else {
                         // substitute this occurrence and read it back from the URL as OkHttp stores it, leaving
                         // the placeholder if OkHttp would not carry the value unchanged; the value is never logged
@@ -1868,8 +1867,8 @@ class ApproovTokenInterceptor implements Interceptor {
                             replacementURL = candidateURL;
                             from = start + secureString.length();
                         } else {
-                            ApproovLog.w(TAG, "Secure string for query parameter " + queryKey + " cannot be carried "
-                                    + "in the URL unchanged, placeholder left");
+                            ApproovLog.w(TAG, "Secure string not substituted in query parameter " + queryKey
+                                    + ": not carried unchanged in the URL, placeholder left");
                         }
                     }
                 } else {
@@ -1890,14 +1889,14 @@ class ApproovTokenInterceptor implements Interceptor {
             if (!ApproovService.isSafeHeaderValue(setTokenHeaderPrefix))
                 throw ApproovService.unsafeHeaderValue(setTokenHeaderKey);
             if (!ApproovService.isSafeHeaderValue(tokenResults.getToken()))
-                throw ApproovService.unsafeSdkValue("a token", setTokenHeaderKey);
+                throw ApproovService.unsafeSdkValue("token", setTokenHeaderKey);
             setHeader(builder, setTokenHeaderKey, setTokenHeaderValue);
             changes.setTokenHeaderKey(setTokenHeaderKey);
             changes.setTokenHeaderPrefix(setTokenHeaderPrefix);
         }
         if (setTraceIDHeaderKey != null) {
             if (!ApproovService.isSafeHeaderValue(setTraceIDHeaderValue))
-                throw ApproovService.unsafeSdkValue("a trace ID", setTraceIDHeaderKey);
+                throw ApproovService.unsafeSdkValue("trace ID", setTraceIDHeaderKey);
             setHeader(builder, setTraceIDHeaderKey, setTraceIDHeaderValue);
             changes.setTraceIDHeaderKey(setTraceIDHeaderKey);
         }
@@ -1920,8 +1919,7 @@ class ApproovTokenInterceptor implements Interceptor {
             } catch (IllegalArgumentException e) {
                 // the OkHttp message quotes the URL, which now holds secure strings, so neither it nor the
                 // cause is kept
-                throw new ApproovException("Query parameter substitution for " + queryKeys
-                        + ": the secure string does not form a valid URL");
+                throw new ApproovException("Query parameter substitution for " + queryKeys + ": invalid URL");
             }
             changes.setSubstitutionQueryParamResults(originalURL, queryKeys);
         }
@@ -2165,7 +2163,7 @@ class ApproovTokenInterceptor implements Interceptor {
         try {
             builder.header(name, value);
         } catch (IllegalArgumentException e) {
-            String message = "Approov cannot set header " + name + ": not a valid header name";
+            String message = "Approov header " + name + ": invalid name";
             ApproovLog.e(TAG, message);
             throw new ApproovException(message);
         }
@@ -2439,8 +2437,7 @@ class ApproovPinningInterceptor implements Interceptor {
             if (!osTrustOnlyHosts.contains(normalized) || !warnedOsTrustOnlyHosts.add(normalized))
                 return;
         }
-        ApproovLog.w(TAG, "Approov domain " + normalized + " has no pins and the managed trust roots are empty: "
-                + "its connections are validated by OS trust only");
+        ApproovLog.w(TAG, "Approov domain " + normalized + ": no pins and no managed trust roots, OS trust only");
     }
 
     /**

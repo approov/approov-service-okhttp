@@ -46,7 +46,7 @@ import okhttp3.mockwebserver.MockResponse;
 @RunWith(RobolectricTestRunner.class)
 @Config(manifest = Config.NONE)
 public class SdkUnsafeHeaderValue380Test {
-    private static final String APP_CONFIG_MESSAGE = "its value contains a character a header value cannot carry";
+    private static final String APP_CONFIG_MESSAGE = "invalid character in value";
     private static final ApproovServiceMutator[] MUTATORS = {
         ApproovServiceMutator.CLOSE_FAILURE, ApproovServiceMutator.ALWAYS_PROCEED
     };
@@ -96,8 +96,7 @@ public class SdkUnsafeHeaderValue380Test {
                 ApproovException e = RequestPathProbe.assertFailure(label, probe.run(request(), enqueued),
                         ApproovException.class);
                 assertTrue(label + ": an SDK problem naming the header: " + e.getMessage(),
-                        e.getMessage().contains("the Approov SDK issued " + what + " that header " + header
-                                + " cannot carry"));
+                        e.getMessage().contains("Approov SDK problem: " + what + " for header " + header));
                 assertFalse(label + ": reported as the app's configuration: " + e.getMessage(),
                         e.getMessage().contains(APP_CONFIG_MESSAGE));
                 assertNotQuoted(label, e, marker);
@@ -109,13 +108,13 @@ public class SdkUnsafeHeaderValue380Test {
     @Test
     public void anUnsafeTokenIsAnSdkProblem() throws Exception {
         assertSdkProblem("{\"operation\": \"fetchApproovToken\", \"response\": {\"status\": \"SUCCESS\","
-                + " \"token\": \"tok\\u00e9TOKENMARK\"}}", "a token", "Approov-Token", "TOKENMARK");
+                + " \"token\": \"tok\\u00e9TOKENMARK\"}}", "token", "Approov-Token", "TOKENMARK");
     }
 
     @Test
     public void anUnsafeTraceIDIsAnSdkProblem() throws Exception {
         assertSdkProblem("{\"operation\": \"fetchApproovToken\", \"response\": {\"status\": \"SUCCESS\","
-                + " \"traceID\": \"trace\\u0001TRACEMARK\"}}", "a trace ID", "Approov-TraceID", "TRACEMARK");
+                + " \"traceID\": \"trace\\u0001TRACEMARK\"}}", "trace ID", "Approov-TraceID", "TRACEMARK");
     }
 
     @Test
@@ -123,7 +122,7 @@ public class SdkUnsafeHeaderValue380Test {
         ApproovService.setTokenHeader("Authorization", "Beareré ");
         ApproovException e = RequestPathProbe.assertFailure("prefix", probe.run(request(), false),
                 ApproovException.class);
-        assertEquals("Approov cannot set header Authorization: " + APP_CONFIG_MESSAGE, e.getMessage());
+        assertEquals("Approov header Authorization: " + APP_CONFIG_MESSAGE, e.getMessage());
     }
 
     @Test

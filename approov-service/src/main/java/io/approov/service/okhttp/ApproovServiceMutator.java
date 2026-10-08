@@ -255,7 +255,7 @@ public interface ApproovServiceMutator {
     default boolean handleInterceptorShouldProcessRequest(Request request) throws IOException {
         if (request == null)
             throw ApproovService.standardDecision(new ApproovException(
-                    "handleInterceptorShouldProcessRequest method was passed a request that is null!"));
+                    "handleInterceptorShouldProcessRequest: null request"));
 
         // check if the URL matches one of the exclusion regexs and skip interceptor processing in these cases
         String url = request.url().toString();

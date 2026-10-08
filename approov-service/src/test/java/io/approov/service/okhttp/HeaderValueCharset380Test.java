@@ -212,8 +212,7 @@ public class HeaderValueCharset380Test {
                 ApproovException e = RequestPathProbe.assertFailure(what,
                         probe.run(new Request.Builder().url(fixture.server.url("/p")).build(), enqueued),
                         ApproovException.class);
-                assertEquals(what, "Approov cannot set header Authorization: its value contains a character "
-                        + "a header value cannot carry", e.getMessage());
+                assertEquals(what, "Approov header Authorization: invalid character in value", e.getMessage());
                 assertNull(what + ": no cause", e.getCause());
                 assertNeverQuoted(what, e, "PREFIXMARK");
                 assertNeverLogged(what, "PREFIXMARK");
@@ -252,8 +251,7 @@ public class HeaderValueCharset380Test {
             ApproovException e = RequestPathProbe.assertFailure(what,
                     probe.run(new Request.Builder().url(fixture.server.url("/p")).build(), enqueued),
                     ApproovException.class);
-            assertEquals(what, "Approov cannot set header X-App: its value contains a character "
-                    + "a header value cannot carry", e.getMessage());
+            assertEquals(what, "Approov header X-App: invalid character in value", e.getMessage());
             assertNull(what + ": no cause", e.getCause());
             assertNeverQuoted(what, e, "APPMARK");
             assertNeverLogged(what, "APPMARK");
