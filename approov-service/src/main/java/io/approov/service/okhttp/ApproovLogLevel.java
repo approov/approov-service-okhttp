@@ -17,23 +17,12 @@
 
 package io.approov.service.okhttp;
 
-/**
- * The logging levels of the service layer, set with
- * {@link ApproovService#setLoggingLevel(ApproovLogLevel)}. Each level includes
- * the levels before it: {@link #ERROR} writes errors only, {@link #INFO} (the
- * default) writes errors, warnings and information, and {@link #DEBUG} writes
- * everything, including the loggable token of each request. {@link #OFF} writes
- * nothing. The levels and their order match approov-service-ios.
- */
+// ApproovLogLevel is the logging level of the service layer set with ApproovService.setLoggingLevel, where each
+// level includes the levels before it
 public enum ApproovLogLevel {
-    /** Nothing is logged by the service layer. */
-    OFF,
-    /** Errors only. */
-    ERROR,
-    /** Errors and warnings. */
-    WARNING,
-    /** Errors, warnings and information; the default. */
-    INFO,
-    /** Everything, including the loggable token of each request. */
-    DEBUG
+    OFF,        // nothing is logged by the service layer
+    ERROR,      // errors only
+    WARNING,    // errors and warnings
+    INFO,       // errors, warnings and information, the default
+    DEBUG       // everything, including the loggable token of each request
 }

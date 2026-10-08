@@ -21,18 +21,7 @@ import android.util.Log;
 
 import okhttp3.HttpUrl;
 
-/**
- * The single route by which the service layer writes to the device log, gated by
- * the level set with {@link ApproovService#setLoggingLevel(ApproovLogLevel)}: an
- * error is written at ERROR and above, a warning at WARNING and above, an
- * information line at INFO (the default) and above, and a debug line at DEBUG.
- * Nothing is written at OFF.
- *
- * Debug logging enabled for the ApproovService tag, for example with
- * "adb shell setprop log.tag.ApproovService DEBUG", raises any level but OFF to
- * DEBUG, so that support can read the debug lines of a release build without a
- * rebuild. OFF is final: the app has opted out of all layer logging.
- */
+// ApproovLog writes all the service layer logging, gated by the level set with ApproovService.setLoggingLevel
 final class ApproovLog {
     // the tag whose platform debug setting raises the level to DEBUG
     static final String SUPPORT_TAG = "ApproovService";
@@ -40,24 +29,38 @@ final class ApproovLog {
     // the level set by the app; volatile as it is read on every request thread
     private static volatile ApproovLogLevel level = ApproovLogLevel.INFO;
 
+    /**
+     * Construction is disallowed as this is a static only class.
+     */
     private ApproovLog() {
     }
 
+    /**
+     * Sets the logging level.
+     *
+     * @param newLevel is the new logging level
+     */
     static void setLevel(ApproovLogLevel newLevel) {
         level = newLevel;
     }
 
+    /**
+     * Gets the logging level.
+     *
+     * @return the current logging level
+     */
     static ApproovLogLevel getLevel() {
         return level;
     }
 
     /**
-     * Indicates whether a line at the given level is written.
+     * Determines if a line at the given level is written.
      *
-     * @param wanted the level of the line
-     * @return true if the line is written
+     * @param wanted is the level of the line
+     * @return true if the line is written, false otherwise
      */
     static boolean isEnabled(ApproovLogLevel wanted) {
+        // OFF is final as the app has opted out of all logging
         ApproovLogLevel current = level;
         if (current == ApproovLogLevel.OFF)
             return false;
@@ -67,15 +70,16 @@ final class ApproovLog {
     }
 
     /**
-     * Indicates whether debug lines, the loggable token among them, are written.
+     * Determines if debug lines, the loggable token among them, are written.
      *
-     * @return true if debug lines are written
+     * @return true if debug lines are written, false otherwise
      */
     static boolean isDebugEnabled() {
         return isEnabled(ApproovLogLevel.DEBUG);
     }
 
-    // whether debug logging is enabled for the support tag by the platform setting
+    // determines if debug logging is enabled for the support tag (for example with "adb shell setprop
+    // log.tag.ApproovService DEBUG"), which raises any level but OFF to DEBUG without a rebuild
     private static boolean supportDebug() {
         try {
             return Log.isLoggable(SUPPORT_TAG, Log.DEBUG);
@@ -85,17 +89,17 @@ final class ApproovLog {
     }
 
     /**
-     * The URL as it may be logged: scheme, host, any non-default port and path,
-     * without user info, query or fragment, which may carry personal data or a
-     * substituted secure string.
+     * Gets the form of a URL that may be logged: scheme, host, any non-default port and path, without the
+     * user info, query or fragment, which may carry personal data or a substituted secure string.
      *
-     * @param url the URL
+     * @param url is the URL to be logged
      * @return the loggable form of the URL
      */
     static String loggableURL(HttpUrl url) {
         return url.newBuilder().username("").password("").query(null).fragment(null).build().toString();
     }
 
+    // writers for each level, each only writing if its level is enabled
     static void e(String tag, String message) {
         if (isEnabled(ApproovLogLevel.ERROR))
             Log.e(tag, message);

@@ -48,83 +48,54 @@ import okio.Buffer;
 import okio.ByteString;
 
 /**
- * HTTP message signing (RFC 9421) of the requests Approov protects, and the
- * signature parameters factory API that configures it.
- *
- * Message signing is not a service mutator. It is off by default in 3.8.0 and
- * switched on with {@link ApproovService#enableMessageSigning()}, whichever
- * {@link ApproovServiceMutator} makes the request decisions, and installing a
- * mutator never switches it on or off. Once on, every request carrying the
- * Approov token header is signed last, after the mutator's decisions, the
- * secure string substitutions and its handleInterceptorProcessedRequest
- * callback, so the signature covers what is sent. It is signed again whenever
- * its protection is reapplied (a redirect within a protected domain, an
- * authenticator retry, a stale protection refresh). From 4.0.0 signing is on
- * and compulsory.
- *
- * The default factory ({@link #generateDefaultSignatureParametersFactory()})
- * produces both the install (ECDSA P-256, per app installation key held in the
- * device secure hardware) and the account (HMAC-SHA256, shared account key)
- * signatures, emitted as the members "install" and "account" of the same
- * Signature and Signature-Input dictionaries over the same covered components.
- * Both are produced so that a device without secure hardware for the install
- * key still yields a verifiable signature; the backend chooses which it
- * verifies. A signature that cannot be produced is omitted and the request
- * proceeds with the remaining one, or unsigned, since the backend is the
- * enforcement point. The only deliberate failures are configuration errors by
- * the integrator: a required body digest that cannot be generated, or an
- * unsupported signature algorithm.
- *
- * Apps never construct this class: they pass a {@link SignatureParametersFactory}
- * to {@link ApproovService#enableMessageSigning(SignatureParametersFactory)} or
- * {@link ApproovService#putMessageSigningHostFactory(String, SignatureParametersFactory)}.
+ * ApproovDefaultMessageSigning provides HTTP message signing (RFC 9421) of the requests Approov protects,
+ * and the signature parameters factory that configures it. Message signing is enabled with
+ * ApproovService.enableMessageSigning, whichever service mutator makes the request decisions, and every
+ * request carrying the Approov token header is then signed last, so that the signature covers what is
+ * sent. It is signed again whenever its protection is reapplied.
+ * <p>
+ * The default factory produces both the install signature (ECDSA P-256 with a per app installation key
+ * held in the device secure hardware) and the account signature (HMAC-SHA256 with the account key), as
+ * the members "install" and "account" of the same Signature and Signature-Input headers, so that a device
+ * without secure hardware still provides a verifiable signature. A signature that cannot be produced is
+ * omitted and the request proceeds with the other one, or unsigned, since your backend API is the
+ * enforcement point. The only failures that abort a request are configuration errors: a required body
+ * digest that cannot be generated, or an unsupported signature algorithm.
+ * <p>
+ * Apps never construct this class, but pass a SignatureParametersFactory to
+ * ApproovService.enableMessageSigning or ApproovService.putMessageSigningHostFactory.
  */
 public class ApproovDefaultMessageSigning {
     // logging tag
     private static final String TAG = "ApproovMsgSign";
 
-    /**
-     * Constant for the SHA-256 digest algorithm (used for body digests).
-     */
+    // the SHA-256 digest algorithm, used for body digests
     public static final String DIGEST_SHA256 = "sha-256";
 
-    /**
-     * Constant for the SHA-512 digest algorithm (used for body digests).
-     */
+    // the SHA-512 digest algorithm, used for body digests
     public static final String DIGEST_SHA512 = "sha-512";
 
-    /**
-     * Constant for the ECDSA P-256 with SHA-256 algorithm (used when signing with
-     * install private key).
-     */
+    // the ECDSA P-256 with SHA-256 algorithm, used when signing with the install private key
     public final static String ALG_ES256 = "ecdsa-p256-sha256";
 
-    /**
-     * Constant for the HMAC with SHA-256 algorithm (used when signing with the
-     * account signing key).
-     */
+    // the HMAC with SHA-256 algorithm, used when signing with the account signing key
     public final static String ALG_HS256 = "hmac-sha256";
 
-    /**
-     * Signature dictionary member name for the install message signature.
-     */
+    // the Signature dictionary member name for the install message signature
     public final static String SIG_ID_INSTALL = "install";
 
-    /**
-     * Signature dictionary member name for the account message signature.
-     */
+    // the Signature dictionary member name for the account message signature
     public final static String SIG_ID_ACCOUNT = "account";
 
-    // the factory used for every host without a factory of its own, or null to
-    // sign nothing; read on the request threads, so volatile
+    // the factory used for every host without a factory of its own, or null to sign nothing, which is
+    // volatile as it is read on the request threads
     private volatile SignatureParametersFactory defaultFactory;
 
-    // factories for individual hosts, keyed by the lowercase host name (no port),
-    // read on the request threads
+    // factories for individual hosts, keyed by the lowercase host name without any port
     private final Map<String, SignatureParametersFactory> hostFactories = new ConcurrentHashMap<>();
 
     /**
-     * Constructs a signer with no factory. Only ApproovService constructs one.
+     * Constructs a signer with no factory, which is only done by ApproovService.
      */
     ApproovDefaultMessageSigning() {
     }
@@ -137,7 +108,7 @@ public class ApproovDefaultMessageSigning {
     /**
      * Sets the factory used for every host without a factory of its own.
      *
-     * @param factory the factory, or null to sign nothing for such hosts
+     * @param factory is the factory to be used, or null to sign nothing for such hosts
      * @return this signer
      */
     ApproovDefaultMessageSigning setDefaultFactory(SignatureParametersFactory factory) {
@@ -146,12 +117,10 @@ public class ApproovDefaultMessageSigning {
     }
 
     /**
-     * Uses a factory for requests to one host instead of the default factory.
+     * Sets the factory used for requests to one host instead of the default factory.
      *
-     * @param hostName the host name, matched without regard to case and without
-     *                 any port
-     * @param factory  the factory for the host, or null to remove the host's
-     *                 factory so that the default factory applies again
+     * @param hostName is the host name, matched without regard to case and without any port
+     * @param factory is the factory for the host, or null to use the default factory again
      * @return this signer
      */
     ApproovDefaultMessageSigning putHostFactory(String hostName, SignatureParametersFactory factory) {
@@ -166,10 +135,10 @@ public class ApproovDefaultMessageSigning {
     }
 
     /**
-     * Selects the factory for a request: the factory of its host if there is one,
-     * otherwise the default factory.
+     * Selects the factory for a request, which is the factory of its host if there is one or otherwise
+     * the default factory.
      *
-     * @param provider the component provider for the request
+     * @param provider is the component provider for the request
      * @return the factory, or null if none applies
      */
     private SignatureParametersFactory factoryFor(OkHttpComponentProvider provider) {
@@ -178,24 +147,20 @@ public class ApproovDefaultMessageSigning {
     }
 
     /**
-     * Signs a request that the Approov interceptor has protected. The request is
-     * only modified if it carries the Approov token header and a factory applies
-     * to its host.
+     * Signs a request that the Approov interceptor has protected. The request is only modified if it
+     * carries the Approov token header and a factory applies to its host. Any failure other than a
+     * configuration error leaves the request unsigned.
      *
-     * @param request the request as the Approov interceptor and the service
-     *                mutator left it
-     * @param changes the protection the Approov interceptor applied to it
-     * @return the request with the signature headers added, or the request
-     *         unchanged if it is not signed
-     * @throws RequiredBodyDigestException if a body digest configured as required
-     *                                     cannot be generated
-     * @throws ApproovException            if a signature algorithm is unsupported
+     * @param request is the request as the Approov interceptor and the service mutator left it
+     * @param changes is the protection the Approov interceptor applied to it
+     * @return the request with the signature headers added, or the request unchanged if it is not signed
+     * @throws RequiredBodyDigestException if a body digest configured as required cannot be generated
+     * @throws ApproovException if a signature algorithm is unsupported
      */
     Request sign(Request request, ApproovRequestMutations changes) throws ApproovException {
-        // Every failure other than the two configuration errors above, including a
-        // RuntimeException from the SDK, from a custom factory or from building the
-        // headers, is inside the fail-open (SPECIFICATION 3.3, 3.5): the request
-        // proceeds unsigned and nothing but an IOException leaves the request path.
+        // any failure other than the configuration errors, including a RuntimeException from the SDK, from a
+        // custom factory or from building the headers, leaves the request unsigned so that nothing but an
+        // IOException leaves the request path
         try {
             return signOrFail(request, changes);
         } catch (RuntimeException e) {
@@ -205,11 +170,13 @@ public class ApproovDefaultMessageSigning {
     }
 
     /**
-     * Signs a request, see {@link #sign(Request, ApproovRequestMutations)}.
+     * Signs a request, throwing any RuntimeException for sign to handle.
      *
-     * @throws RequiredBodyDigestException if a body digest configured as required
-     *                                     cannot be generated
-     * @throws ApproovException            if a signature algorithm is unsupported
+     * @param request is the request as the Approov interceptor and the service mutator left it
+     * @param changes is the protection the Approov interceptor applied to it
+     * @return the request with the signature headers added, or the request unchanged if it is not signed
+     * @throws RequiredBodyDigestException if a body digest configured as required cannot be generated
+     * @throws ApproovException if a signature algorithm is unsupported
      */
     private Request signOrFail(Request request, ApproovRequestMutations changes) throws ApproovException {
         if (changes == null || changes.getTokenHeaderKey() == null) {
@@ -222,59 +189,51 @@ public class ApproovDefaultMessageSigning {
             // no factory applies to this host so the request is not signed
             return request;
         }
-        // Build the signature parameters. This fails CLOSED (the RequiredBodyDigestException, an
-        // IOException, is rethrown) only when a body digest configured as required cannot be
-        // generated, which must abort the request. Any other failure here (including from a custom SignatureParametersFactory) fails
-        // OPEN: we log at error and proceed unsigned, because the backend is the enforcement point.
+
+        // build the signature parameters, which only aborts the request if a body digest configured as
+        // required cannot be generated, while any other failure (including from a custom factory) leaves
+        // the request unsigned as the backend is the enforcement point
         SignatureParameters params;
         try {
             params = factory.buildSignatureParameters(provider, changes);
         } catch (RequiredBodyDigestException e) {
-            // The only deliberate fail-closed build condition: a body digest configured as
-            // required could not be generated, so the request must be aborted.
             throw e;
         } catch (Exception e) {
             ApproovLog.e(TAG, "Failed to build signature parameters - proceeding unsigned: " + e);
             return request;
         }
         if (params == null) {
-            // No signature to be added to the request; return the original request.
+            // no signature is to be added to the request
             return request;
         }
 
-        // Determine the algorithms to sign with. A factory (or subclass) that sets an
-        // explicit algorithm on the parameters produces that single signature; otherwise
-        // the algorithms configured on the factory are used, which by default are both
-        // the install and the account signature.
+        // determine the algorithms to sign with, which is a single algorithm if the factory sets one
+        // explicitly on the parameters, or otherwise the algorithms configured on the factory (by default
+        // both the install and the account signature)
         List<String> algs;
         if (params.getAlg() != null) {
             algs = Collections.singletonList(params.getAlg());
         } else {
-            // a factory with no algorithm enabled throws IllegalStateException here,
-            // which is not one of the fail-closed conditions: the request is sent
-            // unsigned (see sign)
+            // a factory with no algorithm enabled throws IllegalStateException here, which leaves the
+            // request unsigned
             algs = factory.getAlgs();
         }
         for (String alg : algs) {
-            // an unsupported algorithm is an integrator configuration error and the
-            // only signing condition, besides a required body digest, that fails closed
-            // (SPECIFICATION 1.7(a)); like every failure on the request path it is an
-            // IOException, so an enqueued call reports it to onFailure
+            // an unsupported algorithm is a configuration error and aborts the request, as an IOException so
+            // that an enqueued call reports it to onFailure
             if (!ALG_ES256.equals(alg) && !ALG_HS256.equals(alg))
                 throw new ApproovException("Unsupported algorithm identifier: " + alg);
         }
 
-        // Generate a signature per algorithm over the same covered components. Each
-        // signature has its own signature base since the base includes the algorithm.
+        // generate a signature per algorithm over the same covered components, each with its own signature
+        // base since the base includes the algorithm
         Map<String, ListElement<?>> signatures = new LinkedHashMap<>();
         Map<String, ListElement<?>> signatureInputs = new LinkedHashMap<>();
         Map<String, String> messages = new LinkedHashMap<>();
         for (String alg : algs) {
             SignatureParameters algParams = new SignatureParameters(params).setAlg(alg);
-            // Apply the params to get the message. A failure building the signature base is not a
-            // deliberate fail-closed condition, so it also fails OPEN (proceed unsigned).
-            // WARNING never log the message as it contains an Approov token which provides
-            // access to your API.
+            // apply the params to get the message, leaving the request unsigned if this fails; WARNING never
+            // log the message as it contains an Approov token which provides access to your API
             String message;
             try {
                 message = new SignatureBaseBuilder(algParams, provider).createSignatureBase();
@@ -285,7 +244,7 @@ public class ApproovDefaultMessageSigning {
             String sigId = ALG_ES256.equals(alg) ? SIG_ID_INSTALL : SIG_ID_ACCOUNT;
             byte[] signature = ALG_ES256.equals(alg) ? installSignature(message) : accountSignature(message);
             if (signature == null) {
-                // this signature could not be produced: proceed with any other
+                // this signature could not be produced so we proceed with any other
                 ApproovLog.e(TAG, "Skipping " + sigId + " message signature");
                 continue;
             }
@@ -298,15 +257,13 @@ public class ApproovDefaultMessageSigning {
             return request;
         }
 
-        // RFC 9421 §4.2 defines each Signature dictionary member value as a Byte
-        // Sequence, serialized by RFC 8941 §3.3.5 as colon-delimited base64
-        // (for example, install=:<base64>:). Both signatures are members of the
-        // same dictionaries.
+        // each signature is a Byte Sequence member of the same Signature and Signature-Input dictionaries,
+        // serialized as colon delimited base64 (for example install=:<base64>:)
         String sigHeader = Dictionary.valueOf(signatures).serialize();
         String sigInputHeader = Dictionary.valueOf(signatureInputs).serialize();
 
-        // Update the request from the one held by the component provider as the
-        // signature builder may have modified it.
+        // update the request from the one held by the component provider as the signature builder may have
+        // modified it
         Request.Builder signedBuilder = provider.getRequest().newBuilder()
                 .header("Signature", sigHeader)
                 .header("Signature-Input", sigInputHeader);
@@ -325,20 +282,15 @@ public class ApproovDefaultMessageSigning {
             }
         }
         Request signed = signedBuilder.build();
-
-        // WARNING never log the full request as it contains an Approov token which
-        // provides access to your API
-        // ApproovLog.d(TAG, "Request String: " + signed.toString());
         return signed;
     }
 
     /**
-     * Produces the install message signature over the given message as the raw
-     * 64 byte r||s value required by RFC 9421 for ecdsa-p256-sha256, or null if
-     * it cannot be produced.
+     * Produces the install message signature over the given message as the raw 64 byte r||s value that
+     * ecdsa-p256-sha256 requires.
      *
-     * @param message the signature base
-     * @return the signature bytes, or null if unavailable
+     * @param message is the signature base
+     * @return the signature bytes, or null if not available
      */
     private static byte[] installSignature(String message) {
         String base64;
@@ -369,14 +321,11 @@ public class ApproovDefaultMessageSigning {
     }
 
     /**
-     * Converts an ASN.1 DER encoded ECDSA P-256 signature, as the SDK returns the
-     * install message signature, to the raw 64 byte r||s form that RFC 9421
-     * requires for ecdsa-p256-sha256. Tink's ecdsaDer2Ieee checks the DER
-     * structure but not that r and s fit in 32 bytes (an oversized r throws and an
-     * oversized s overwrites the end of r), so only input that is the canonical DER
-     * encoding of the result is accepted, as in approov-service-android.
+     * Converts an ASN.1 DER encoded ECDSA P-256 signature, as the SDK returns the install message signature,
+     * to the raw 64 byte r||s form that ecdsa-p256-sha256 requires. Only the canonical DER encoding of the
+     * result is accepted, since the Tink conversion does not check that r and s fit in 32 bytes.
      *
-     * @param der the DER encoded signature
+     * @param der is the DER encoded signature
      * @return the raw r||s signature
      * @throws IllegalArgumentException if der is not a canonical DER ES256 signature
      */
@@ -395,12 +344,11 @@ public class ApproovDefaultMessageSigning {
     }
 
     /**
-     * Produces the account message signature over the given message, or null if
-     * it cannot be produced (for instance because the account key is only
-     * delivered on a successful attestation).
+     * Produces the account message signature over the given message, which may not be available as the
+     * account key is only delivered on a successful attestation.
      *
-     * @param message the signature base
-     * @return the signature bytes, or null if unavailable
+     * @param message is the signature base
+     * @return the signature bytes, or null if not available
      */
     private static byte[] accountSignature(String message) {
         String base64;
@@ -423,27 +371,23 @@ public class ApproovDefaultMessageSigning {
     }
 
     /**
-     * Generates a default {@link SignatureParametersFactory} with predefined
-     * settings.
+     * Generates a default SignatureParametersFactory with predefined settings.
      *
-     * @return A new instance of {@link SignatureParametersFactory}.
+     * @return a new instance of SignatureParametersFactory
      */
     public static SignatureParametersFactory generateDefaultSignatureParametersFactory() {
         return generateDefaultSignatureParametersFactory(null);
     }
 
     /**
-     * Generates a default {@link SignatureParametersFactory} with optional base
-     * parameters.
+     * Generates a default SignatureParametersFactory with optional base parameters.
      *
-     * @param baseParametersOverride The base parameters to override, or
-     *                               {@code null} to use defaults.
-     * @return A new instance of {@link SignatureParametersFactory}.
+     * @param baseParametersOverride is the base parameters to be used, or null to use the defaults
+     * @return a new instance of SignatureParametersFactory
      */
     public static SignatureParametersFactory generateDefaultSignatureParametersFactory(
             SignatureParameters baseParametersOverride) {
-        // default expiry seconds - must encompass worst case request retry
-        // time and clock skew
+        // default expiry seconds - must encompass worst case request retry time and clock skew
         long defaultExpiresLifetime = 15;
         SignatureParameters baseParameters;
         if (baseParametersOverride != null) {
@@ -465,56 +409,52 @@ public class ApproovDefaultMessageSigning {
                 .setBodyDigestConfig(DIGEST_SHA256, false);
     }
 
-    /**
-     * Factory class for creating pre-request {@link SignatureParameters} with
-     * configurable settings. Each request passed to the factory builds a new
-     * SignatureParameters instance based on the configured settings and
-     * specific for the request.
-     */
+    // SignatureParametersFactory creates the SignatureParameters for each request from its configured settings
     public static class SignatureParametersFactory {
-        // The base parameters that are copied for every new generated message
-        // signature. Initialised to an empty SignatureParameters so that a bare
-        // SignatureParametersFactory() is safe to use without calling setBaseParameters().
+        // the base parameters that are copied for every new message signature, initially empty so that a
+        // bare factory is safe to use
         protected SignatureParameters baseParameters = new SignatureParameters();
-        // The algorithm to use for body digests, or null if no body digest is to be
-        // used.
+
+        // the algorithm to use for body digests, or null if no body digest is to be used
         protected String bodyDigestAlgorithm;
-        // True if a body digest is required; body digests cannot be generated for all
-        // requests - either because they have no body or because the request body is
-        // one shot.
+
+        // true if a body digest is required, noting that one cannot be generated for every request as it
+        // may have no body or a one shot body
         protected boolean bodyDigestRequired;
-        // True to produce the install message signature (ECDSA P-256 with the per
-        // installation key).
+
+        // true to produce the install message signature (ECDSA P-256 with the per installation key)
         protected boolean useInstallMessageSigning = true;
-        // True to produce the account message signature (HMAC-SHA256 with the shared
-        // account key). Both are true by default so that a bare factory produces both
-        // signatures unless one is selected explicitly.
+
+        // true to produce the account message signature (HMAC-SHA256 with the account key), so that by
+        // default a bare factory produces both signatures
         protected boolean useAccountMessageSigning = true;
-        // True to add the "created" timestamp field to the signature parameters.
+
+        // true to add the "created" timestamp field to the signature parameters
         protected boolean addCreated;
-        // Expiration lifetime in seconds; if >0 the "expires" field is added to the
-        // signature parameters.
+
+        // the expiration lifetime in seconds, where the "expires" field is only added if this is >0
         protected long expiresLifetime;
-        // True to add the Approov token header to the signature parameters. This is
-        // strongly advised.
+
+        // true to add the Approov token header to the signature parameters, which is strongly advised
         protected boolean addApproovTokenHeader;
+
+        // true to add any Approov TraceID header to the signature parameters
         protected boolean addApproovTraceIDHeader;
-        // True to add the Approov status header to the signature parameters if it is
-        // present, so that the reported fetch status cannot be stripped or altered
-        // without invalidating the signature.
+
+        // true to add any Approov status header to the signature parameters, so that the reported fetch
+        // status cannot be stripped or altered without invalidating the signature
         protected boolean addApproovStatusHeader;
-        // Lists the headers to add to the message signature if they are present in the
-        // request. (Non-optional headers should be added to the base parameters).
-        // Initialised to an empty list so that a bare SignatureParametersFactory() is
-        // safe to use without calling addOptionalHeaders().
+
+        // the headers to add to the message signature if they are present in the request (headers that are
+        // always required should be added to the base parameters), initially empty so that a bare factory
+        // is safe to use
         protected List<String> optionalHeaders = new ArrayList<>();
 
         /**
-         * Sets the base parameters for the factory. The base parameters are copied for
-         * every new generated message signature.
+         * Sets the base parameters for the factory, which are copied for every new message signature.
          *
-         * @param baseParameters The base parameters to set.
-         * @return The current instance for method chaining.
+         * @param baseParameters is the base parameters to be used
+         * @return this factory for method chaining
          */
         public SignatureParametersFactory setBaseParameters(SignatureParameters baseParameters) {
             this.baseParameters = baseParameters;
@@ -522,15 +462,13 @@ public class ApproovDefaultMessageSigning {
         }
 
         /**
-         * Configures the body digest settings for the factory. If set, then requests
-         * with bodies will have the digest created and added as a header to the request
-         * with the header included in the request's message signature.
+         * Sets the body digest configuration for the factory. If set, then a request with a body has the
+         * digest added as a header, which is included in the message signature.
          *
-         * @param bodyDigestAlgorithm The digest algorithm to use, or {@code null} to
-         *                            disable.
-         * @param required            Whether the body digest is required.
-         * @return The current instance for method chaining.
-         * @throws IllegalArgumentException If an unsupported algorithm is specified.
+         * @param bodyDigestAlgorithm is the digest algorithm to use, or null to disable body digests
+         * @param required is true if the body digest is required
+         * @return this factory for method chaining
+         * @throws IllegalArgumentException if an unsupported algorithm is specified
          */
         public SignatureParametersFactory setBodyDigestConfig(String bodyDigestAlgorithm, boolean required) {
             if (bodyDigestAlgorithm == null) {
@@ -545,9 +483,9 @@ public class ApproovDefaultMessageSigning {
         }
 
         /**
-         * Configures the factory to produce only the install message signature.
+         * Sets the factory to produce only the install message signature.
          *
-         * @return The current instance for method chaining.
+         * @return this factory for method chaining
          */
         public SignatureParametersFactory setUseInstallMessageSigning() {
             this.useInstallMessageSigning = true;
@@ -556,9 +494,9 @@ public class ApproovDefaultMessageSigning {
         }
 
         /**
-         * Configures the factory to produce only the account message signature.
+         * Sets the factory to produce only the account message signature.
          *
-         * @return The current instance for method chaining.
+         * @return this factory for method chaining
          */
         public SignatureParametersFactory setUseAccountMessageSigning() {
             this.useInstallMessageSigning = false;
@@ -567,12 +505,11 @@ public class ApproovDefaultMessageSigning {
         }
 
         /**
-         * Configures the factory to produce both the install and the account
-         * message signatures, as members "install" and "account" of the same
-         * Signature and Signature-Input dictionaries over the same covered
+         * Sets the factory to produce both the install and the account message signatures, as the members
+         * "install" and "account" of the same Signature and Signature-Input headers over the same covered
          * components. This is the default of a newly constructed factory.
          *
-         * @return The current instance for method chaining.
+         * @return this factory for method chaining
          */
         public SignatureParametersFactory setUseInstallAndAccountMessageSigning() {
             this.useInstallMessageSigning = true;
@@ -581,8 +518,7 @@ public class ApproovDefaultMessageSigning {
         }
 
         /**
-         * Gets the signature algorithms configured on this factory, in the order
-         * the signatures are emitted.
+         * Gets the signature algorithms configured on this factory, in the order the signatures are emitted.
          *
          * @return the algorithm identifiers
          * @throws IllegalStateException if neither signature is enabled
@@ -599,13 +535,11 @@ public class ApproovDefaultMessageSigning {
         }
 
         /**
-         * Sets whether the "created" field should be added to the signature parameters.
-         * The created field holds the device's timestamp indicating when the request
-         * was
-         * created.
+         * Sets whether the "created" field should be added to the signature parameters, which holds the
+         * device timestamp indicating when the request was created.
          *
-         * @param addCreated Whether to add the "created" field.
-         * @return The current instance for method chaining.
+         * @param addCreated is true to add the "created" field
+         * @return this factory for method chaining
          */
         public SignatureParametersFactory setAddCreated(boolean addCreated) {
             this.addCreated = addCreated;
@@ -613,16 +547,12 @@ public class ApproovDefaultMessageSigning {
         }
 
         /**
-         * Sets the expiration lifetime for the signature parameters. Only a
-         * value >0 will cause the expires attribute to be added to the
-         * SignatureParameters for a request. The expires attribute holds the
-         * timestamp indicating when the message signature will expire. It is
-         * equal to the created timestamp (if included) plus the expiration
-         * lifetime.
+         * Sets the expiration lifetime for the signature parameters. Only a value >0 causes the "expires"
+         * field to be added, which holds the timestamp when the message signature expires, equal to the
+         * created timestamp plus the expiration lifetime.
          *
-         * @param expiresLifetime The expiration lifetime in seconds, if <=0
-         *                        no expiration is added.
-         * @return The current instance for method chaining.
+         * @param expiresLifetime is the expiration lifetime in seconds, or <=0 to add no expiration
+         * @return this factory for method chaining
          */
         public SignatureParametersFactory setExpiresLifetime(long expiresLifetime) {
             this.expiresLifetime = expiresLifetime;
@@ -630,11 +560,10 @@ public class ApproovDefaultMessageSigning {
         }
 
         /**
-         * Sets whether the Approov token header should be added to the signature
-         * parameters.
+         * Sets whether the Approov token header should be added to the signature parameters.
          *
-         * @param addApproovTokenHeader Whether to add the Approov token header.
-         * @return The current instance for method chaining.
+         * @param addApproovTokenHeader is true to add the Approov token header
+         * @return this factory for method chaining
          */
         public SignatureParametersFactory setAddApproovTokenHeader(boolean addApproovTokenHeader) {
             this.addApproovTokenHeader = addApproovTokenHeader;
@@ -642,12 +571,10 @@ public class ApproovDefaultMessageSigning {
         }
 
         /**
-         * Sets whether the optional Approov traceID header should be added to the
-         * signature
-         * parameters.
+         * Sets whether the optional Approov TraceID header should be added to the signature parameters.
          *
-         * @param addApproovTraceIDHeader Whether to add the Approov traceID header.
-         * @return The current instance for method chaining.
+         * @param addApproovTraceIDHeader is true to add the Approov TraceID header
+         * @return this factory for method chaining
          */
         public SignatureParametersFactory setAddApproovTraceIDHeader(boolean addApproovTraceIDHeader) {
             this.addApproovTraceIDHeader = addApproovTraceIDHeader;
@@ -655,12 +582,11 @@ public class ApproovDefaultMessageSigning {
         }
 
         /**
-         * Sets whether the Approov status header, when present on the request, is
-         * covered by the signature so that the reported fetch status cannot be
-         * stripped or altered without invalidating the signature.
+         * Sets whether the Approov status header, if present on the request, is covered by the signature so
+         * that the reported fetch status cannot be stripped or altered without invalidating the signature.
          *
-         * @param addApproovStatusHeader Whether to cover the Approov status header.
-         * @return The current instance for method chaining.
+         * @param addApproovStatusHeader is true to cover the Approov status header
+         * @return this factory for method chaining
          */
         public SignatureParametersFactory setAddApproovStatusHeader(boolean addApproovStatusHeader) {
             this.addApproovStatusHeader = addApproovStatusHeader;
@@ -668,13 +594,11 @@ public class ApproovDefaultMessageSigning {
         }
 
         /**
-         * Adds optional headers to the signature parameters. Headers
-         * configured as optional are added to the generated
-         * SignatureParameters if the target request includes the header
-         * otherwise they are ignored.
+         * Adds optional headers to the signature parameters. A header configured as optional is added to
+         * the generated SignatureParameters if the request includes it, and is otherwise ignored.
          *
-         * @param headers The headers to add.
-         * @return The current instance for method chaining.
+         * @param headers is the headers to be added
+         * @return this factory for method chaining
          */
         public SignatureParametersFactory addOptionalHeaders(String... headers) {
             if (this.optionalHeaders == null) {
@@ -688,16 +612,14 @@ public class ApproovDefaultMessageSigning {
         /**
          * Generates a body digest for the request if possible.
          *
-         * @param provider          The component provider for the request.
-         * @param requestParameters The signature parameters to update.
-         * @return {@code true} if the body digest was successfully generated,
-         *         {@code false} otherwise.
+         * @param provider is the component provider for the request
+         * @param requestParameters is the signature parameters to be updated
+         * @return true if the body digest was generated, false otherwise
          */
         protected boolean generateBodyDigest(OkHttpComponentProvider provider, SignatureParameters requestParameters) {
+            // ignore null bodies, one shot bodies, or bodies of unknown length as these will likely require
+            // more specific knowledge, while an empty body has a digest like any other
             RequestBody body = provider.request.body();
-            // ignore null bodies, one shot bodies, or bodies of unknown length as these
-            // will likely require more specific knowledge; an empty body has a digest
-            // like any other (SPECIFICATION 3.3: whenever one can be computed)
             if (body == null || body.isOneShot()) {
                 return false;
             } else {
@@ -719,6 +641,7 @@ public class ApproovDefaultMessageSigning {
                 // ignore bodies that can't be interrogated
                 return false;
             }
+
             // calculate the digest
             ByteString digest;
             switch (bodyDigestAlgorithm) {
@@ -731,6 +654,7 @@ public class ApproovDefaultMessageSigning {
                 default:
                     return false;
             }
+
             // generate the header value
             Dictionary digestHeader = Dictionary.valueOf(Collections.singletonMap(
                     bodyDigestAlgorithm, ByteSequenceItem.valueOf(digest.toByteArray())));
@@ -741,6 +665,7 @@ public class ApproovDefaultMessageSigning {
                     .header("Content-Digest", digestHeader.serialize())
                     .build();
             provider.setRequest(request);
+
             // add the header to the SignatureParameters
             requestParameters.addComponentIdentifier("Content-Digest");
             return true;
@@ -749,17 +674,15 @@ public class ApproovDefaultMessageSigning {
         /**
          * Builds the signature parameters for a given request.
          *
-         * @param provider The component provider for the request.
-         * @param changes  The request mutations to apply.
-         * @return The generated {@link SignatureParameters}.
-         * @throws RequiredBodyDigestException If a body digest configured as required
-         *                                     cannot be generated.
+         * @param provider is the component provider for the request
+         * @param changes is the mutations applied to the request by Approov
+         * @return the generated SignatureParameters
+         * @throws RequiredBodyDigestException if a body digest configured as required cannot be generated
          */
         protected SignatureParameters buildSignatureParameters(OkHttpComponentProvider provider,
                 ApproovRequestMutations changes) throws RequiredBodyDigestException {
-            // the algorithm is left unset so that one signature per configured
-            // algorithm (see getAlgs) is produced over these same parameters; a
-            // subclass may set an explicit algorithm to produce that single signature
+            // the algorithm is left unset so that one signature per configured algorithm is produced over
+            // these same parameters, while a subclass may set an explicit algorithm for a single signature
             SignatureParameters requestParameters = new SignatureParameters(baseParameters);
             if (addCreated || expiresLifetime > 0) {
                 long currentTime = System.currentTimeMillis() / 1000;
@@ -793,67 +716,63 @@ public class ApproovDefaultMessageSigning {
         }
     }
 
-    /**
-     * Thrown when a body digest configured as <em>required</em> cannot be generated.
-     * This is the only signature-build condition that must fail CLOSED (abort the
-     * request, SPECIFICATION 1.7(a)). Every other build failure, including an
-     * {@link IllegalStateException} raised by a custom {@link SignatureParametersFactory}
-     * for an unrelated reason, fails OPEN (the request proceeds unsigned), because the
-     * backend is the enforcement point for message signatures.
-     * <p>
-     * It is an {@link ApproovException} and so an {@link java.io.IOException}: a
-     * synchronous call throws it and an enqueued call receives it in onFailure. Up to
-     * 3.5.x it was an IllegalStateException, which OkHttp rethrew on its dispatcher
-     * thread for an enqueued call, terminating the app.
-     */
+    // RequiredBodyDigestException is thrown if a body digest configured as required cannot be generated, which
+    // aborts the request
     public static class RequiredBodyDigestException extends ApproovException {
+        /**
+         * Constructs an exception due to a required body digest that cannot be generated.
+         *
+         * @param message is the basic information about the exception cause
+         */
         public RequiredBodyDigestException(String message) {
             super(message);
         }
     }
 
-    /**
-     * OkHttpComponentProvider implements the ComponentProvider interface for
-     * OkHttp3 requests.
-     *
-     * Every derived component comes from the request URL exactly as OkHttp sends
-     * it ({@link HttpUrl#toString()}, {@link HttpUrl#encodedPath()},
-     * {@link HttpUrl#encodedQuery()}), so that the backend reconstructs the same
-     * values from the request it receives (SPECIFICATION 3.3). The URL is never
-     * re-parsed with {@code java.net.URI} or {@link HttpUrl#uri()}, which re-encode
-     * characters such as {@code |} that OkHttp sends raw, and which reject some
-     * URLs OkHttp accepts.
-     */
+    // OkHttpComponentProvider implements the ComponentProvider interface for OkHttp requests, deriving every
+    // component from the request URL exactly as OkHttp sends it so that the backend reconstructs the same
+    // values, and never parsing it again with java.net.URI, which encodes some characters differently
     public static final class OkHttpComponentProvider implements ComponentProvider {
+        // the request being signed
         private Request request;
 
+        // the URL of the request
         private HttpUrl okURL;
 
         /**
-         * Constructs an instance of {@code OkHttpComponentProvider}.
+         * Constructs a component provider for a request.
          *
-         * @param request The OkHttp request to wrap.
+         * @param request is the OkHttp request to be wrapped
          */
         OkHttpComponentProvider(Request request) {
             this.request = request;
             this.okURL = request.url();
         }
 
+        /**
+         * Gets the request being signed.
+         *
+         * @return the request
+         */
         public Request getRequest() {
             return request;
         }
 
+        /**
+         * Sets the request being signed, such as when a body digest header is added.
+         *
+         * @param request is the new request
+         */
         public void setRequest(Request request) {
             this.request = request;
             this.okURL = request.url();
         }
 
         /**
-         * Gets the host of the request, without any port, as OkHttp holds it
-         * (lowercase, IPv6 addresses without brackets). Used to select a host
-         * factory.
+         * Gets the host of the request without any port, as OkHttp holds it (in lowercase, and an IPv6
+         * address without brackets), which is used to select a host factory.
          *
-         * @return the host
+         * @return the host of the request
          */
         String getHost() {
             return okURL.host();
@@ -865,9 +784,10 @@ public class ApproovDefaultMessageSigning {
         }
 
         /**
-         * Gets the authority (RFC 9421 section 2.2.3): the lowercase host, in
-         * brackets for an IPv6 address, followed by the port only when it is not
-         * the default port of the scheme.
+         * Gets the @authority derived component, which is the lowercase host, in brackets for an IPv6
+         * address, followed by the port only if it is not the default port of the scheme.
+         *
+         * @return the authority of the request
          */
         @Override
         public String getAuthority() {
@@ -884,8 +804,10 @@ public class ApproovDefaultMessageSigning {
         }
 
         /**
-         * Gets the target URI (RFC 9421 section 2.2.2): the URL as OkHttp sends
-         * it. A fragment is never sent, so it is left out.
+         * Gets the @target-uri derived component, which is the URL as OkHttp sends it, leaving out any
+         * fragment as that is never sent.
+         *
+         * @return the target URI of the request
          */
         @Override
         public String getTargetUri() {
@@ -897,8 +819,10 @@ public class ApproovDefaultMessageSigning {
         }
 
         /**
-         * Gets the request target (RFC 9421 section 2.2.5): the path and query as
-         * they appear in the request line.
+         * Gets the @request-target derived component, which is the path and query as they appear in the
+         * request line.
+         *
+         * @return the request target of the request
          */
         @Override
         public String getRequestTarget() {
@@ -912,8 +836,10 @@ public class ApproovDefaultMessageSigning {
         }
 
         /**
-         * Gets the query (RFC 9421 section 2.2.7): the query as sent with its
-         * leading {@code ?}, or {@code ?} alone when there is none.
+         * Gets the @query derived component, which is the query as sent with its leading "?", or "?" alone
+         * if there is none.
+         *
+         * @return the query of the request
          */
         @Override
         public String getQuery() {
@@ -922,10 +848,12 @@ public class ApproovDefaultMessageSigning {
         }
 
         /**
-         * Gets a query parameter (RFC 9421 section 2.2.8). The name is the encoded
-         * name from the component identifier; the value is the parameter's
-         * decoded value encoded again with the application/x-www-form-urlencoded
-         * percent-encode set, a space as {@code %20}.
+         * Gets the @query-param derived component for a name, which is the encoded name from the component
+         * identifier. The value is the decoded value of the parameter encoded again with the
+         * application/x-www-form-urlencoded percent-encode set, with a space as %20.
+         *
+         * @param name is the encoded name of the query parameter
+         * @return the value of the query parameter, or null if it occurs more than once
          */
         @Override
         public String getQueryParam(String name) {
@@ -933,23 +861,16 @@ public class ApproovDefaultMessageSigning {
             if (values.isEmpty()) {
                 throw new IllegalArgumentException("Could not find query parameter named " + name);
             } else if (values.size() > 1) {
-                // From Section 2.2.8 of the spec: If a parameter name occurs multiple times in
-                // a request, the
-                // named query parameter MUST NOT be included. If multiple parameters are common
-                // within
-                // an application, it is RECOMMENDED to sign the entire query string using the
-                // @query
-                // component identifier defined in Section 2.2.7.
-
-                // to indicate that a query param must not be included, we return null
+                // a query parameter that occurs more than once must not be included in the signature, which we
+                // indicate by returning null, and the whole @query should be signed instead
                 return null;
             }
             String value = values.get(0);
             return (value == null) ? "" : formEncode(value);
         }
 
-        // decodes application/x-www-form-urlencoded text: + is a space and %XX a
-        // byte of UTF-8; a malformed escape is kept as it is
+        // decodes application/x-www-form-urlencoded text where + is a space and %XX a byte of UTF-8, keeping
+        // a malformed escape as it is
         private static String formDecode(String text) {
             if (text.indexOf('%') < 0 && text.indexOf('+') < 0)
                 return text;
@@ -973,8 +894,8 @@ public class ApproovDefaultMessageSigning {
             return out.readUtf8();
         }
 
-        // percent-encodes UTF-8 text with the application/x-www-form-urlencoded
-        // percent-encode set, which leaves only ASCII letters, digits and *-._
+        // percent-encodes UTF-8 text with the application/x-www-form-urlencoded percent-encode set, which
+        // leaves only ASCII letters, digits and *-._
         private static String formEncode(String text) {
             byte[] bytes = text.getBytes(StandardCharsets.UTF_8);
             StringBuilder out = new StringBuilder(bytes.length);
@@ -990,6 +911,7 @@ public class ApproovDefaultMessageSigning {
             return out.toString();
         }
 
+        // the hexadecimal digits used for percent-encoding
         private static final char[] HEX_DIGITS = "0123456789ABCDEF".toCharArray();
 
         @Override
@@ -1008,19 +930,14 @@ public class ApproovDefaultMessageSigning {
         }
 
         /**
-         * Gets the values of a header field as OkHttp will send them. The request
-         * is signed before OkHttp's BridgeInterceptor, which runs between the
-         * application and the network interceptors and, for a request with a body,
-         * sets Content-Type from the body's media type (if it has one) and
-         * Content-Length from its length, removing Content-Length when the length
-         * is unknown and the body is sent chunked, whatever the app set. Those two
-         * fields are reported as Bridge will set them, so that the signature covers
-         * the values on the wire (SPECIFICATION 3.7); on a request that already
-         * passed Bridge (a reapplication at the network layer) the result is the
-         * same. Every other field is the request's own.
+         * Gets the values of a header field as OkHttp will send them. The request is signed before the OkHttp
+         * BridgeInterceptor, which sets Content-Type from the media type of any body and Content-Length from
+         * its length, removing Content-Length if the body is sent chunked, whatever the app set. Those two
+         * fields are reported as it will set them, so that the signature covers the values on the wire,
+         * while every other field is taken from the request.
          *
-         * @param name the field name
-         * @return the field's values, empty if it is not sent
+         * @param name is the field name
+         * @return the values of the field, or an empty list if it is not sent
          */
         private List<String> fieldValues(String name) {
             RequestBody body = request.body();

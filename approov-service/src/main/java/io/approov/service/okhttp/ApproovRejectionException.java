@@ -19,25 +19,26 @@ package io.approov.service.okhttp;
 
 import com.criticalblue.approovsdk.Approov;
 
+// ApproovRejectionException provides additional information if the app has been rejected by Approov
 public class ApproovRejectionException extends ApproovFetchStatusException {
     // provides a code of the app state for support purposes
     private final String arc;
+
     // provides a comma separated list of rejection reasons (if the feature is enabled in Approov)
     private final String rejectionReasons;
 
     /**
      * Constructs an exception if the app is rejected by Approov.
      *
-     * @param message basic information about the exception cause
-     * @param arc code that can be used for support purposes
-     * @param rejectionReasons comma separated list of rejection reasons, may be {@code null}
+     * @param message is the basic information about the exception cause
+     * @param arc is the code that can be used for support purposes
+     * @param rejectionReasons may provide a comma separated list of rejection reasons, or null
      */
     public ApproovRejectionException(String message, String arc, String rejectionReasons) {
         super(Approov.TokenFetchStatus.REJECTED, message);
         this.arc = arc;
         this.rejectionReasons = rejectionReasons;
     }
-
 
     /**
      * Gets the ARC associated with the rejection, which may be used for support as Approov

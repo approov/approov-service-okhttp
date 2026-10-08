@@ -25,9 +25,7 @@ import com.criticalblue.approovsdk.Approov;
 import java.util.List;
 import java.util.Map;
 
-/**
- * Direct, intentionally thin production delegation to the Approov SDK.
- */
+// DefaultApproovSdkFacade passes every call directly to the Approov SDK
 final class DefaultApproovSdkFacade implements ApproovSdkFacade {
     @Override
     public boolean initialize(Context context, String config, String updateConfig, String comment) {

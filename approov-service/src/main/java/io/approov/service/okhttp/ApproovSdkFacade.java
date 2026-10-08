@@ -25,12 +25,8 @@ import com.criticalblue.approovsdk.Approov;
 import java.util.List;
 import java.util.Map;
 
-/**
- * Package-private boundary around the static Approov SDK API. Production uses
- * the direct delegating implementation; tests can install a recording facade
- * without changing the public service API or globally mocking static methods.
- * Mirrors io.approov.service.android.ApproovSdkFacade.
- */
+// ApproovSdkFacade is the boundary through which the layer calls the static Approov SDK API, so that tests
+// can install a facade that records the calls
 interface ApproovSdkFacade {
     boolean initialize(Context context, String config, String updateConfig, String comment);
 

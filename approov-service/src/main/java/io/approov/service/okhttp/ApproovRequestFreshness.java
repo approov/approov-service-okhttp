@@ -27,73 +27,52 @@ import java.util.Set;
 import okhttp3.Headers;
 import okhttp3.Request;
 
-/**
- * ApproovRequestFreshness is attached as a tag to requests that have been given
- * Approov protection (token, status header and, by default, message signatures)
- * so that the protection can be checked again at the network layer, immediately
- * before the request is transmitted. A request may be held between protection
- * and transmission, most notably if the device enters a deep sleep or doze state
- * while the request is queued, or if the app holds requests in a retry/backoff
- * mechanism; the token and any message signature (which carries created/expires
- * timestamps) may then no longer be valid and the protection must be refreshed.
- * A request may also be redirected by OkHttp to a different URL, possibly on a
- * host Approov does not protect, in which case the protection of the original
- * destination must be stripped and the new destination classified afresh. The
- * marker describes exactly the protection applied to the request it is attached
- * to, so that it can be removed and reapplied.
- */
+// ApproovRequestFreshness is attached as a tag to a request given Approov protection and describes exactly the
+// protection applied, so that the network layer can strip and reapply it if the request was held too long
+// before transmission (such as during a device doze) or was redirected to another URL
 class ApproovRequestFreshness {
     // the URL string that was used for the Approov token fetch
     private final String fetchURL;
 
-    // the mutations that were applied to the request by the Approov interceptor,
-    // required to strip the protection from the request; a private copy once the
-    // layer has applied them (see freezeChanges)
+    // the mutations applied to the request by the Approov interceptor, needed to strip the protection
+    // from the request; a private copy once the layer has applied them
     private volatile ApproovRequestMutations changes;
 
-    // elapsed realtime (which advances during device sleep) at the point the
-    // protection was applied, or -1 if protection has not yet been marked
+    // elapsed realtime (which advances during device sleep) when the protection was applied, or -1 if
+    // not yet marked
     private volatile long protectedAtMillis;
 
-    // names of the headers that were added by the mutator's processed request
-    // callback (normally the message signature headers) which must be removed
-    // before the protection can be reapplied
+    // names of the headers added by the processed request callback or message signing, which must be
+    // removed before the protection is reapplied
     private volatile List<String> mutatorAddedHeaders;
 
-    // the URL of the request as it left the Approov interceptor (after any query
-    // parameter substitution), or null if unknown; a network attempt whose URL
-    // differs is a redirect followup that must be reclassified
+    // the URL of the request as it left the Approov interceptor (after any query parameter substitution),
+    // or null if unknown; an attempt with a different URL is a redirect that must be reclassified
     private volatile String appliedURL;
 
-    // the HTTP method of the request as it left the Approov interceptor; a network
-    // attempt whose method differs (a 303 turning a POST into a GET) carries a
-    // signature over the wrong method and must be reprotected
+    // the HTTP method of the request as it left the Approov interceptor; an attempt with a different
+    // method (a 303 turning a POST into a GET) must be reprotected
     private volatile String appliedMethod;
 
-    // the headers of the request as seen by the network layer on the first attempt
-    // after the protection was applied (OkHttp adds its own transport headers between
-    // the application and the network interceptors, so the baseline is taken there);
-    // a later attempt whose headers differ was rebuilt by the app or by OkHttp (an
-    // Authenticator replacing Authorization on a 401) and any signature over the old
-    // headers is invalid, so it must be reprotected. Null until the first attempt.
+    // the headers of the request on its first network attempt (OkHttp adds its transport headers before
+    // the network layer), or null until then; an attempt with different headers (an Authenticator
+    // replacing Authorization on a 401) must be reprotected
     private volatile Headers appliedHeaders;
 
-    // the complete ordered values each substituted header had before substitution,
-    // so that the placeholders can be restored when the protection is stripped
+    // the complete ordered values each substituted header had before substitution, so that the
+    // placeholders can be restored when the protection is stripped
     private volatile Map<String, List<String>> originalHeaderValues;
 
-    // a SHA-256 digest of the value each substituted header was given, as stored on
-    // the built request, so that the placeholder is only restored if the header still
-    // holds what this layer installed and not a value the app changed afterwards (for
-    // example from an OkHttp authenticator). A digest rather than the value: the layer
-    // keeps no copy of a secure string beyond the request that carries it.
+    // a SHA-256 digest of the value each substituted header was given, so that a placeholder is only
+    // restored if the header still holds what we installed; a digest is held so that we keep no copy
+    // of a secure string
     private volatile Map<String, String> installedHeaderDigests;
 
     /**
      * Constructs a marker for protection applied to a request.
      *
-     * @param fetchURL the URL string used for the Approov token fetch
-     * @param changes  the mutations applied to the request
+     * @param fetchURL is the URL string used for the Approov token fetch
+     * @param changes is the mutations applied to the request
      */
     ApproovRequestFreshness(String fetchURL, ApproovRequestMutations changes) {
         this.fetchURL = fetchURL;
@@ -107,6 +86,7 @@ class ApproovRequestFreshness {
         this.installedHeaderDigests = Collections.emptyMap();
     }
 
+    // getters and setters for the protection state
     String getFetchURL() {
         return fetchURL;
     }
@@ -116,11 +96,8 @@ class ApproovRequestFreshness {
     }
 
     /**
-     * Replaces the mutations with a private copy once the layer has applied them,
-     * before the service mutator's processed request callback is handed the
-     * original: its setters are public, and the protection stripped from the
-     * request (and signed) must be what the layer applied, whatever the callback
-     * does to that object.
+     * Replaces the mutations with a private copy, before the processed request callback is given the
+     * original, so that the protection stripped and signed is what the layer applied.
      */
     void freezeChanges() {
         changes = changes.copy();
@@ -137,9 +114,8 @@ class ApproovRequestFreshness {
     /**
      * Records that the protection has been applied.
      *
-     * @param protectedAtMillis   elapsed realtime at which protection was applied
-     * @param mutatorAddedHeaders names of headers added by the processed request
-     *                            callback
+     * @param protectedAtMillis is the elapsed realtime at which protection was applied
+     * @param mutatorAddedHeaders is the names of the headers added by the processed request callback
      */
     void markProtected(long protectedAtMillis, List<String> mutatorAddedHeaders) {
         this.protectedAtMillis = protectedAtMillis;
@@ -175,12 +151,11 @@ class ApproovRequestFreshness {
     }
 
     /**
-     * Indicates whether a header still holds the value this layer installed by
-     * substitution.
+     * Determines if a header still holds the value this layer installed by substitution.
      *
-     * @param header the header name
-     * @param value  the header's current single value
-     * @return true if the value is the one installed
+     * @param header is the header name
+     * @param value is the current single value of the header
+     * @return true if the value is the one installed, false otherwise
      */
     boolean isInstalledValue(String header, String value) {
         String digest = installedHeaderDigests.get(header);
@@ -190,11 +165,9 @@ class ApproovRequestFreshness {
     /**
      * Records the secure string substitutions applied to the request.
      *
-     * @param originalHeaderValues  the complete values each header had before
-     * @param installedHeaderValues the value each header carries after substitution,
-     *                              as stored on the built request (OkHttp trims
-     *                              header values when they are set); only a digest
-     *                              is kept
+     * @param originalHeaderValues is the complete values each header had before substitution
+     * @param installedHeaderValues is the value each header carries after substitution, as stored on the
+     * built request (OkHttp trims header values), of which only a digest is kept
      */
     void setSubstitutions(Map<String, List<String>> originalHeaderValues, Map<String, String> installedHeaderValues) {
         this.originalHeaderValues = originalHeaderValues;
@@ -221,11 +194,11 @@ class ApproovRequestFreshness {
     }
 
     /**
-     * Determines the names of the headers present on the after request that are
-     * not present on the before request, compared case insensitively.
+     * Determines the names of the headers present on the after request that are not present on the before
+     * request, compared case insensitively.
      *
-     * @param before the request before the processed request callback
-     * @param after  the request after the processed request callback
+     * @param before is the request before the processed request callback
+     * @param after is the request after the processed request callback
      * @return the names of the added headers
      */
     static List<String> addedHeaderNames(Request before, Request after) {

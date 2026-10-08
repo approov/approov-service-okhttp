@@ -19,27 +19,26 @@ package io.approov.service.okhttp;
 
 import com.criticalblue.approovsdk.Approov;
 
-/**
- * @deprecated Use {@link ApproovFetchStatusException} instead. This subtype is retained only to avoid
- *             breaking existing handlers and call sites; migrate any explicit catches to use the parent class.
- */
+// ApproovNetworkException indicates an exception caused by networking conditions which is likely to be
+// temporary so a user initiated retry should be performed. Deprecated: catch ApproovFetchStatusException
+// instead, this subclass is kept so that existing handlers continue to work
 @Deprecated
 public class ApproovNetworkException extends ApproovFetchStatusException {
 
     /**
      * Constructs an Approov networking exception.
      *
-     * @param message basic information about the exception cause
+     * @param message is the basic information about the exception cause
      */
     public ApproovNetworkException(String message) {
         super(null, message);
     }
 
     /**
-     * Constructs an Approov networking exception with a specific token fetch status.
+     * Constructs an Approov networking exception with the fetch status that caused it.
      *
-     * @param status token fetch status that triggered the error
-     * @param message basic information about the exception cause
+     * @param status is the fetch status that caused the exception
+     * @param message is the basic information about the exception cause
      */
     public ApproovNetworkException(Approov.TokenFetchStatus status, String message) {
         super(status, message);
