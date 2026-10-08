@@ -209,3 +209,41 @@ tasks.register('verifyPublishedPom') {
         }
     }
 }
+
+// the Approov SDK version this layer depends on, read from its declared dependency
+def approovSdkDependencyVersion = configurations.implementation.dependencies
+        .find { (it.group == 'io.approov') && (it.name == 'approov-android-sdk') }?.version
+
+tasks.register('verifyReleaseSdkVersion') {
+    group = 'verification'
+    description = 'Fails a 3.8.x or later release whose Approov SDK dependency is 3.5.x. Only the release path runs it, ' +
+            'so development and tests may stay on a 3.5.x SDK.'
+    def pomFile = layout.projectDirectory.file('pom.xml')
+    def releaseVersion = project.findProperty('approovServiceVersion')?.toString()
+    def gradleSdkVersion = approovSdkDependencyVersion
+    inputs.file(pomFile)
+    doLast {
+        if (!(releaseVersion ==~ /\d+\.\d+\.\d+/))
+            throw new GradleException("verifyReleaseSdkVersion: release version must be x.y.z " +
+                    "(-PapproovServiceVersion), got ${releaseVersion}")
+        def pomSdk = new groovy.xml.XmlSlurper().parse(pomFile.asFile).dependencies.dependency
+                .find { (it.groupId.text() == 'io.approov') && (it.artifactId.text() == 'approov-android-sdk') }
+        def sdkVersions = ['build.gradle': gradleSdkVersion, 'pom.xml': pomSdk?.version?.text()]
+        sdkVersions.each { where, version ->
+            if (!version)
+                throw new GradleException("verifyReleaseSdkVersion: no Approov SDK dependency in ${where}")
+        }
+
+        // the 3.8.x line needs the 3.8.0 SDK, and the 3.5.x SDK reports statuses (MITM_DETECTED) that it no
+        // longer handles once released
+        def (major, minor) = releaseVersion.tokenize('.').collect { it as int }
+        if ((major > 3) || ((major == 3) && (minor >= 8))) {
+            sdkVersions.each { where, version ->
+                if (version ==~ /3\.5(\..*)?/)
+                    throw new GradleException("verifyReleaseSdkVersion: release ${releaseVersion} depends on " +
+                            "Approov SDK ${version} in ${where}, a 3.8.x or later release needs SDK 3.8.0 or later")
+            }
+        }
+        logger.lifecycle("Release ${releaseVersion}: Approov SDK ${sdkVersions['build.gradle']} accepted")
+    }
+}

@@ -123,6 +123,10 @@ jobs:
           fi
           printf 'trust\n5\ny\nquit\n' | gpg --batch --yes --command-fd 0 --edit-key "$KEY_ID"
 
+      # development and tests may run on a 3.5.x SDK, but a 3.8.x or later release must never ship on one
+      - name: Verify Approov SDK dependency
+        run: ./gradlew verifyReleaseSdkVersion -PapproovServiceVersion="$CURRENT_TAG"
+
       - name: Build AAR
         run: ./gradlew assembleRelease -PapproovServiceVersion="$CURRENT_TAG"
 

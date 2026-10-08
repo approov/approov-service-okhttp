@@ -20,6 +20,10 @@ if [[ ! "$CURRENT_TAG" =~ ^[0-9]+\.[0-9]+\.[0-9]+$ ]]; then
     exit 1
 fi
 
+# A 3.8.x or later release must never ship on a 3.5.x Approov SDK, even when this script is run outside the
+# release workflow
+(cd .. && ./gradlew -q verifyReleaseSdkVersion -PapproovServiceVersion="${CURRENT_TAG}")
+
 # The version of the package that will be build and will be visible in maven central
 # For Approov SDK release 3.4.0 (library 7270) the version was 3.4.0
 # This is also used to rename the folder where the package is stored by replacing the TAG-RENAME-DIR
