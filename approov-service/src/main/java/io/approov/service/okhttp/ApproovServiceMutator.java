@@ -122,7 +122,7 @@ public interface ApproovServiceMutator {
      * Determines if a token fetch status is a network failure, meaning that the attestation could not be
      * performed because of the network rather than because of the app or device. These are NO_NETWORK,
      * POOR_NETWORK and UNTRUSTED_NETWORK, which reports a fundamental TLS trust failure, and MITM_DETECTED,
-     * which only an SDK before 3.8.0 reports.
+     * which only an SDK before 3.7.0 reports.
      *
      * @param status is the token fetch status to classify
      * @return true if the status is a network failure, false otherwise
@@ -134,7 +134,7 @@ public interface ApproovServiceMutator {
                 return true;
             default:
                 // TODO replace with "case UNTRUSTED_NETWORK:" and drop MITM_DETECTED once the layer depends on the
-                // 3.8.0 SDK, as matching by name compiles against the SDK enums both with and without them
+                // 3.7.0 SDK, as matching by name compiles against the SDK enums both with and without them
                 String name = status.name();
                 return "UNTRUSTED_NETWORK".equals(name) || "MITM_DETECTED".equals(name);
         }

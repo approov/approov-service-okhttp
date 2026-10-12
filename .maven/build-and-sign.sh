@@ -20,7 +20,7 @@ if [[ ! "$CURRENT_TAG" =~ ^[0-9]+\.[0-9]+\.[0-9]+$ ]]; then
     exit 1
 fi
 
-# A 3.8.x or later release must never ship on a 3.5.x Approov SDK, even when this script is run outside the
+# A 3.7.x or later release must never ship on a 3.5.x Approov SDK, even when this script is run outside the
 # release workflow
 (cd .. && ./gradlew -q verifyReleaseSdkVersion -PapproovServiceVersion="${CURRENT_TAG}")
 
