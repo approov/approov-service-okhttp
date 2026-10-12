@@ -52,7 +52,7 @@ public class ApproovServiceMiniSdkTest {
     public void setUp() {
         context = ApplicationProvider.getApplicationContext();
         AttesterProxyController.reset();
-        // initialize never resets configuration in 3.8.0, so
+        // initialize never resets configuration in 3.7.0, so
         // each test starts from a clean layer state
         ApproovService.reset();
         ApproovService.initialize(context, validInitialConfig, "reinit-okhttp-tests");
@@ -343,13 +343,13 @@ public class ApproovServiceMiniSdkTest {
             // though the mini-SDK supplies a trace ID with the failure (decided 2026-10-07)
             assertNull(getHeader(reply, "Approov-Token"));
             assertNull(getHeader(reply, "Approov-TraceID"));
-            // 3.8.0 §4: the status is reported on the status header
+            // 3.7.0 §4: the status is reported on the status header
             assertEquals("no_approov_service", getHeader(reply, "Approov-Status"));
         }
     }
 
     // ==================================================================================
-    // 3.8.0 Behaviour-Spec §1 always proceed, §4 status header (T37-01, T37-05, T37-06, T37-07)
+    // 3.7.0 Behaviour-Spec §1 always proceed, §4 status header (T37-01, T37-05, T37-06, T37-07)
     // ==================================================================================
 
     /**
@@ -370,7 +370,7 @@ public class ApproovServiceMiniSdkTest {
                 "    \"status\": \"" + status + "\"" +
                 "  }" +
                 "}");
-            // T37-01: under ALWAYS_PROCEED (opt-in in 3.8.0) every status proceeds
+            // T37-01: under ALWAYS_PROCEED (opt-in in 3.7.0) every status proceeds
             ApproovService.setServiceMutator(ApproovServiceMutator.ALWAYS_PROCEED);
 
             OkHttpClient client = ApproovService.getOkHttpClient();
@@ -798,7 +798,7 @@ public class ApproovServiceMiniSdkTest {
     }
 
     /**
-     * UNTRUSTED_NETWORK (the 3.8.0 replacement of
+     * UNTRUSTED_NETWORK (the 3.7.0 replacement of
      * MITM_DETECTED) is a network failure for the direct methods: fetchToken,
      * fetchSecureString, fetchCustomJWT and precheck throw ApproovNetworkException.
      */
@@ -946,7 +946,7 @@ public class ApproovServiceMiniSdkTest {
     }
 
     /**
-     * §3 Service Mutator Override / 3.8.0 §1 opt-in abort (M37-02)
+     * §3 Service Mutator Override / 3.7.0 §1 opt-in abort (M37-02)
      *
      * A custom mutator may opt in to aborting a request for an outcome the app does
      * not accept by throwing. The exception is a standard network stack exception
@@ -991,13 +991,13 @@ public class ApproovServiceMiniSdkTest {
     }
 
     // ==================================================================================
-    // 3.8.0 SPECIFICATION 1.0, 5.5, 6.2: DEFAULT is CLOSE_FAILURE, ALWAYS_PROCEED opt-in
+    // 3.7.0 SPECIFICATION 1.0, 5.5, 6.2: DEFAULT is CLOSE_FAILURE, ALWAYS_PROCEED opt-in
     // (T37-01a, T37-02)
     // ==================================================================================
 
     /**
      * T37-01a: the out-of-the-box mutator, and the one setServiceMutator(null)
-     * reinstates, is CLOSE_FAILURE in 3.8.0: a REJECTED token fetch aborts with the
+     * reinstates, is CLOSE_FAILURE in 3.7.0: a REJECTED token fetch aborts with the
      * fetch status exception and sends nothing, a network status aborts with the
      * network exception, and NO_APPROOV_SERVICE proceeds with the status header and
      * no token header. A custom mutator that overrides no decision gets the
@@ -1037,7 +1037,7 @@ public class ApproovServiceMiniSdkTest {
      * SUCCESS adds the token, NO_APPROOV_SERVICE the status header only, UNKNOWN_URL and
      * UNPROTECTED_URL send no Approov headers, the network statuses throw the
      * network exception and every other status the fetch status exception, with no
-     * request reaching the wire. setProceedOnNetworkFail is removed in 3.8.0:
+     * request reaching the wire. setProceedOnNetworkFail is removed in 3.7.0:
      * the network statuses always throw under CLOSE_FAILURE.
      */
     @Test
@@ -1323,7 +1323,7 @@ public class ApproovServiceMiniSdkTest {
 
     /**
      * SPECIFICATION 3.1, 3.2, 3.6 / T37-04: guard the out-of-the-box signing state
-     * so that a change of default cannot ship unreviewed. In 3.8.0 no request
+     * so that a change of default cannot ship unreviewed. In 3.7.0 no request
      * carries Signature or Signature-Input until enableMessageSigning() is called;
      * after that one call every protected request carries both the install
      * (ecdsa-p256-sha256) and the account (hmac-sha256) members of the same
@@ -1472,7 +1472,7 @@ public class ApproovServiceMiniSdkTest {
     }
 
     /**
-     * 3.8.0 §3: when one of the two default signatures cannot be produced the
+     * 3.7.0 §3: when one of the two default signatures cannot be produced the
      * request proceeds with the other, rather than unsigned or aborted.
      */
     @Test
@@ -1946,7 +1946,7 @@ public class ApproovServiceMiniSdkTest {
     }
 
     // ==================================================================================
-    // Review findings 2026-09-08 (external review of feature/3.8.0): regressions kept
+    // Review findings 2026-09-08 (external review of feature/3.7.0): regressions kept
     // as permanent tests. SPECIFICATION 2.4, 2.5, 4.5, 6.3, 7.1.
     // ==================================================================================
 
@@ -2541,7 +2541,7 @@ public class ApproovServiceMiniSdkTest {
                 "setUseApproovStatusIfNoToken", "getUseApproovStatusIfNoToken",
                 "setApproovInterceptorExtensions", "getApproovInterceptorExtensions",
                 "setProceedOnNetworkFail", "getProceedOnNetworkFail", "prefetch"})
-            assertFalse(removed + " must be removed on 3.8.x", names.contains(removed));
+            assertFalse(removed + " must be removed on 3.7.x", names.contains(removed));
         // signing is switched with enableMessageSigning, never through a mutator
         assertFalse("createDefaultServiceMutator must be removed", names.contains("createDefaultServiceMutator"));
         for (String retained : new String[] {"getMessageSignature", "setApproovHeader",
@@ -2551,14 +2551,14 @@ public class ApproovServiceMiniSdkTest {
             assertTrue(retained + " must be present", names.contains(retained));
         try {
             Class.forName("io.approov.service.okhttp.ApproovInterceptorExtensions");
-            fail("ApproovInterceptorExtensions must be removed on 3.8.x");
+            fail("ApproovInterceptorExtensions must be removed on 3.7.x");
         } catch (ClassNotFoundException expected) {
             // removed
         }
         for (String removed : new String[] {"processedRequest", "handleInterceptorProcessedRequest"}) {
             try {
                 ApproovDefaultMessageSigning.class.getMethod(removed, Request.class, ApproovRequestMutations.class);
-                fail(removed + " must not be part of ApproovDefaultMessageSigning on 3.8.x");
+                fail(removed + " must not be part of ApproovDefaultMessageSigning on 3.7.x");
             } catch (NoSuchMethodException expected) {
                 // removed
             }
