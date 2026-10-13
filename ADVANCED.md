@@ -133,6 +133,73 @@ ApproovService.putMessageSigningHostFactory("payments.example.com", paymentsFact
 
 A host factory applies to requests to that host (matched without regard to case, without the port); the default factory to every other protected host. `putMessageSigningHostFactory(host, null)` removes a host factory. Return `null` from a custom factory to leave a request unsigned. Custom covered components are built with `io.approov.util.okhttp.sig.SignatureParameters`.
 
+### Custom factory
+
+To choose the covered components per request, subclass `SignatureParametersFactory`, override `buildSignatureParameters` and hand each request to a ready-made factory from `generateDefaultSignatureParametersFactory`. This signs requests to `example.api.com` whose path starts with `/download` without the target URI, and every other path with the default components:
+
+```kotlin
+import io.approov.service.okhttp.ApproovDefaultMessageSigning
+import io.approov.service.okhttp.ApproovDefaultMessageSigning.OkHttpComponentProvider
+import io.approov.service.okhttp.ApproovDefaultMessageSigning.SignatureParametersFactory
+import io.approov.service.okhttp.ApproovRequestMutations
+import io.approov.service.okhttp.ApproovService
+import io.approov.util.okhttp.sig.ComponentProvider
+import io.approov.util.okhttp.sig.SignatureParameters
+
+class DownloadPathFactory : SignatureParametersFactory() {
+    // the factory for download requests, whose only base component is the method
+    private val downloadFactory = ApproovDefaultMessageSigning.generateDefaultSignatureParametersFactory(
+        SignatureParameters().addComponentIdentifier(ComponentProvider.DC_METHOD))
+
+    // the factory for every other request
+    private val defaultFactory = ApproovDefaultMessageSigning.generateDefaultSignatureParametersFactory()
+
+    override fun buildSignatureParameters(provider: OkHttpComponentProvider,
+                                          changes: ApproovRequestMutations): SignatureParameters? {
+        // choose the delegate by the request path
+        return if (provider.path.startsWith("/download")) {
+            downloadFactory.buildSignatureParameters(provider, changes)
+        } else {
+            defaultFactory.buildSignatureParameters(provider, changes)
+        }
+    }
+}
+
+ApproovService.enableMessageSigning()
+ApproovService.putMessageSigningHostFactory("example.api.com", DownloadPathFactory())
+```
+
+The same in Java:
+
+```java
+public class DownloadPathFactory extends ApproovDefaultMessageSigning.SignatureParametersFactory {
+    // the factory for download requests, whose only base component is the method
+    private final SignatureParametersFactory downloadFactory = ApproovDefaultMessageSigning
+            .generateDefaultSignatureParametersFactory(
+                    new SignatureParameters().addComponentIdentifier(ComponentProvider.DC_METHOD));
+
+    // the factory for every other request
+    private final SignatureParametersFactory defaultFactory =
+            ApproovDefaultMessageSigning.generateDefaultSignatureParametersFactory();
+
+    @Override
+    public SignatureParameters buildSignatureParameters(OkHttpComponentProvider provider,
+            ApproovRequestMutations changes) throws RequiredBodyDigestException {
+        // choose the delegate by the request path
+        if (provider.getPath().startsWith("/download")) {
+            return downloadFactory.buildSignatureParameters(provider, changes);
+        }
+        return defaultFactory.buildSignatureParameters(provider, changes);
+    }
+}
+```
+
+Three things to know when writing one:
+
+- The signatures that are produced come from the factory that is installed, the `DownloadPathFactory` here, and not from the delegate that built the parameters. A newly constructed factory produces both the install and the account signature. If the delegates produce only one, call the same method on the installed factory too (`DownloadPathFactory().setUseInstallMessageSigning()`), or the other signature is added as well. Parameters that set an explicit `alg` produce that single signature whatever the installed factory says.
+- Returning `null` leaves the request unsigned. An override that throws leaves the request unsigned too, except for `RequiredBodyDigestException`, which fails the request, so let it propagate from a delegate configured with a required body digest.
+- Each delegate is shared by every request it serves, so it is configured once and not changed afterwards.
+
 ### Verifying signatures on the backend
 
 The verifier needs the account message signing key for the `account` signature (the `install` signature is verified with the public key carried in the Approov token). The CLI prints it with `approov secret -messageSigningKey get-base64url`, but that command does not print the key alone: a banner, a warning, the password prompt, the key ID and the encoding come before the key line. Take only the key line when you copy it or capture it in a script; anything else in the configured key makes every account signature fail to verify.

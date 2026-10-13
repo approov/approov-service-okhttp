@@ -681,14 +681,18 @@ public class ApproovDefaultMessageSigning {
         }
 
         /**
-         * Builds the signature parameters for a given request.
+         * Builds the signature parameters for a given request. A subclass may override this and call it on
+         * another factory to hand a request to that factory, for example one from
+         * generateDefaultSignatureParametersFactory. A null result means the request is not signed.
+         * Note that the algorithms are taken from the factory that is installed, not from the factory that
+         * built the parameters, unless the parameters set an algorithm themselves.
          *
          * @param provider is the component provider for the request
          * @param changes is the mutations applied to the request by Approov
          * @return the generated SignatureParameters
          * @throws RequiredBodyDigestException if a body digest configured as required cannot be generated
          */
-        protected SignatureParameters buildSignatureParameters(OkHttpComponentProvider provider,
+        public SignatureParameters buildSignatureParameters(OkHttpComponentProvider provider,
                 ApproovRequestMutations changes) throws RequiredBodyDigestException {
             // the algorithm is left unset so that one signature per configured algorithm is produced over
             // these same parameters, while a subclass may set an explicit algorithm for a single signature
