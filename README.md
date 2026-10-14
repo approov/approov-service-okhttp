@@ -160,7 +160,9 @@ To always send the request and let your backend decide, install `ALWAYS_PROCEED`
 ApproovService.setServiceMutator(ApproovServiceMutator.ALWAYS_PROCEED)  // optional, the 4.0.0 default
 ```
 
-A request sent without a token never carries a secure string or a signature. If the token fetch fails for a host that is not one of your Approov API domains, the request is sent unchanged under either mutator. More in [what happens by default](ADVANCED.md#what-happens-by-default).
+When a request to one of your token-protected APIs goes ahead without a token, it carries only the `Approov-Status` header. Its secure string placeholders are sent unchanged, and it is not signed. The connection is still checked against the domain's pins. An API you added with `-noApproovToken` is different: it never uses a token, and still gets its secure strings.
+
+If the token fetch fails for a host that is not one of your Approov API domains, the request is sent unchanged under either mutator. More in [what happens by default](ADVANCED.md#what-happens-by-default).
 
 ### Message signing
 
