@@ -21,7 +21,7 @@ Make sure `mavenCentral()` is in your repositories, then add the package to your
 implementation("io.approov:service.okhttp:3.7.0")
 ```
 
-The package supports Android 6.0 (API level 23) and later. It needs OkHttp 4.12 or later and brings in OkHttp 4.12.0 itself. OkHttp 3.x is not supported.
+The package supports Android 6.0 (API level 23) and later. It brings in OkHttp 5.3.2, and also works if your app stays on OkHttp 4.12 or later. OkHttp 3.x is not supported. If your app compiles Kotlin, it needs Kotlin 2.1 or later. See [OkHttp version](ADVANCED.md#okhttp-version).
 
 Add these permissions to your app manifest:
 
@@ -217,6 +217,7 @@ By default 3.7.0 makes the same token decisions as 3.5.x and throws the same exc
 * Methods that call the SDK throw `ApproovException` with the message `<method>: Approov protection not enabled` before initialization and in bypass mode. `getOkHttpClient()` can now be called before initialization.
 * Approov's network interceptors now run before the ones your builder adds. A logger or inspector there no longer sees a redirect before Approov removes its headers. Your interceptors run after signing, so they must not change a signed header, the URL or the body.
 * The package no longer depends on BouncyCastle. It bundles its own relocated copy of Google Tink, which cannot clash with your app's Tink, Gson or BouncyCastle, or with another Approov package.
+* The package now brings in OkHttp 5.3.2, which tries IPv6 and IPv4 addresses side by side. Keep your other OkHttp libraries on the same version, and use Kotlin 2.1 or later if your app compiles Kotlin. See [OkHttp version](ADVANCED.md#okhttp-version).
 * Logging now has a level, `INFO` by default. The loggable token and the device ID are debug lines, so they only appear after `ApproovService.setLoggingLevel(ApproovLogLevel.DEBUG)` or `adb shell setprop log.tag.ApproovService DEBUG`.
 
 4.0.0 is planned to make `ALWAYS_PROCEED` and message signing the defaults. Signing can still be turned off. Your backend will then be the only place that rejects requests without a valid token.

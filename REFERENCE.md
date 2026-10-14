@@ -164,7 +164,7 @@ The client:
 * performs any header or query parameter substitutions
 * pins the connections (see [connection validation](ADVANCED.md#connection-validation)). On every request it checks the current pins for the request's host against the certificate chain that the trust manager validated.
 
-OkHttp 4.12 or later is required. OkHttp 3.x is not supported.
+The package depends on OkHttp 5.3.2, and also works on OkHttp 4.12 or later. OkHttp 3.x is not supported. See [OkHttp version](ADVANCED.md#okhttp-version).
 
 A pin failure fails only that request. The connection is not closed, so other hosts that OkHttp has merged onto the same HTTP/2 connection are not affected. If the SDK cannot give the pins, the connection check fails closed with `SSLPeerUnverifiedException` (`Approov pinning: pins unavailable for <host>`), with the SDK's exception as its cause.
 

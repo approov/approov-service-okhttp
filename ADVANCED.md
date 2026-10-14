@@ -35,7 +35,7 @@ Whatever the attestation outcome, the package checks the TLS connection to each 
 
 A connection that fails the check is refused with OkHttp's standard `SSLPeerUnverifiedException`. This is exactly how OkHttp refuses any connection whose certificate it cannot trust. Only that request fails. Other hosts that share an HTTP/2 connection with it are not affected.
 
-The check uses the certificate chain your device's trust store validated, as OkHttp 4.x records it. It never uses a certificate the server merely appends. This is why the package needs OkHttp 4.12 or later. It depends on 4.12.0. OkHttp 3.x is not supported, and OkHttp 5 is not yet tested.
+The check uses the certificate chain your device's trust store validated, as OkHttp records it from version 4. It never uses a certificate the server merely appends. This is why the package needs OkHttp 4.12 or later. OkHttp 3.x is not supported. See [OkHttp version](#okhttp-version).
 
 Requests to domains you haven't added to Approov are sent unchanged.
 
@@ -478,6 +478,34 @@ A connection whose certificate matches none of the domain's keys fails with `SSL
 A cleartext (`http`) request to a domain with keys fails the same way, with a warning.
 
 If the keys cannot be read from the SDK, the connection fails closed, which means it is refused. It fails with `SSLPeerUnverifiedException` and the message `Approov pinning: pins unavailable for <host>`, with the SDK's exception as its cause. One error line names the host and the cause.
+
+## OkHttp version
+
+The package depends on OkHttp 5.3.2. This is a minimum: Gradle uses the highest OkHttp version that anything in your app asks for, so an app that declares a later OkHttp keeps it.
+
+OkHttp 5 tries a host's IPv6 and IPv4 addresses side by side. On a network that drops IPv6 traffic, requests still connect quickly. The Approov SDK makes its own calls with your app's OkHttp, so its token fetches get the same benefit.
+
+### What OkHttp 5 asks of your build
+
+* Kotlin: OkHttp 5.3.2 brings version 2.2 of the Kotlin standard library. If your app compiles Kotlin, it needs Kotlin 2.1 or later. Java-only apps are unaffected.
+* Other OkHttp libraries: keep every OkHttp artifact on the same version. An artifact built for OkHttp 4, such as `logging-interceptor` 4.12.0, can call code that OkHttp 5 no longer has, and then fails at run time. The OkHttp BOM keeps them in line:
+
+```kotlin
+implementation(platform("com.squareup.okhttp3:okhttp-bom:5.3.2"))
+implementation("com.squareup.okhttp3:logging-interceptor")
+```
+
+* Manifest: OkHttp 5 adds an `androidx.startup` provider to your merged manifest.
+
+### Staying on OkHttp 4
+
+The package also works on OkHttp 4.12 and later, and is tested on 4.12.0. To keep your app on OkHttp 4, pin every OkHttp artifact with the BOM:
+
+```kotlin
+implementation(enforcedPlatform("com.squareup.okhttp3:okhttp-bom:4.12.0"))
+```
+
+Your app then does not get the side-by-side IPv6 and IPv4 connections. React Native ships its own OkHttp 4, so test a React Native app on OkHttp 5 before you ship it, or pin it to 4.12.0 this way.
 
 ## Service mutators
 

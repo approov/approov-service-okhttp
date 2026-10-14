@@ -10,6 +10,14 @@ repositories {
     google()
 }
 
+// The OkHttp the package depends on (gradle.properties), and the one the unit tests run on: the same
+// unless -PokhttpTestVersion names another 4.x or 5.x release. The package must not use anything that
+// OkHttp 4.12 lacks, so CI also runs the tests on 4.12.0, the release apps that stay on OkHttp 4 use.
+def okhttpVersion = providers.gradleProperty('okhttpVersion').get()
+def okhttpTestVersion = (project.findProperty('okhttpTestVersion') ?: okhttpVersion).toString()
+if (!(okhttpTestVersion ==~ /[45]\.\d+\.\d+/))
+    throw new GradleException("okhttpTestVersion must be an OkHttp 4.x or 5.x release, found '${okhttpTestVersion}'")
+
 android {
     namespace = "io.approov.service.okhttp"
     compileSdk 34
@@ -65,6 +73,11 @@ configurations {
         exclude group: 'io.approov', module: 'approov-android-sdk'
     }
 
+    // the unit tests run on okhttpTestVersion; the package's own classes stay compiled against okhttpVersion
+    matching { it.name ==~ /.*UnitTest(Compile|Runtime)Classpath/ }.configureEach {
+        resolutionStrategy.force "com.squareup.okhttp3:okhttp:${okhttpTestVersion}"
+    }
+
     // Tink converts the SDK's DER install signature to raw r||s. It is bundled
     // inside the AAR, relocated with its runtime dependencies under this layer's
     // own prefix io.approov.util.okhttp, so apps that ship their own Tink,
@@ -97,7 +110,7 @@ def relocatedTinkJar = tasks.register('relocatedTinkJar', com.github.jengelman.g
 }
 
 dependencies {
-    implementation 'com.squareup.okhttp3:okhttp:4.12.0'
+    implementation "com.squareup.okhttp3:okhttp:${okhttpVersion}"
     implementation 'io.approov:approov-android-sdk:3.5.3'
     relocatedTink('com.google.crypto.tink:tink-android:1.23.0') {
         // androidx.annotation is a regular dependency of this library below
@@ -115,9 +128,9 @@ dependencies {
     testImplementation 'org.robolectric:robolectric:4.11.1'
     testImplementation 'org.json:json:20231013'
     // self-signed TLS material for the pin check tests
-    testImplementation 'com.squareup.okhttp3:okhttp-tls:4.12.0'
+    testImplementation "com.squareup.okhttp3:okhttp-tls:${okhttpTestVersion}"
     // local HTTPS server for the request-before-initialize and bypass pinning tests
-    testImplementation 'com.squareup.okhttp3:mockwebserver:4.12.0'
+    testImplementation "com.squareup.okhttp3:mockwebserver:${okhttpTestVersion}"
     testImplementation 'androidx.test:core:1.6.1'
 }
 
@@ -200,6 +213,10 @@ tasks.register('verifyPublishedPom') {
         ['com.squareup.okhttp3:okhttp', 'io.approov:approov-android-sdk'].each {
             assert artifacts.contains(it): "published POM is missing runtime dependency ${it}"
         }
+        // the POM names the OkHttp the package is built against, as a plain minimum
+        def okhttp = dependencies.find { (it.groupId.text() == 'com.squareup.okhttp3') && (it.artifactId.text() == 'okhttp') }
+        assert okhttp.version.text() == okhttpVersion:
+                "published POM names OkHttp ${okhttp.version.text()}, not okhttpVersion ${okhttpVersion}"
         // BouncyCastle is gone and Tink is bundled relocated, so none of these may be
         // a dependency of the published library
         def groups = dependencies.collect { it.groupId.text() } as Set

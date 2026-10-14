@@ -29,6 +29,7 @@ import androidx.test.core.app.ApplicationProvider;
 import com.criticalblue.minisdk.testing.AttesterProxyController;
 
 import org.junit.After;
+import org.junit.Assume;
 import org.junit.Before;
 import org.junit.Test;
 import org.junit.runner.RunWith;
@@ -53,6 +54,7 @@ import okhttp3.Call;
 import okhttp3.Callback;
 import okhttp3.EventListener;
 import okhttp3.HttpUrl;
+import okhttp3.OkHttp;
 import okhttp3.OkHttpClient;
 import okhttp3.Protocol;
 import okhttp3.Request;
@@ -85,6 +87,11 @@ public class SharedConnectionPinFailure370Test {
 
     @Before
     public void setUp() throws Exception {
+        // OkHttp 5 negotiates HTTP/2 on Android through android.net.ssl.SSLSockets, which Robolectric's JVM
+        // sockets do not support, so every connection is HTTP/1.1 and no host can be coalesced; these tests
+        // run in the OkHttp 4 lane (-PokhttpTestVersion=4.12.0), where OkHttp uses the JVM's own ALPN
+        Assume.assumeTrue("HTTP/2 coalescing cannot be reached on OkHttp " + OkHttp.VERSION + " under Robolectric",
+                OkHttp.VERSION.startsWith("4."));
         HeldCertificate certificate = new HeldCertificate.Builder()
                 .addSubjectAlternativeName("a.test")
                 .addSubjectAlternativeName("b.test")

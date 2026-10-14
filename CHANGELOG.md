@@ -52,7 +52,7 @@ Entries marked **Breaking** need a source change, as does everything under Remov
   - `initialize`, `setLoggingLevel`, `setBindingHeader` and `addSubstitutionHeader` name the method in their `IllegalArgumentException`
   - debug lines name the host rather than the URL, and give the status by name, such as `REJECTED`
 - Some log levels changed to match the other packages. An empty account ID ignored after protection is enabled is logged as info. A cleartext request to a pinned host is a warning. A pin mismatch, and pins that cannot be read, are errors that name the host only.
-- The package needs OkHttp 4.12 or later and depends on 4.12.0. OkHttp 3.x is not supported.
+- **Breaking:** The package now depends on OkHttp 5.3.2, where 3.5.x depended on 4.12.0. OkHttp 5 tries IPv6 and IPv4 addresses side by side, so your app's requests and the Approov SDK's connect on networks that drop IPv6. Apps that compile Kotlin need Kotlin 2.1 or later. Keep your other OkHttp libraries on the same version with the OkHttp BOM, or stay on OkHttp 4.12 or later with `enforcedPlatform`. OkHttp 3.x is not supported. See [OkHttp version](ADVANCED.md#okhttp-version).
 - The README and ADVANCED.md now describe one integration order: call `initialize`, check the result, then make your configuration calls before sending protected requests. See [initialize, then configure](ADVANCED.md#initialize-then-configure).
 
 ### Deprecated
