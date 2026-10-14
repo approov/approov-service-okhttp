@@ -172,7 +172,7 @@ Message signing is off by default in 3.7.0. Turn it on with one call after `init
 ApproovService.enableMessageSigning()
 ```
 
-Every protected request is then signed with both the install signature and the account signature. Message signing will be on, and required, from 4.0.0.
+Every protected request is then signed with both the install signature and the account signature. From 4.0.0 message signing is planned to be on by default. You will still be able to turn it off with `disableMessageSigning()`.
 
 The full list of headers, and what your backend should do with each, is in [what each request carries](ADVANCED.md#what-each-request-carries). Choosing signatures, per-host settings and verifying signatures are covered in [message signing](ADVANCED.md#message-signing).
 
@@ -219,7 +219,7 @@ By default 3.7.0 makes the same token decisions as 3.5.x and throws the same exc
 * The package no longer depends on BouncyCastle. It bundles its own relocated copy of Google Tink, which cannot clash with your app's Tink, Gson or BouncyCastle, or with another Approov package.
 * Logging now has a level, `INFO` by default. The loggable token and the device ID are debug lines, so they only appear after `ApproovService.setLoggingLevel(ApproovLogLevel.DEBUG)` or `adb shell setprop log.tag.ApproovService DEBUG`.
 
-4.0.0 is planned to make `ALWAYS_PROCEED` the default and message signing required. Your backend will then be the only place that rejects requests without a valid token.
+4.0.0 is planned to make `ALWAYS_PROCEED` and message signing the defaults. Signing can still be turned off. Your backend will then be the only place that rejects requests without a valid token.
 
 ## NEXT STEPS
 

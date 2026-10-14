@@ -269,7 +269,7 @@ A custom mutator may choose to abort a request from any interceptor hook. To do 
 The aborts that `CLOSE_FAILURE` makes keep the 3.5.x Approov exception types, which are all subclasses of `IOException`. So an existing app catches the same exceptions as before.
 
 ## enableMessageSigning
-Turns message signing on. [Message signing](ADVANCED.md#message-signing) is off by default in 3.7.0, and will be on and required from 4.0.0.
+Turns message signing on. [Message signing](ADVANCED.md#message-signing) is off by default in 3.7.0, and is planned to be on by default from 4.0.0. You will still be able to turn it off with `disableMessageSigning()`.
 
 Once it is on, every request that carries the Approov token header is signed (RFC 9421). Signing happens after the service mutator's decisions, the secure string substitutions and the mutator's `handleInterceptorProcessedRequest` callback, so the signature covers what is actually sent. The request is signed again whenever its protection is reapplied: on a redirect within a protected domain, an authenticator retry or a stale protection refresh.
 

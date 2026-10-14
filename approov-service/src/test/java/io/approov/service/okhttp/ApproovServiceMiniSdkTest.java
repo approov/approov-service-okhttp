@@ -1327,7 +1327,7 @@ public class ApproovServiceMiniSdkTest {
      * carries Signature or Signature-Input until enableMessageSigning() is called;
      * after that one call every protected request carries both the install
      * (ecdsa-p256-sha256) and the account (hmac-sha256) members of the same
-     * dictionaries. From 4.0.0 signing is on and compulsory and this test changes.
+     * dictionaries. From 4.0.0 signing is planned to be on by default and this test changes.
      */
     @Test
     public void testMessageSigningIsOffByDefaultAndOneCallTurnsItOn() throws Exception {

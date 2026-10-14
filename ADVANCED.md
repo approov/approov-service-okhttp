@@ -165,7 +165,7 @@ Only a request carrying a token is signed. A request that goes ahead without a t
 
 See [Installation Message Signing](https://approov.io/docs/latest/approov-usage-documentation/#installation-message-signing) and [Account Message Signing](https://approov.io/docs/latest/approov-usage-documentation/#account-message-signing).
 
-**From 4.0.0, signing is on and compulsory.** Make sure your backend accepts signed requests before you turn signing on, and before you upgrade to 4.0.0.
+**From 4.0.0, signing is planned to be on by default.** You will still be able to turn it off with `disableMessageSigning()`. Make sure your backend accepts signed requests before you turn signing on, and before you upgrade to 4.0.0.
 
 ### When signing runs
 
