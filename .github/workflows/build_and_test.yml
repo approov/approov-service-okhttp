@@ -46,6 +46,8 @@ jobs:
         uses: actions/checkout@v5
         with:
           repository: approov/core-service-layers-testing
+          # this branch carries the test harness for this release line
+          ref: spec/okhttp-release-3.7.0
           token: ${{ secrets.CORE_SERVICE_LAYERS_TESTING_PAT }}
           path: core-service-layers-testing
 
@@ -55,7 +57,7 @@ jobs:
       #    URLs are resolved with the following precedence (mirrors the mini-sdk
       #    fallback logic in MiniAttesterConfig / Approov.m):
       #      1. GitHub org variable  (TESTING_REPLY_URL / _UNPROTECTED)
-      #      2. Mini-SDK hardcoded defaults (replay.ivol.workers.dev / ...)
+      #      2. Mini-SDK hardcoded defaults (the echo workers)
       #
       #    If the workers are unavailable, this step invokes the management
       #    script in core-service-layers-testing to redeploy them.
@@ -155,12 +157,23 @@ jobs:
         working-directory: approov-service-okhttp
         run: ./gradlew assembleRelease
 
+      - name: Verify AAR contents and published POM
+        working-directory: approov-service-okhttp
+        run: ./gradlew verifyReleaseAar verifyPublishedPom
+
       - name: Run unit tests
         working-directory: approov-service-okhttp
         env:
           TESTING_REPLY_URL: ${{ env.TESTING_REPLY_URL }}
           TESTING_REPLY_URL_UNPROTECTED: ${{ env.TESTING_REPLY_URL_UNPROTECTED }}
         run: ./gradlew test
+
+      - name: Run unit tests on OkHttp 4.12.0
+        working-directory: approov-service-okhttp
+        env:
+          TESTING_REPLY_URL: ${{ env.TESTING_REPLY_URL }}
+          TESTING_REPLY_URL_UNPROTECTED: ${{ env.TESTING_REPLY_URL_UNPROTECTED }}
+        run: ./gradlew test -PokhttpTestVersion=4.12.0
 
       # -----------------------------------------------------------------------
       # 6. Print test summary to the console and to the Actions Job Summary

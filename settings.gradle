@@ -6,7 +6,7 @@ if (localPropertiesFile.exists()) {
     }
 }
 
-def miniSdkRoot = localProperties.getProperty('miniSdkAndroidRoot', '../core-service-layers-testing/mini-sdk/android')
+def miniSdkRoot = localProperties.getProperty('miniSdkAndroidRoot', '../core-service-layers-testing/mini-sdk-3.7.0/android')
 def approovSdkDir = new File(miniSdkRoot, 'approov-sdk')
 def testSupportDir = new File(miniSdkRoot, 'test-support')
 
