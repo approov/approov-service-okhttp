@@ -55,7 +55,7 @@ import okhttp3.OkHttpClient;
  * mode the first time) resets the configuration to its defaults, as in 3.5.8,
  * while the logging level is kept; an empty config once protection is enabled is
  * ignored and resets nothing. The SDK is the mini SDK, already initialized by
- * setUp as it would be by the first caller in the process; RecordingSdkFacade
+ * setUp as it would be by the first caller in the process; RecordingSdk
  * records what reaches it.
  */
 @RunWith(RobolectricTestRunner.class)
@@ -67,7 +67,7 @@ public class InitializeContract370Test {
             "Approov SDK has already been initialized with a different configuration";
 
     private Context context;
-    private RecordingSdkFacade sdk;
+    private RecordingSdk sdk;
     // the service mutator configureEverything installs, which is message signing with a host factory, so that
     // a reset of the mutator also turns message signing off
     private final ApproovDefaultMessageSigning mutator = new ApproovDefaultMessageSigning()
@@ -83,12 +83,13 @@ public class InitializeContract370Test {
         // "reinit..." comment makes the mini SDK accept it whatever it held before
         Approov.initialize(context, CONFIG, "auto", "reinit-contract-setup");
         ApproovService.reset();
-        sdk = RecordingSdkFacade.install();
+        sdk = RecordingSdk.install();
     }
 
     @After
     public void tearDown() {
         ApproovService.reset();
+        RecordingSdk.uninstall();
         AttesterProxyController.reset();
     }
 

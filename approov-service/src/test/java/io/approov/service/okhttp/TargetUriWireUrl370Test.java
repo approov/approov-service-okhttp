@@ -108,7 +108,7 @@ public class TargetUriWireUrl370Test {
     public void setUp() throws Exception {
         fixture = new LocalHttpsFixture(false);
         ApproovService.reset();
-        ApproovService.setSdkFacadeForTesting(new OriginTokenFetchFacade());
+        RecordingSdk.install(new OriginTokenFetchSdk());
         ApproovService.initialize(fixture.context, LocalHttpsFixture.CONFIG, "reinit-wire-url");
         // HTTP/1.1 so that the server sees a real request line and Host header
         ApproovService.setOkHttpClientBuilder(fixture.trustingBuilder()
@@ -123,17 +123,18 @@ public class TargetUriWireUrl370Test {
     public void tearDown() throws Exception {
         fixture.shutdown();
         ApproovService.reset();
+        RecordingSdk.uninstall();
     }
 
     /**
      * The mini-SDK's token fetch parses its URL with java.net.URI and answers
      * BAD_URL for the URLs under test, so the request would abort before it is
-     * signed. This facade hands the token fetch only the origin of the URL and
+     * signed. This SDK hook hands the token fetch only the origin of the URL and
      * otherwise delegates to the mini-SDK, so that the signing of these URLs is
      * what is tested. Whether the real SDK accepts these URLs in a token fetch is
      * not established by this test.
      */
-    private static final class OriginTokenFetchFacade extends RecordingSdkFacade {
+    private static final class OriginTokenFetchSdk extends RecordingSdk {
         private static String origin(String url) {
             HttpUrl parsed = HttpUrl.get(url);
             return parsed.scheme() + "://" + parsed.host() + ":" + parsed.port() + "/";

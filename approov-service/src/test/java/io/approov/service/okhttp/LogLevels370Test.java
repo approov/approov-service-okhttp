@@ -75,6 +75,7 @@ public class LogLevels370Test {
     public void tearDown() throws Exception {
         fixture.shutdown();
         ApproovService.reset();
+        RecordingSdk.uninstall();
         ShadowLog.reset();
     }
 
@@ -164,7 +165,7 @@ public class LogLevels370Test {
     @Test
     public void pinsUnreadableInTheApiDomainCheckAreAnError() {
         ApproovService.initialize(fixture.context, LocalHttpsFixture.CONFIG, "reinit-log-levels");
-        ApproovService.setSdkFacadeForTesting(new RecordingSdkFacade() {
+        RecordingSdk.install(new RecordingSdk() {
             @Override
             public Map<String, List<String>> getPins(String pinType) {
                 throw new IllegalStateException("pins unreadable in test");
@@ -179,7 +180,7 @@ public class LogLevels370Test {
     public void pinsUnreadableForAConnectionAreAnError() throws Exception {
         ApproovService.initialize(fixture.context, LocalHttpsFixture.CONFIG, "reinit-log-levels");
         ApproovService.setOkHttpClientBuilder(fixture.trustingBuilder());
-        ApproovService.setSdkFacadeForTesting(new RecordingSdkFacade() {
+        RecordingSdk.install(new RecordingSdk() {
             @Override
             public Map<String, List<String>> getPins(String pinType) {
                 throw new IllegalStateException("pins unreadable in test");

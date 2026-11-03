@@ -53,7 +53,7 @@ import okhttp3.mockwebserver.MockResponse;
 @Config(manifest = Config.NONE)
 public class StrictBypassPinning370Test {
     private LocalHttpsFixture fixture;
-    private RecordingSdkFacade sdk;
+    private RecordingSdk sdk;
 
     @Before
     public void setUp() throws Exception {
@@ -63,7 +63,7 @@ public class StrictBypassPinning370Test {
         assertEquals(Collections.singletonList(LocalHttpsFixture.WRONG_PIN),
                 Approov.getPins("public-key-sha256").get("localhost"));
         ApproovService.reset();
-        sdk = RecordingSdkFacade.install();
+        sdk = RecordingSdk.install();
         ApproovService.setOkHttpClientBuilder(fixture.trustingBuilder());
     }
 
@@ -71,6 +71,7 @@ public class StrictBypassPinning370Test {
     public void tearDown() throws Exception {
         fixture.shutdown();
         ApproovService.reset();
+        RecordingSdk.uninstall();
     }
 
     private void sendAndExpectDelivered(OkHttpClient client) throws Exception {

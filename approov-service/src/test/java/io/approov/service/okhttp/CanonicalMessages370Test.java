@@ -70,6 +70,7 @@ public class CanonicalMessages370Test {
     public void tearDown() throws Exception {
         fixture.shutdown();
         ApproovService.reset();
+        RecordingSdk.uninstall();
     }
 
     private static boolean logged(String text) {
@@ -120,7 +121,7 @@ public class CanonicalMessages370Test {
     @Test
     public void anSdkFailureIsWrappedWithItsClassAndMessage() {
         IllegalStateException thrown = new IllegalStateException("sdk failure in test");
-        ApproovService.setSdkFacadeForTesting(new RecordingSdkFacade() {
+        RecordingSdk.install(new RecordingSdk() {
             @Override
             public Approov.TokenFetchResult fetchApproovTokenAndWait(String url) {
                 throw thrown;
@@ -158,7 +159,7 @@ public class CanonicalMessages370Test {
     @Test
     public void pinsUnavailableForAConnectionNameTheHost() throws Exception {
         IllegalStateException thrown = new IllegalStateException("pins unreadable in test");
-        ApproovService.setSdkFacadeForTesting(new RecordingSdkFacade() {
+        RecordingSdk.install(new RecordingSdk() {
             @Override
             public Map<String, List<String>> getPins(String pinType) {
                 throw thrown;
@@ -205,7 +206,5 @@ public class CanonicalMessages370Test {
                 () -> ApproovService.initialize(fixture.context, null)).getMessage());
         assertEquals("setLoggingLevel: null level", assertThrows(IllegalArgumentException.class,
                 () -> ApproovService.setLoggingLevel(null)).getMessage());
-        assertEquals("setSdkFacadeForTesting: null facade", assertThrows(IllegalArgumentException.class,
-                () -> ApproovService.setSdkFacadeForTesting(null)).getMessage());
     }
 }

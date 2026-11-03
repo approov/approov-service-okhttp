@@ -62,7 +62,7 @@ public class BadUrlSubstitution370Test {
     private static final String SECRET = "real-api-key-value";
 
     private TwoOriginFixture fixture;
-    private RecordingSdkFacade sdk;
+    private RecordingSdk sdk;
 
     /**
      * Lets every token status proceed and accepts every substitution result,
@@ -95,7 +95,7 @@ public class BadUrlSubstitution370Test {
     public void setUp() throws Exception {
         fixture = new TwoOriginFixture(true, PLACEHOLDER, SECRET);
         ApproovService.reset();
-        sdk = RecordingSdkFacade.install();
+        sdk = RecordingSdk.install();
         // redaction is checked at the most verbose level, the loggable token included
         ApproovService.setLoggingLevel(ApproovLogLevel.DEBUG);
         fixture.initialize();
@@ -108,6 +108,7 @@ public class BadUrlSubstitution370Test {
     public void tearDown() throws Exception {
         fixture.shutdown();
         ApproovService.reset();
+        RecordingSdk.uninstall();
     }
 
     private Request request() {

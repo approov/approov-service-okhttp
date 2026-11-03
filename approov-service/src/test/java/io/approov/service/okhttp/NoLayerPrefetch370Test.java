@@ -49,19 +49,20 @@ public class NoLayerPrefetch370Test {
     private static final String CONFIG = "#test-account#mAxOF0ekJUOC36J5XWmVmVipOcUoEdMjhPSp2FVtyTo=";
 
     private Context context;
-    private RecordingSdkFacade sdk;
+    private RecordingSdk sdk;
 
     @Before
     public void setUp() {
         context = ApplicationProvider.getApplicationContext();
         AttesterProxyController.reset();
         ApproovService.reset();
-        sdk = RecordingSdkFacade.install();
+        sdk = RecordingSdk.install();
     }
 
     @After
     public void tearDown() {
         ApproovService.reset();
+        RecordingSdk.uninstall();
         AttesterProxyController.reset();
     }
 

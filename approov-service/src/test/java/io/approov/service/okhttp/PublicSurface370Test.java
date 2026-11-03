@@ -61,6 +61,7 @@ public class PublicSurface370Test {
     @After
     public void tearDown() {
         ApproovService.reset();
+        RecordingSdk.uninstall();
         AttesterProxyController.reset();
     }
 
@@ -121,7 +122,7 @@ public class PublicSurface370Test {
         // before initialize, and in bypass mode, each fails naming itself with no SDK call
         ApproovService.reset();
         AttesterProxyController.reset();
-        RecordingSdkFacade sdk = RecordingSdkFacade.install();
+        RecordingSdk sdk = RecordingSdk.install();
         for (boolean bypass : new boolean[] {false, true}) {
             if (bypass)
                 ApproovService.initialize(ApplicationProvider.getApplicationContext(), "");
@@ -146,7 +147,7 @@ public class PublicSurface370Test {
         ApproovService.reset();
         AttesterProxyController.reset();
         IllegalArgumentException thrown = new IllegalArgumentException("bad attrs");
-        ApproovService.setSdkFacadeForTesting(new RecordingSdkFacade() {
+        RecordingSdk.install(new RecordingSdk() {
             @Override
             public void setInstallAttrsInToken(String attributes) {
                 throw thrown;

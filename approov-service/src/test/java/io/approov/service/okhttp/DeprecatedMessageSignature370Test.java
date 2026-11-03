@@ -50,7 +50,7 @@ public class DeprecatedMessageSignature370Test {
     public void setUp() {
         ApproovService.reset();
         ShadowLog.reset();
-        ApproovService.setSdkFacadeForTesting(new RecordingSdkFacade() {
+        RecordingSdk.install(new RecordingSdk() {
             @Override
             public String getAccountMessageSignature(String message) {
                 calls.add("getAccountMessageSignature");
@@ -65,6 +65,7 @@ public class DeprecatedMessageSignature370Test {
     @After
     public void tearDown() {
         ApproovService.reset();
+        RecordingSdk.uninstall();
         AttesterProxyController.reset();
         ShadowLog.reset();
     }

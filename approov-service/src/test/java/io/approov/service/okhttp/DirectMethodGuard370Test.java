@@ -61,7 +61,7 @@ public class DirectMethodGuard370Test {
     }
 
     private Context context;
-    private RecordingSdkFacade sdk;
+    private RecordingSdk sdk;
 
     @Before
     public void setUp() {
@@ -71,19 +71,20 @@ public class DirectMethodGuard370Test {
         // reach a working SDK rather than fail inside it
         Approov.initialize(context, CONFIG, "auto", "reinit-guard-setup");
         ApproovService.reset();
-        sdk = RecordingSdkFacade.install();
+        sdk = RecordingSdk.install();
     }
 
     @After
     public void tearDown() {
         ApproovService.reset();
+        RecordingSdk.uninstall();
         AttesterProxyController.reset();
     }
 
     private void assertGuarded(String method, DirectCall call) {
         for (boolean bypass : new boolean[] {false, true}) {
             ApproovService.reset();
-            sdk = RecordingSdkFacade.install();
+            sdk = RecordingSdk.install();
             if (bypass) {
                 ApproovService.initialize(context, "");
                 assertTrue(ApproovService.isApproovServiceEnabled());

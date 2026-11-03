@@ -70,14 +70,14 @@ public class SdkRuntimeException370Test {
 
     private LocalHttpsFixture fixture;
     private RequestPathProbe probe;
-    private FailingSdkFacade sdk;
+    private FailingSdk sdk;
 
     /**
      * Delegates to the mini-SDK, recording every call, but throws a chosen
      * RuntimeException (or returns null) from one chosen method, from its n-th call
      * after being armed.
      */
-    static final class FailingSdkFacade extends RecordingSdkFacade {
+    static final class FailingSdk extends RecordingSdk {
         private volatile String method;
         private volatile Supplier<RuntimeException> failure;
         private volatile int fromCall;
@@ -191,8 +191,8 @@ public class SdkRuntimeException370Test {
                 + "\"pins\": {\"public-key-sha256\": {\"localhost\": []}},"
                 + "\"initialSecureStrings\": {\"the-key\": \"the-secret\"}}}}");
         ApproovService.reset();
-        sdk = new FailingSdkFacade();
-        ApproovService.setSdkFacadeForTesting(sdk);
+        sdk = new FailingSdk();
+        RecordingSdk.install(sdk);
         ApproovService.initialize(fixture.context, LocalHttpsFixture.CONFIG, "reinit-sdk-runtime-exception");
         ApproovService.setOkHttpClientBuilder(fixture.trustingBuilder());
         probe = new RequestPathProbe(fixture);
@@ -203,6 +203,7 @@ public class SdkRuntimeException370Test {
         probe.close();
         fixture.shutdown();
         ApproovService.reset();
+        RecordingSdk.uninstall();
     }
 
     private Request get(String pathAndQuery) {
@@ -210,7 +211,7 @@ public class SdkRuntimeException370Test {
     }
 
     /**
-     * For every RuntimeException kind, synchronously and enqueued: arms the facade
+     * For every RuntimeException kind, synchronously and enqueued: arms the SDK hook
      * to throw from the method, runs the arranged request and asserts that the app
      * sees an ApproovException whose cause is exactly what the SDK threw, and that
      * the request never reached the server unless expected.

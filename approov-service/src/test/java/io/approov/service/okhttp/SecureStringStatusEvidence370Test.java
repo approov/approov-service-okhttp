@@ -76,8 +76,8 @@ public class SecureStringStatusEvidence370Test {
             {"INTERNAL_ERROR", "INTERNAL_ERROR"},
             {"UNKNOWN_KEY", "UNKNOWN_KEY"}};
 
-    // an SDK facade answering every secure string fetch with a fixed status and no value while one is set
-    private static final class StatusFacade extends RecordingSdkFacade {
+    // an SDK hook answering every secure string fetch with a fixed status and no value while one is set
+    private static final class StatusSdk extends RecordingSdk {
         volatile Approov.TokenFetchStatus status;
 
         @Override
@@ -91,13 +91,13 @@ public class SecureStringStatusEvidence370Test {
     }
 
     private TwoOriginFixture fixture;
-    private StatusFacade sdk;
+    private StatusSdk sdk;
 
     private void start(String extraScenario) throws Exception {
         fixture = new TwoOriginFixture(extraScenario, true, PLACEHOLDER, SECRET);
         ApproovService.reset();
-        sdk = new StatusFacade();
-        ApproovService.setSdkFacadeForTesting(sdk);
+        sdk = new StatusSdk();
+        RecordingSdk.install(sdk);
         fixture.initialize();
         ApproovService.addSubstitutionHeader("Api-Key", null);
         ApproovService.addSubstitutionQueryParam("key");
@@ -109,6 +109,7 @@ public class SecureStringStatusEvidence370Test {
         if (fixture != null)
             fixture.shutdown();
         ApproovService.reset();
+        RecordingSdk.uninstall();
     }
 
     // a secure string fetch result with the given status and no value, built as the SDK builds it

@@ -52,20 +52,21 @@ import okhttp3.mockwebserver.RecordedRequest;
 @Config(manifest = Config.NONE)
 public class RequestBeforeInitialize370Test {
     private LocalHttpsFixture fixture;
-    private RecordingSdkFacade sdk;
+    private RecordingSdk sdk;
 
     @Before
     public void setUp() throws Exception {
         fixture = new LocalHttpsFixture(false);
         fixture.initializeSdkElsewhere();
         ApproovService.reset();
-        sdk = RecordingSdkFacade.install();
+        sdk = RecordingSdk.install();
     }
 
     @After
     public void tearDown() throws Exception {
         fixture.shutdown();
         ApproovService.reset();
+        RecordingSdk.uninstall();
     }
 
     private RecordedRequest sendWithPlaceholders(OkHttpClient client) throws Exception {

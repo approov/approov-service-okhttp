@@ -64,12 +64,12 @@ public class ChannelReapply370Test {
     private static final String SECRET = "real-api-key-value";
 
     private TwoOriginFixture fixture;
-    private RecordingSdkFacade sdk;
+    private RecordingSdk sdk;
 
     private void start(String extraScenario) throws Exception {
         fixture = new TwoOriginFixture(extraScenario, true, PLACEHOLDER, SECRET);
         ApproovService.reset();
-        sdk = RecordingSdkFacade.install();
+        sdk = RecordingSdk.install();
         fixture.initialize();
         ApproovService.addSubstitutionHeader("Api-Key", null);
         ApproovService.addSubstitutionQueryParam("key");
@@ -82,6 +82,7 @@ public class ChannelReapply370Test {
         if (fixture != null)
             fixture.shutdown();
         ApproovService.reset();
+        RecordingSdk.uninstall();
     }
 
     private Request request(String path) {

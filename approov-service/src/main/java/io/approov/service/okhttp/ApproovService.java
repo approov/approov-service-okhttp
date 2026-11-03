@@ -24,6 +24,8 @@ import androidx.annotation.VisibleForTesting;
 import com.criticalblue.approovsdk.Approov;
 
 import java.io.IOException;
+import java.lang.reflect.InvocationTargetException;
+import java.lang.reflect.Method;
 import java.security.cert.Certificate;
 import java.util.ArrayList;
 import java.util.Collections;
@@ -131,22 +133,15 @@ public class ApproovService {
     // set of URL regexs that should be excluded from any Approov protection, mapped to the compiled Pattern
     private static Map<String, Pattern> exclusionURLRegexs = new HashMap<>();
 
-    // the boundary through which every Approov SDK call is made, which tests may replace
-    private static volatile ApproovSdkFacade sdkFacade = new DefaultApproovSdkFacade();
+    // Approov.getServerAdjustedCurrentTimeMS is not in every Approov SDK the package may run with, so it is
+    // looked up once by reflection and the device clock is used without it
+    // TODO call Approov.getServerAdjustedCurrentTimeMS() directly once the SDK dependency provides it
+    private static final Method SERVER_ADJUSTED_TIME = findServerAdjustedTime();
 
     /**
      * Construction is disallowed as this is a static only class.
      */
     private ApproovService() {
-    }
-
-    /**
-     * Gets the boundary through which every Approov SDK call is made.
-     *
-     * @return the SDK facade
-     */
-    static ApproovSdkFacade sdk() {
-        return sdkFacade;
     }
 
     /**
@@ -421,19 +416,6 @@ public class ApproovService {
     }
 
     /**
-     * Sets the boundary through which every Approov SDK call is made. This should only be used for testing
-     * purposes.
-     *
-     * @param facade is the SDK facade to be used
-     */
-    @VisibleForTesting
-    static synchronized void setSdkFacadeForTesting(ApproovSdkFacade facade) {
-        if (facade == null)
-            throw new IllegalArgumentException("setSdkFacadeForTesting: null facade");
-        sdkFacade = facade;
-    }
-
-    /**
      * Initializes the ApproovService with an Approov account ID and comment. Any caller in the process may
      * call this and all of them share the same service state. A non-empty account ID is always passed to
      * the Approov SDK with the comment unchanged and the SDK decides: a repeat with the same account ID and
@@ -494,7 +476,7 @@ public class ApproovService {
         // only judge of a repeat call and any exception it throws reaches the caller with the state untouched
         boolean newlyInitialized;
         try {
-            newlyInitialized = sdk().initialize(context.getApplicationContext(), config, "auto", comment);
+            newlyInitialized = Approov.initialize(context.getApplicationContext(), config, "auto", comment);
         } catch (RuntimeException e) {
             ApproovLog.e(TAG, "initialize: Approov SDK failed: " + e);
             throw e;
@@ -509,7 +491,7 @@ public class ApproovService {
             ApproovLog.d(TAG, "initialize: Approov SDK already initialized with the same config and comment");
         if (!protectionWasEnabled) {
             try {
-                sdk().setUserProperty("approov-service-okhttp/" + BuildConfig.APPROOV_SERVICE_VERSION);
+                Approov.setUserProperty("approov-service-okhttp/" + BuildConfig.APPROOV_SERVICE_VERSION);
             } catch (RuntimeException e) {
                 // the property is diagnostic only and must not fail a successful initialization
                 ApproovLog.e(TAG, "initialize: Approov user property not set: " + e);
@@ -619,7 +601,6 @@ public class ApproovService {
         substitutionHeaders = new HashMap<>();
         substitutionQueryParams = new HashMap<>();
         exclusionURLRegexs = new HashMap<>();
-        sdkFacade = new DefaultApproovSdkFacade();
         ApproovLog.setLevel(ApproovLogLevel.INFO);
     }
 
@@ -655,7 +636,7 @@ public class ApproovService {
     public static synchronized void setDevKey(String devKey) throws ApproovException {
         requireProtection("setDevKey");
         try {
-            ApproovService.sdk().setDevKey(devKey);
+            Approov.setDevKey(devKey);
             ApproovLog.d(TAG, "setDevKey");
         } catch (RuntimeException e) {
             throw sdkFailure("setDevKey", e);
@@ -810,7 +791,7 @@ public class ApproovService {
     static boolean isApproovApiHost(String host) {
         Map<String, List<String>> pins;
         try {
-            pins = sdk().getPins("public-key-sha256");
+            pins = Approov.getPins("public-key-sha256");
         } catch (RuntimeException e) {
             // a pin set that cannot be read lists no host
             ApproovLog.e(TAG, "Approov SDK getPins failed: " + e);
@@ -918,7 +899,7 @@ public class ApproovService {
         boolean configChanged = approovResults.isConfigChanged();
         if (configChanged) {
             try {
-                ApproovService.sdk().fetchConfig();
+                Approov.fetchConfig();
             } catch (RuntimeException e) {
                 throw sdkFailure("fetchConfig", e);
             }
@@ -1194,7 +1175,7 @@ public class ApproovService {
         requireProtection("precheck");
         // try and fetch a non-existent secure string in order to check for a rejection
         Approov.TokenFetchResult approovResults = directFetch("fetchSecureStringAndWait",
-                () -> ApproovService.sdk().fetchSecureStringAndWait("precheck-dummy-key", null));
+                () -> Approov.fetchSecureStringAndWait("precheck-dummy-key", null));
         ApproovLog.d(TAG, "precheck: " + approovResults.getStatus());
 
         // process the returned Approov status using decision maker
@@ -1216,7 +1197,7 @@ public class ApproovService {
     public static String getDeviceID() throws ApproovException {
         requireProtection("getDeviceID");
         try {
-            String deviceID = ApproovService.sdk().getDeviceID();
+            String deviceID = Approov.getDeviceID();
             ApproovLog.d(TAG, "getDeviceID: " + deviceID);
             return deviceID;
         } catch (RuntimeException e) {
@@ -1238,7 +1219,7 @@ public class ApproovService {
     public static long getServerAdjustedCurrentTimeMS() throws ApproovException {
         requireProtection("getServerAdjustedCurrentTimeMS");
         try {
-            return ApproovService.sdk().getServerAdjustedCurrentTimeMS();
+            return sdkServerAdjustedTimeMS();
         } catch (RuntimeException e) {
             throw sdkFailure("getServerAdjustedCurrentTimeMS", e);
         }
@@ -1255,12 +1236,47 @@ public class ApproovService {
     static long signatureTimeMillis() {
         if (isApproovProtectionEnabled()) {
             try {
-                return ApproovService.sdk().getServerAdjustedCurrentTimeMS();
+                return sdkServerAdjustedTimeMS();
             } catch (RuntimeException e) {
                 ApproovLog.w(TAG, "Message signing: server adjusted time unavailable, using the device clock: " + e);
             }
         }
         return System.currentTimeMillis();
+    }
+
+    /**
+     * Looks up Approov.getServerAdjustedCurrentTimeMS in the Approov SDK the package runs with.
+     *
+     * @return the method, or null if the SDK does not provide it
+     */
+    private static Method findServerAdjustedTime() {
+        try {
+            return Approov.class.getMethod("getServerAdjustedCurrentTimeMS");
+        } catch (NoSuchMethodException e) {
+            return null;
+        }
+    }
+
+    /**
+     * Gets the server adjusted time from the Approov SDK, or the device clock if the SDK does not provide it.
+     *
+     * @return the current time in milliseconds since the epoch, adjusted to the Approov servers' clock
+     * @throws RuntimeException as the SDK call throws it, such as an IllegalStateException before initialization
+     */
+    private static long sdkServerAdjustedTimeMS() {
+        if (SERVER_ADJUSTED_TIME == null)
+            return System.currentTimeMillis();
+        try {
+            return (Long) SERVER_ADJUSTED_TIME.invoke(null);
+        } catch (InvocationTargetException e) {
+            // the SDK's own exception, as a direct call would throw it
+            Throwable cause = e.getCause();
+            if (cause instanceof RuntimeException)
+                throw (RuntimeException) cause;
+            throw new IllegalStateException(cause);
+        } catch (IllegalAccessException e) {
+            throw new IllegalStateException(e);
+        }
     }
 
     /**
@@ -1276,7 +1292,7 @@ public class ApproovService {
     public static void setDataHashInToken(String data) throws ApproovException {
         requireProtection("setDataHashInToken");
         try {
-            ApproovService.sdk().setDataHashInToken(data);
+            Approov.setDataHashInToken(data);
             ApproovLog.d(TAG, "setDataHashInToken");
         } catch (RuntimeException e) {
             throw sdkFailure("setDataHashInToken", e);
@@ -1300,7 +1316,7 @@ public class ApproovService {
         requireProtection("fetchToken");
         // fetch the Approov token
         Approov.TokenFetchResult approovResults = directFetch("fetchApproovTokenAndWait",
-                () -> ApproovService.sdk().fetchApproovTokenAndWait(url));
+                () -> Approov.fetchApproovTokenAndWait(url));
         ApproovLog.d(TAG, "fetchToken: " + approovResults.getStatus());
 
         // process the status using decision maker
@@ -1354,7 +1370,7 @@ public class ApproovService {
     public static String getAccountMessageSignature(String message) throws ApproovException {
         requireProtection("getAccountMessageSignature");
         try {
-            String signature = ApproovService.sdk().getAccountMessageSignature(message);
+            String signature = Approov.getAccountMessageSignature(message);
             ApproovLog.d(TAG, "getAccountMessageSignature");
             if (signature == null)
                 throw new ApproovException("no account signature available");
@@ -1384,7 +1400,7 @@ public class ApproovService {
     public static String getInstallMessageSignature(String message) throws ApproovException {
         requireProtection("getInstallMessageSignature");
         try {
-            String signature = ApproovService.sdk().getInstallMessageSignature(message);
+            String signature = Approov.getInstallMessageSignature(message);
             ApproovLog.d(TAG, "getInstallMessageSignature");
             if (signature == null)
                 throw new ApproovException("no device signature available");
@@ -1420,7 +1436,7 @@ public class ApproovService {
 
         // fetch any secure string keyed by the value, catching any exceptions the SDK might throw
         Approov.TokenFetchResult approovResults = directFetch("fetchSecureStringAndWait",
-                () -> ApproovService.sdk().fetchSecureStringAndWait(key, newDef));
+                () -> Approov.fetchSecureStringAndWait(key, newDef));
         ApproovLog.d(TAG, "fetchSecureString " + type + " for " + key + ": " + approovResults.getStatus());
 
         // process the returned Approov status using decision maker
@@ -1448,7 +1464,7 @@ public class ApproovService {
         requireProtection("fetchCustomJWT");
         // fetch the custom JWT catching any exceptions the SDK might throw
         Approov.TokenFetchResult approovResults = directFetch("fetchCustomJWTAndWait",
-                () -> ApproovService.sdk().fetchCustomJWTAndWait(payload));
+                () -> Approov.fetchCustomJWTAndWait(payload));
         ApproovLog.d(TAG, "fetchCustomJWT: " + approovResults.getStatus());
 
         // process the returned Approov status using decision maker
@@ -1528,7 +1544,7 @@ public class ApproovService {
     public static void setInstallAttributes(String attrs) throws ApproovException {
         requireProtection("setInstallAttributes");
         try {
-            ApproovService.sdk().setInstallAttrsInToken(attrs);
+            Approov.setInstallAttrsInToken(attrs);
             ApproovLog.d(TAG, "setInstallAttributes");
         } catch (RuntimeException e) {
             throw sdkFailure("setInstallAttrsInToken", e);
@@ -1544,7 +1560,7 @@ public class ApproovService {
     public static void setInstallAttrsInToken(String attrs) throws ApproovException {
         requireProtection("setInstallAttrsInToken");
         try {
-            ApproovService.sdk().setInstallAttrsInToken(attrs);
+            Approov.setInstallAttrsInToken(attrs);
             ApproovLog.d(TAG, "setInstallAttrsInToken");
         } catch (RuntimeException e) {
             throw sdkFailure("setInstallAttrsInToken", e);
@@ -1870,7 +1886,7 @@ class ApproovTokenInterceptor implements Interceptor {
                 }
                 String key = value.substring(prefix.length());
                 approovResults = fetchForRequest("fetchSecureStringAndWait", () ->
-                        ApproovService.sdk().fetchSecureStringAndWait(key, null));
+                        Approov.fetchSecureStringAndWait(key, null));
                 ApproovLog.d(TAG, "Substituting header: " + header + ", " + approovResults.getStatus().toString());
                 // the request proceeds unless the mutator throws, and a decision to substitute with no value is
                 // treated like a decision not to substitute, so the header never carries "null"
@@ -1936,7 +1952,7 @@ class ApproovTokenInterceptor implements Interceptor {
                 // value as a key for a secure string
                 String queryValue = matcher.group(1);
                 approovResults = fetchForRequest("fetchSecureStringAndWait", () ->
-                        ApproovService.sdk().fetchSecureStringAndWait(queryValue, null));
+                        Approov.fetchSecureStringAndWait(queryValue, null));
                 ApproovLog.d(TAG, "Substituting query parameter: " + queryKey + ", " + approovResults.getStatus().toString());
                 // the request proceeds unless the mutator throws, and a decision to substitute with no value is
                 // treated like a decision not to substitute
@@ -2198,7 +2214,7 @@ class ApproovTokenInterceptor implements Interceptor {
         // empty value is still bound
         String bindingValue = (bindingHeader != null) ? request.header(bindingHeader) : null;
         if (bindingValue == null)
-            return fetchForRequest(call, () -> ApproovService.sdk().fetchApproovTokenAndWait(url.toString()));
+            return fetchForRequest(call, () -> Approov.fetchApproovTokenAndWait(url.toString()));
 
         // set the binding value and fetch the token, holding the lock across the two SDK calls only
         Approov.TokenFetchResult approovResults;
@@ -2207,13 +2223,13 @@ class ApproovTokenInterceptor implements Interceptor {
         synchronized (BINDING_LOCK) {
             approovResults = null;
             try {
-                ApproovService.sdk().setDataHashInToken(bindingValue);
+                Approov.setDataHashInToken(bindingValue);
             } catch (RuntimeException e) {
                 bindingFailure = e;
             }
             if (bindingFailure == null) {
                 try {
-                    approovResults = ApproovService.sdk().fetchApproovTokenAndWait(url.toString());
+                    approovResults = Approov.fetchApproovTokenAndWait(url.toString());
                 } catch (RuntimeException e) {
                     fetchFailure = e;
                 }
@@ -2506,7 +2522,7 @@ class ApproovPinningInterceptor implements Interceptor {
         Set<String> osTrustOnly = new HashSet<>();
         Set<String> pinnedHosts = new HashSet<>();
         try {
-            Map<String, List<String>> allPins = ApproovService.sdk().getPins("public-key-sha256");
+            Map<String, List<String>> allPins = Approov.getPins("public-key-sha256");
             if (allPins == null)
                 throw new IllegalStateException("getPins returned no pins");
             for (Map.Entry<String, List<String>> entry : allPins.entrySet()) {

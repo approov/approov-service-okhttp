@@ -63,7 +63,7 @@ public class RedirectTarget370Test {
     private static final String TARGET_TOKEN = "token-for-the-target-host";
 
     private TwoOriginFixture fixture;
-    private RecordingSdkFacade sdk;
+    private RecordingSdk sdk;
 
     /**
      * @param targetProtected whether the other origin (127.0.0.1) is also an Approov
@@ -83,7 +83,7 @@ public class RedirectTarget370Test {
                     + "\"initialSecureStrings\": {\"" + PLACEHOLDER + "\": \"" + SECRET + "\"}}}}");
         }
         ApproovService.reset();
-        sdk = RecordingSdkFacade.install();
+        sdk = RecordingSdk.install();
         fixture.initialize();
         ApproovService.addSubstitutionHeader("Api-Key", null);
         ApproovService.addSubstitutionQueryParam("key");
@@ -96,6 +96,7 @@ public class RedirectTarget370Test {
         if (fixture != null)
             fixture.shutdown();
         ApproovService.reset();
+        RecordingSdk.uninstall();
     }
 
     private Request firstRequest() {

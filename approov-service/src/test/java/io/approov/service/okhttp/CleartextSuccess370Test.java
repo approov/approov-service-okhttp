@@ -47,7 +47,7 @@ import okhttp3.mockwebserver.RecordedRequest;
  * a custom mutator that accepts every substitution. No secure string is fetched
  * and the substitution hooks are not consulted, while the token header shows that
  * the SUCCESS path was taken. The mini SDK answers BAD_URL for every http URL, so
- * the SDK facade fetches the token for the https form of the URL, standing in for
+ * the SDK hook fetches the token for the https form of the URL, standing in for
  * an SDK that answers SUCCESS for a cleartext URL.
  */
 @RunWith(RobolectricTestRunner.class)
@@ -58,7 +58,7 @@ public class CleartextSuccess370Test {
 
     private TwoOriginFixture fixture;
     private MockWebServer cleartext;
-    private RecordingSdkFacade sdk;
+    private RecordingSdk sdk;
 
     // the number of substitution hook calls made to the accepting mutator
     private final AtomicInteger substitutionHooks = new AtomicInteger();
@@ -98,13 +98,13 @@ public class CleartextSuccess370Test {
         cleartext.start(InetAddress.getByName("localhost"), 0);
         ApproovService.reset();
         fixture.initialize();
-        sdk = new RecordingSdkFacade() {
+        sdk = new RecordingSdk() {
             @Override
             public Approov.TokenFetchResult fetchApproovTokenAndWait(String url) {
                 return super.fetchApproovTokenAndWait(url.replaceFirst("^http:", "https:"));
             }
         };
-        ApproovService.setSdkFacadeForTesting(sdk);
+        RecordingSdk.install(sdk);
         ApproovService.addSubstitutionHeader("Api-Key", null);
         ApproovService.addSubstitutionQueryParam("key");
         ApproovService.setOkHttpClientBuilder(fixture.trustingBuilder());
@@ -115,6 +115,7 @@ public class CleartextSuccess370Test {
         cleartext.shutdown();
         fixture.shutdown();
         ApproovService.reset();
+        RecordingSdk.uninstall();
     }
 
     @Test

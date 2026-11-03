@@ -57,6 +57,7 @@ public class ApproovServiceMiniSdkTest {
     @After
     public void tearDown() {
         ApproovService.reset();
+        RecordingSdk.uninstall();
         AttesterProxyController.reset();
     }
 
@@ -1315,7 +1316,7 @@ public class ApproovServiceMiniSdkTest {
         // the default case pins the target host with the managed trust roots, so the
         // pinner is not empty
         assertFalse(ApproovService.getCertificatePinner().getPins().isEmpty());
-        RecordingSdkFacade sdk = RecordingSdkFacade.install();
+        RecordingSdk sdk = RecordingSdk.install();
         OkHttpClient client = ApproovService.getOkHttpClient();
         Request request = new Request.Builder().url(getTargetURL()).get().build();
 
@@ -1339,7 +1340,7 @@ public class ApproovServiceMiniSdkTest {
      */
     @Test
     public void testConfigChangeWithForceApplyPinsRebuildsPinsOnce() throws Exception {
-        RecordingSdkFacade sdk = RecordingSdkFacade.install();
+        RecordingSdk sdk = RecordingSdk.install();
         OkHttpClient client = ApproovService.getOkHttpClient();
         Request request = new Request.Builder().url(getTargetURL()).get().build();
 
@@ -1360,7 +1361,7 @@ public class ApproovServiceMiniSdkTest {
     @Test
     public void testNoConfigChangeOrForceApplyPinsKeepsPins() throws Exception {
         assertFalse(ApproovService.getCertificatePinner().getPins().isEmpty());
-        RecordingSdkFacade sdk = RecordingSdkFacade.install();
+        RecordingSdk sdk = RecordingSdk.install();
         OkHttpClient client = ApproovService.getOkHttpClient();
         Request request = new Request.Builder().url(getTargetURL()).get().build();
 

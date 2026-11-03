@@ -46,7 +46,7 @@ import okhttp3.mockwebserver.RecordedRequest;
  * protection is enabled, so that a device whose clock is wrong still signs within the backend's window. If
  * the SDK call fails the signature is still produced, on the device clock, with a warning.
  * ApproovService.getServerAdjustedCurrentTimeMS() returns the SDK value and, like the other direct methods,
- * fails before protection is enabled. The facade sets the server time three hours apart from the device
+ * fails before protection is enabled. The SDK hook sets the server time three hours apart from the device
  * clock, so a signature stamped from the device clock cannot pass for one stamped from the server time.
  */
 @RunWith(RobolectricTestRunner.class)
@@ -57,8 +57,8 @@ public class ServerAdjustedTime370Test {
     private static final Pattern CREATED = Pattern.compile(";created=(\\d+)");
     private static final Pattern EXPIRES = Pattern.compile(";expires=(\\d+)");
 
-    // a recording facade whose server adjusted time is the device clock minus OFFSET_MS, or fails
-    private static final class ServerTimeFacade extends RecordingSdkFacade {
+    // a recording SDK hook whose server adjusted time is the device clock minus OFFSET_MS, or fails
+    private static final class ServerTimeSdk extends RecordingSdk {
         volatile RuntimeException failure;
         volatile long lastServerTime;
 
@@ -73,15 +73,15 @@ public class ServerAdjustedTime370Test {
     }
 
     private LocalHttpsFixture fixture;
-    private ServerTimeFacade sdk;
+    private ServerTimeSdk sdk;
 
     @Before
     public void setUp() throws Exception {
         // localhost is an Approov API domain whose certificate the client trusts
         fixture = new LocalHttpsFixture(false);
         ApproovService.reset();
-        sdk = new ServerTimeFacade();
-        ApproovService.setSdkFacadeForTesting(sdk);
+        sdk = new ServerTimeSdk();
+        RecordingSdk.install(sdk);
         ApproovService.initialize(fixture.context, LocalHttpsFixture.CONFIG, "reinit-server-time");
         TestSigning.install();
         ApproovService.setOkHttpClientBuilder(fixture.trustingBuilder());
@@ -92,6 +92,7 @@ public class ServerAdjustedTime370Test {
     public void tearDown() throws Exception {
         fixture.shutdown();
         ApproovService.reset();
+        RecordingSdk.uninstall();
         ShadowLog.reset();
     }
 
@@ -184,11 +185,12 @@ public class ServerAdjustedTime370Test {
     }
 
     @Test
-    public void theRealFacadeReportsTheSdkTimeOrTheDeviceClock() {
-        // the mini SDK has no servers, so its server adjusted time is the device clock; an SDK without the
-        // method makes the facade fall back to the device clock
+    public void theSdkReportsItsServerAdjustedTime() throws Exception {
+        // the mini SDK has no servers, so without the hook its server adjusted time is the device clock, and
+        // the layer reaches it through the same lookup an SDK without the method would fall back from
+        RecordingSdk.uninstall();
         long before = System.currentTimeMillis();
-        long value = new DefaultApproovSdkFacade().getServerAdjustedCurrentTimeMS();
+        long value = ApproovService.getServerAdjustedCurrentTimeMS();
         long after = System.currentTimeMillis();
         assertTrue("within the device clock: " + value, (value >= before - 1000) && (value <= after + 1000));
     }

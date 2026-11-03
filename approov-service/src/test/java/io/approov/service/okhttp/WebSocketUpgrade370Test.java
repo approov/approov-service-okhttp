@@ -60,14 +60,14 @@ public class WebSocketUpgrade370Test {
     private static final String PLACEHOLDER = "api-key-placeholder";
 
     private LocalHttpsFixture fixture;
-    private RecordingSdkFacade sdk;
+    private RecordingSdk sdk;
 
     @Before
     public void setUp() throws Exception {
         // localhost is an Approov API domain carrying a pin that its certificate does not match
         fixture = new LocalHttpsFixture(true);
         ApproovService.reset();
-        sdk = RecordingSdkFacade.install();
+        sdk = RecordingSdk.install();
         ApproovService.initialize(fixture.context, LocalHttpsFixture.CONFIG, "reinit-websocket");
         ApproovService.addSubstitutionHeader("Api-Key", null);
         TestSigning.install();
@@ -79,6 +79,7 @@ public class WebSocketUpgrade370Test {
     public void tearDown() throws Exception {
         fixture.shutdown();
         ApproovService.reset();
+        RecordingSdk.uninstall();
     }
 
     // opens a WebSocket and waits for it to open or fail, returning the failure or null; a failure reported after

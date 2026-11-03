@@ -86,12 +86,12 @@ public class ProtectedChannels370Test {
             "NO_NETWORK_PERMISSION", "MISSING_LIB_DEPENDENCY"};
 
     private TwoOriginFixture fixture;
-    private RecordingSdkFacade sdk;
+    private RecordingSdk sdk;
 
     private void start(String extraScenario) throws Exception {
         fixture = new TwoOriginFixture(extraScenario, true, PLACEHOLDER, SECRET);
         ApproovService.reset();
-        sdk = RecordingSdkFacade.install();
+        sdk = RecordingSdk.install();
         fixture.initialize();
         configure();
     }
@@ -109,6 +109,7 @@ public class ProtectedChannels370Test {
         if (fixture != null)
             fixture.shutdown();
         ApproovService.reset();
+        RecordingSdk.uninstall();
     }
 
     private Request request() {
@@ -549,14 +550,14 @@ public class ProtectedChannels370Test {
     @Test
     public void anUnreadablePinSetListsNoHost() throws Exception {
         start(null);
-        ApproovService.setSdkFacadeForTesting(new RecordingSdkFacade() {
+        RecordingSdk.install(new RecordingSdk() {
             @Override
             public java.util.Map<String, java.util.List<String>> getPins(String pinType) {
                 throw new IllegalStateException("no pins");
             }
         });
         assertFalse(ApproovService.isApproovApiHost("localhost"));
-        ApproovService.setSdkFacadeForTesting(new RecordingSdkFacade() {
+        RecordingSdk.install(new RecordingSdk() {
             @Override
             public java.util.Map<String, java.util.List<String>> getPins(String pinType) {
                 return null;
@@ -616,20 +617,20 @@ public class ProtectedChannels370Test {
 
     @Test
     public void unprotectedUrlOverCleartextKeepsThePlaceholders() throws Exception {
-        // the SDK answers BAD_URL for every http URL, so this facade answers
+        // the SDK answers BAD_URL for every http URL, so this SDK hook answers
         // UNPROTECTED_URL for one itself, to show that the layer's own https check
         // keeps a secret out of cleartext on the secrets-only channel too
         fixture = new TwoOriginFixture(false, PLACEHOLDER, SECRET);
         ApproovService.reset();
-        RecordingSdkFacade facade = new RecordingSdkFacade() {
+        RecordingSdk answering = new RecordingSdk() {
             @Override
             public Approov.TokenFetchResult fetchApproovTokenAndWait(String url) {
                 calls.add("fetchApproovTokenAndWait:" + url);
                 return tokenResult(Approov.TokenFetchStatus.UNPROTECTED_URL);
             }
         };
-        ApproovService.setSdkFacadeForTesting(facade);
-        sdk = facade;
+        RecordingSdk.install(answering);
+        sdk = answering;
         fixture.initialize();
         ApproovService.addSubstitutionHeader("Api-Key", null);
         ApproovService.addSubstitutionQueryParam("key");
@@ -643,7 +644,7 @@ public class ProtectedChannels370Test {
         LocalHttpsFixture.assertNoApproovHeaders(recorded);
         assertEquals(PLACEHOLDER, recorded.getHeader("Api-Key"));
         assertEquals(PLACEHOLDER, recorded.getRequestUrl().queryParameter("key"));
-        assertEquals("the facade was asked", 1, sdk.count("fetchApproovTokenAndWait"));
+        assertEquals("the SDK was asked", 1, sdk.count("fetchApproovTokenAndWait"));
         assertEquals("a secure string was fetched", 0, sdk.count("fetchSecureStringAndWait"));
     }
 

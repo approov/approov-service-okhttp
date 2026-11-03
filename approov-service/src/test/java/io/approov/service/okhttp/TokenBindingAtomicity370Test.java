@@ -58,7 +58,7 @@ import okhttp3.mockwebserver.RecordedRequest;
  * redirect, authenticator retry); requests without a binding value still fetch
  * concurrently.
  *
- * The SDK here is a facade whose fetch waits for both requests to set their value
+ * The SDK here is a hook whose fetch waits for both requests to set their value
  * (or 300 ms) and returns a token naming the value current when it completes, as
  * the real SDK's pay claim would.
  */
@@ -75,7 +75,7 @@ public class TokenBindingAtomicity370Test {
     public void setUp() throws Exception {
         fixture = new LocalHttpsFixture(false);
         ApproovService.reset();
-        ApproovService.setSdkFacadeForTesting(new RecordingSdkFacade() {
+        RecordingSdk.install(new RecordingSdk() {
             @Override
             public void setDataHashInToken(String data) {
                 currentBinding.set(data);
@@ -116,6 +116,7 @@ public class TokenBindingAtomicity370Test {
     public void tearDown() throws Exception {
         fixture.shutdown();
         ApproovService.reset();
+        RecordingSdk.uninstall();
     }
 
     // a successful token fetch result carrying the token, built as the SDK builds it
@@ -202,7 +203,7 @@ public class TokenBindingAtomicity370Test {
         // serialized, so both are inside the SDK at the same time
         gate = new CountDownLatch(1);
         CountDownLatch bothInside = new CountDownLatch(2);
-        ApproovService.setSdkFacadeForTesting(new RecordingSdkFacade() {
+        RecordingSdk.install(new RecordingSdk() {
             @Override
             public Approov.TokenFetchResult fetchApproovTokenAndWait(String url) {
                 bothInside.countDown();
