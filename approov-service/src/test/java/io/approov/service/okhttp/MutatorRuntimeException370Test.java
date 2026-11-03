@@ -278,7 +278,7 @@ public class MutatorRuntimeException370Test {
     @Test
     public void anAppAbortFromARequestPathHookIsAnApproovExceptionNamingTheHook() throws Exception {
         for (String hook : REQUEST_PATH_HOOKS) {
-            if ("supportsProtectionRefresh".equals(hook))
+            if ("supportsProtectionRefresh".equals(hook) || "handlePinningShouldProcessRequest".equals(hook))
                 continue; // declares no checked exception, so it cannot abort with an ApproovException
             for (boolean enqueued : new boolean[] {true, false}) {
                 ThrowingMutator mutator = new ThrowingMutator(hook, () -> new ApproovException("app abort"));
