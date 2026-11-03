@@ -89,7 +89,7 @@ Secure strings (see [Secure strings](#secure-strings)) are substituted only on a
 | `UNKNOWN_KEY` (the value is not a secure string key, the key was deleted, or its value cannot be decrypted) | `UNKNOWN_KEY` replaces the placeholder and the request proceeds | same |
 | any other status (`REJECTED`, `DISABLED`, `NO_APPROOV_SERVICE`, `NO_NETWORK`, `POOR_NETWORK`, `MITM_DETECTED`, `INTERNAL_ERROR`, ...) | the status name (`REJECTED`, `DISABLED`, `NO_APPROOV_SERVICE`, ...) replaces the placeholder and the request proceeds | same |
 
-The status is the SDK status name, unchanged. A header with a required prefix keeps the prefix, as in `Authorization: Bearer REJECTED`. Each occurrence of a query parameter gets the status of its own fetch, as in `?api_key=NO_NETWORK`.
+The status is the SDK status name, unchanged. A header becomes, for example, `X-Api-Key: REJECTED`, and a required prefix stays in front of the status. Each occurrence of a query parameter gets the status of its own fetch, as in `?api_key=NO_NETWORK`.
 
 This gives your backend the reason a secret is missing, without another header. Compare the value with your real secret. When it does not match, log the value as the reason.
 
@@ -215,9 +215,9 @@ val factory = ApproovDefaultMessageSigning.generateDefaultSignatureParametersFac
     .setExpiresLifetime(60)                 // default 15s
     .addOptionalHeaders("X-Request-Id")     // covered when present
     .setBodyDigestConfig(ApproovDefaultMessageSigning.DIGEST_SHA256, true) // digest required: a body that
-                                            // cannot be digested fails the request with
-                                            // RequiredBodyDigestException, an IOException
-                                            // (a configuration error)
+                                            // cannot be digested fails the request with an
+                                            // ApproovException, an IOException, whose cause is
+                                            // RequiredBodyDigestException (a configuration error)
 
 // a factory is shared by every request it applies to, so use a separate
 // instance for a host that needs different settings
@@ -270,7 +270,7 @@ The same in Java:
 public class PathAwareSigning extends ApproovDefaultMessageSigning {
     @Override
     protected SignatureParameters buildSignatureParameters(ApproovDefaultMessageSigning.OkHttpComponentProvider provider,
-            ApproovRequestMutations changes) throws RequiredBodyDigestException {
+            ApproovRequestMutations changes) {
         // leave health checks unsigned
         if (provider.getPath().startsWith("/health"))
             return null;
@@ -288,7 +288,7 @@ public class PathAwareSigning extends ApproovDefaultMessageSigning {
 Keep three things in mind when you write one:
 
 * The factory for the host decides which signatures are made (`getAlgs()`). Parameters that set an explicit `alg` make that single signature instead.
-* Returning `null` leaves the request unsigned. So does an override that throws, except for `RequiredBodyDigestException`, which fails the request. Let that exception propagate from `super`.
+* Returning `null` leaves the request unsigned. So does an override that throws, except for `RequiredBodyDigestException`, which fails the request with an `ApproovException` that has it as its cause. Let that exception propagate from `super`.
 * The method runs for every signed request. Keep it fast, and do not change the factories from it.
 
 ### Signing with other decisions
@@ -393,7 +393,7 @@ The package may process a request after `initialize` but before your configurati
 * an empty token header, not the status, when no token is available
 * logging at `INFO`, unless you set another level
 
-A configuration change applies only to requests processed after the call. A request already in flight is not processed again.
+A configuration change applies to requests processed after the call. A request already in flight keeps the mutator it started with. If its protection is applied again before it is sent (a stale protection refresh, a redirect or a retry), the other settings, such as the token header and the substitutions, are read again at that moment.
 
 Connection checks do not depend on this order. Their keys come from the Approov SDK's configuration, not from your configuration calls, and apply from initialization.
 
@@ -416,6 +416,8 @@ Each request's token is bound to that request's own header value. This holds eve
 
 The SDK holds one binding value for the whole app. So for every request that carries the binding header, the package sets the value and fetches the token as one step. It does this on the first attempt, and whenever the request's protection is reapplied: on a stale protection refresh, a redirect or an authenticator retry. Requests that carry no binding header are not held up by this.
 
+The package can only order the calls it makes itself. A `setDataHashInToken` or `fetchToken` call from your own code, or a token fetch by another Approov package in the same app, can run between the package setting a request's value and fetching its token. That request's token is then bound to the other value, and your backend rejects it. Do not call `setDataHashInToken` or `fetchToken` while requests that carry the binding header are in flight.
+
 `setDataHashInToken` binds arbitrary data instead. Never use both: the binding header overrides the data hash on every request.
 
 ## Secure strings
@@ -431,6 +433,14 @@ ApproovService.addSubstitutionQueryParam("api_key")
 If a value's secure string fetch fails, the value is replaced by the fetch status name and the request goes ahead. This includes `UNKNOWN_KEY`, which means no secure string is defined for that key. See the [secure string table](#what-happens-by-default).
 
 Header names are matched without regard to case. A header cannot be both a binding header and a substitution header. To fetch or define a secure string directly, use `fetchSecureString`.
+
+### Keys and values
+
+A secure string key is at most 64 characters (see [secure strings](https://docs.approov.io/backend-integration/secure-strings/)). The package uses the whole header value after the prefix, or the whole query parameter value, as the key, exactly as it appears in the request. For a key used in a query parameter, use only letters, digits, `.`, `_`, `~` and `-`. OkHttp encodes other characters in a URL, so the value it sends is no longer the key you wrote, and characters such as `&`, `#`, `=`, `+`, space and `%` change how the URL is read.
+
+A value that a request cannot carry unchanged keeps its placeholder (see [When placeholders stay in place](#when-placeholders-stay-in-place)). Your app can still read it with `fetchSecureString`.
+
+A `+` in a value substituted into a query reaches a backend that decodes the query as a form as a space. If your backend decodes it that way, store the value URL-encoded, with `%2B` for `+`.
 
 ### When placeholders stay in place
 
@@ -451,13 +461,9 @@ This matters under `ALWAYS_PROCEED`, which sends a request whatever its token fe
 
 ### Secure strings and the OkHttp cache
 
-A request with a secure string substituted into its query bypasses your OkHttp `Cache`. Its response is never stored, so the URL with the secret is never written to the cache on disk. The request always goes to the network.
+The package does not change how an OkHttp `Cache` treats a response. A `Cache` stores a response under its request URL, so a response to a request with a secure string in its query is written to the cache on disk with the secret in the URL. It also stores the request headers that the response names in `Vary`, so a substituted header named there is stored with its secret.
 
-To do this, the package marks the response `no-store` as it passes through the package's network interceptor, where OkHttp's cache reads it. Your code gets the server's own `Cache-Control` back. Only `networkResponse()` shows `no-store`, and nothing changes on the wire.
-
-Each network attempt is checked against what it carried. So a redirect from such a URL is not stored, while a redirect target without a query secret is cached as usual.
-
-Every other response is cached as OkHttp decides, including one to a request with a substituted header. **Do not let a server name a substituted header in `Vary`.** OkHttp would then store that header, and so its secure string, with the response.
+If your client has a `Cache`, send requests that carry secure strings with `Cache-Control: no-store` (OkHttp then never stores their responses), and **do not let a server name a substituted header in `Vary`**.
 
 ## Excluding URLs
 
@@ -582,7 +588,7 @@ Under `ALWAYS_PROCEED`, every outcome goes ahead. Your app may decide that some 
 
 The common case is `NO_NETWORK`. The device could not reach Approov, and the API call is about to fail on the same network anyway. Your app may prefer to get a network error at once and show its offline state, rather than send a request that will not reach your backend.
 
-That is your app's policy, so you express it by overriding the hook and throwing an `ApproovException`. Every interceptor hook declares `ApproovException`, `handlePinningShouldProcessRequest` included. The request then fails with a plain `ApproovException` that names the hook, with yours as its cause. Your app's error handling finds your exception with `getCause()`. The Approov status is still available from the result for your own logging.
+That is your app's policy, so you express it by overriding the hook and throwing an `ApproovException`. Every `handleInterceptor...` hook declares `ApproovException`. `handlePinningShouldProcessRequest` declares no checked exception, so it aborts by throwing a `RuntimeException`, with the same result. The request then fails with a plain `ApproovException` that names the hook, with yours as its cause. Your app's error handling finds your exception with `getCause()`. The Approov status is still available from the result for your own logging.
 
 A hook that throws something else is treated as a failed request too, never as a crash. That includes a `NullPointerException` or other programming error, and a deliberate `RuntimeException`. The request fails with an `ApproovException` whose cause is the original exception. The hook is named in its message and in an error-level log line. `execute()` throws it, and an enqueued call receives it in `onFailure`. Otherwise OkHttp would rethrow the exception on its dispatcher thread for an enqueued call, which would terminate your app.
 
@@ -699,14 +705,15 @@ On a protected target, only your own placeholders are substituted, the ones in y
 
 ### Limits
 
-Two limits apply, by design:
+Three limits apply, by design:
 
 * Only requests that were given protection are classified again on a redirect. A request to a domain not in Approov that redirects into a protected domain arrives there without protection, and your backend rejects it. Add every domain your app calls to Approov, including legacy or alias domains that redirect.
 * The package restores what it added, not what it replaced. Suppose your app sets its own `Signature` or `Signature-Input` headers on a request that Approov also signs. On a redirect, the value the package wrote is treated as your app's, and travels with it. Do not set those headers yourself on Approov-protected requests.
+* The package expects a request to keep its scheme, host and port once it has protected it. An interceptor you add to a client you got from `getOkHttpClient`, for example with `newBuilder().addInterceptor`, runs after the package. If it changes the scheme, host or port, the package treats the new URL like a redirect target and leaves its query as it is, so a secure string substituted into the query goes to the new host. **Do not change the host of a request after the package has processed it.** Change it in the request you build, or in an interceptor on the builder you pass to `setOkHttpClientBuilder`.
 
 The package's network interceptors run last in the client, after any your app adds through `setOkHttpClientBuilder`, just before the request is sent. So a network interceptor of yours, such as a logger or an inspector, sees each attempt before the package strips or refreshes its protection. On a redirect to another host it sees the token and the substituted secrets of the original host before the package removes them. Do not log those values there. A request held inside one of your own network interceptors is refreshed before it is sent.
 
-A refresh, a redirect, a retry and the connection validation hook all use the mutator installed at that moment, not the one that first processed the request. Install your mutator once, at startup, and do not replace it while requests are in flight.
+A request keeps the mutator that was installed when the package first processed it. Its refresh, its redirects, its retries and the connection validation hook for each of its attempts all use that mutator, even if you install another one while the request is in flight. A mutator you install applies to requests processed after the call.
 
 ## Diagnostics
 

@@ -322,7 +322,7 @@ public interface ApproovServiceMutator {
      * to a token-protected or secrets-only API over https. The default substitutes the header on SUCCESS
      * and skips it on any other status, with the request proceeding. When the request proceeds without a
      * secure string, the fetch status name replaces the placeholder after
-     * any required prefix, such as "Bearer REJECTED" or "Bearer UNKNOWN_KEY".
+     * any required prefix, such as "X-Api-Key: REJECTED" or "X-Api-Key: UNKNOWN_KEY".
      *
      * @param approovResults is the TokenFetchResult from Approov
      * @param header is the header being substituted
@@ -404,14 +404,13 @@ public interface ApproovServiceMutator {
 
     /**
      * Decides whether certificate pinning should be applied to a request or not. This is called at the
-     * start of the ApproovService pinning processing.
+     * start of the ApproovService pinning processing. An overriding implementation may abort the request by
+     * throwing a RuntimeException, which fails it with an ApproovException naming this hook.
      *
      * @param request is the request being processed
      * @return true if pinning should be applied, false to skip it
-     * @throws ApproovException if an overriding implementation aborts the request, which the default never
-     * does
      */
-    default boolean handlePinningShouldProcessRequest(Request request) throws ApproovException {
+    default boolean handlePinningShouldProcessRequest(Request request) {
         // by default do not skip pinning for any requests
         return true;
     }

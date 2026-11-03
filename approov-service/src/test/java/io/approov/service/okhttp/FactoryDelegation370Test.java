@@ -270,10 +270,11 @@ public class FactoryDelegation370Test {
                 .setBodyDigestConfig(ApproovDefaultMessageSigning.DIGEST_SHA256, true);
         ApproovService.setServiceMutator(new PathSigning(required).setDefaultFactory(standard()));
 
-        // a GET has no body to digest, and the signing decision passes through unwrapped
-        RequiredBodyDigestException e = RequestPathProbe.assertFailure("download",
-                probe.execute(get("localhost", "/download/x")), RequiredBodyDigestException.class);
-        assertNull("not wrapped as a hook failure", e.getCause());
+        // a GET has no body to digest, and the signing decision is not reported as a hook failure
+        ApproovException e = RequestPathProbe.assertFailure("download",
+                probe.execute(get("localhost", "/download/x")), ApproovException.class);
+        assertEquals("Message signing: required body digest not generated", e.getMessage());
+        assertTrue("cause " + e.getCause(), e.getCause() instanceof RequiredBodyDigestException);
         assertEquals("a failed request never reaches the network", 0, server.getRequestCount());
 
         // the other path does not require one

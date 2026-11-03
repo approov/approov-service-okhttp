@@ -169,8 +169,8 @@ public class MutatorRuntimeException370Test {
         }
 
         @Override
-        public boolean handlePinningShouldProcessRequest(Request request) throws ApproovException {
-            trip("handlePinningShouldProcessRequest");
+        public boolean handlePinningShouldProcessRequest(Request request) {
+            tripUnchecked("handlePinningShouldProcessRequest");
             return ApproovServiceMutator.super.handlePinningShouldProcessRequest(request);
         }
 

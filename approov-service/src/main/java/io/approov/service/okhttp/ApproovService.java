@@ -550,7 +550,7 @@ public class ApproovService {
 
     /**
      * Indicates whether Approov protection is enabled for this service layer instance. If initialization
-     * used an empty config string then the layer is initialized but Approov protection is bypassed. This is
+     * used an empty account ID then the layer is initialized but Approov protection is bypassed. This is
      * the same as isApproovProtectionEnabled().
      *
      * @return true if Approov protection is enabled, false otherwise
@@ -664,11 +664,15 @@ public class ApproovService {
      * service mutator lets the request proceed, then the header is sent with an empty token after the prefix,
      * or with the token fetch status if setUseApproovStatusIfNoToken is enabled.
      *
-     * @param header is the header to place the Approov token on
+     * @param header is the header to place the Approov token on, where null adds no token header
      * @param prefix is any prefix String for the Approov token header, or null for none
      */
     public static synchronized void setTokenHeader(String header, String prefix) {
-        ApproovLog.d(TAG, "setTokenHeader " + header + ", " + prefix);
+        // a null header adds no token header at all, which is kept but never silent
+        if (header == null)
+            ApproovLog.w(TAG, "setTokenHeader: null header, no token header is added");
+        else
+            ApproovLog.d(TAG, "setTokenHeader " + header + ", " + prefix);
         approovTokenHeader = header;
         approovTokenPrefix = (prefix != null) ? prefix : APPROOV_TOKEN_PREFIX;
     }
@@ -999,6 +1003,20 @@ public class ApproovService {
     }
 
     /**
+     * Gets the service mutator that governs a request: the one in force when the token interceptor first
+     * processed it, which it carries as a tag, so that a mutator change while the request is in flight never
+     * applies to its later attempts (redirects, retries and refreshes), or the current one for a request the
+     * token interceptor never saw.
+     *
+     * @param request is the request or attempt
+     * @return the service mutator for the request, never null
+     */
+    static ApproovServiceMutator mutatorFor(Request request) {
+        ApproovServiceMutator mutator = request.tag(ApproovServiceMutator.class);
+        return (mutator != null) ? mutator : getServiceMutator();
+    }
+
+    /**
      * Adds the name of a header which should be subject to secure strings substitution. This
      * means that if the header is present then the value will be used as a key to look up a
      * secure string value which will be substituted into the header value instead. This allows
@@ -1011,11 +1029,14 @@ public class ApproovService {
      *
      * @param header is the header to be marked for substitution
      * @param requiredPrefix is any required prefix to the value being substituted or null if not required
-     * @throws IllegalArgumentException if the header is already used for token binding
+     * @throws IllegalArgumentException if the header is null or is already used for token binding
      */
     public static synchronized void addSubstitutionHeader(String header, String requiredPrefix) {
         ApproovLog.d(TAG, "addSubstitutionHeader " + header + ", " + requiredPrefix);
-        if ((header != null) && (bindingHeader != null) && header.equalsIgnoreCase(bindingHeader)) {
+        // a null header would fail every protected request, so it is refused here
+        if (header == null)
+            throw new IllegalArgumentException("addSubstitutionHeader: null header");
+        if ((bindingHeader != null) && header.equalsIgnoreCase(bindingHeader)) {
             throw new IllegalArgumentException("Header " + header +
                     " cannot be used for both token binding and secure string substitution");
         }
@@ -1738,13 +1759,21 @@ class ApproovTokenInterceptor implements Interceptor {
             return chain.proceed(chain.request());
         }
 
-        // cache the mutator for the duration of the interceptor to make sure it is not changed mid-flight
-        ApproovServiceMutator mutator = ApproovService.getServiceMutator();
+        // the mutator in force now governs every attempt of the request, so it is tagged on the request; a
+        // request this interceptor already processed, such as one an app interceptor sends again from its
+        // response, keeps the mutator it was first processed with
+        Request request = chain.request();
+        ApproovServiceMutator mutator = ApproovService.mutatorFor(request);
+        request = request.newBuilder().tag(ApproovServiceMutator.class, mutator).build();
 
-        // a processed request is tagged so that a response to an attempt carrying a substituted query secure
-        // string is kept out of the app's cache, and the app is given the server's own Cache-Control
-        Request sent = OkHttpCacheBypass.tag(applyProtection(chain.request(), mutator, true, true));
-        return OkHttpCacheBypass.restore(sent, chain.proceed(sent));
+        // a request that already carries protection is stripped back to the app's placeholders before it is
+        // protected again; its URL is only restored if it is still the URL the protection was applied to
+        ApproovRequestFreshness freshness = request.tag(ApproovRequestFreshness.class);
+        if (freshness != null)
+            request = stripProtection(request, freshness,
+                    request.url().toString().equals(freshness.getAppliedURL()));
+
+        return chain.proceed(applyProtection(request, mutator, true, true));
     }
 
     /**
@@ -2362,9 +2391,7 @@ class ApproovFreshnessInterceptor implements Interceptor {
 
     @Override
     public Response intercept(Chain chain) throws IOException {
-        // a response to an attempt carrying a substituted query secure string is kept out of the app's cache
-        Request sent = protectAttempt(chain.request());
-        return OkHttpCacheBypass.markAttempt(sent, chain.proceed(sent));
+        return chain.proceed(protectAttempt(chain.request()));
     }
 
     /**
@@ -2407,10 +2434,10 @@ class ApproovFreshnessInterceptor implements Interceptor {
                     && applied.host().equals(now.host()) && (applied.port() == now.port());
             ApproovLog.d(TAG, "Request rebuilt for " + (sameOrigin ? "the same origin" : "a new origin")
                     + ": reapplying Approov protection");
-            // cache the mutator for the duration of the interceptor to make sure it is not changed mid-flight;
-            // a mutator that does not support refresh has its headers stripped but its processed request
-            // callback is not invoked again
-            mutator = ApproovService.getServiceMutator();
+            // the mutator the request was first processed with decides the rebuilt attempt; a mutator that does
+            // not support refresh has its headers stripped but its processed request callback is not invoked
+            // again
+            mutator = ApproovService.mutatorFor(request);
             ApproovServiceMutator rebuiltMutator = mutator;
             invokeProcessed = ApproovService.callMutator("supportsProtectionRefresh",
                     rebuiltMutator::supportsProtectionRefresh);
@@ -2425,9 +2452,9 @@ class ApproovFreshnessInterceptor implements Interceptor {
             if (heldMS <= refreshPeriodMS)
                 return request;
 
-            // a refresh reinvokes the processed request callback of the mutator so it is only performed if
-            // the mutator declares that this is safe
-            mutator = ApproovService.getServiceMutator();
+            // a refresh reinvokes the processed request callback of the mutator the request was first
+            // processed with, so it is only performed if that mutator declares that this is safe
+            mutator = ApproovService.mutatorFor(request);
             ApproovServiceMutator staleMutator = mutator;
             if (!ApproovService.callMutator("supportsProtectionRefresh", staleMutator::supportsProtectionRefresh)) {
                 ApproovLog.d(TAG, "refreshProtection: held " + heldMS + "ms, mutator does not support refresh");
@@ -2609,8 +2636,9 @@ class ApproovPinningInterceptor implements Interceptor {
         if (!ApproovService.isApproovProtectionEnabled())
             return chain.proceed(request);
 
-        // first check if we are to proceed with any pinning processing
-        ApproovServiceMutator mutator = ApproovService.getServiceMutator();
+        // first check if we are to proceed with any pinning processing, asking the mutator the request was
+        // first processed with
+        ApproovServiceMutator mutator = ApproovService.mutatorFor(request);
         if (!ApproovService.callMutator("handlePinningShouldProcessRequest",
                 () -> mutator.handlePinningShouldProcessRequest(request))) {
             // we are not to proceed with any pinning processing so just continue

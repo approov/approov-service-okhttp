@@ -164,6 +164,18 @@ public class PublicSurface370Test {
     }
 
     @Test
+    public void theSignerFactoryFieldsStayProtectedForSubclasses() throws Exception {
+        // a subclass of the signer written for an earlier version reads and sets these fields
+        java.lang.reflect.Field defaultFactory = ApproovDefaultMessageSigning.class.getDeclaredField("defaultFactory");
+        assertTrue("defaultFactory is protected", Modifier.isProtected(defaultFactory.getModifiers()));
+        assertEquals(SignatureParametersFactory.class, defaultFactory.getType());
+        java.lang.reflect.Field hostFactories = ApproovDefaultMessageSigning.class.getDeclaredField("hostFactories");
+        assertTrue("hostFactories is protected", Modifier.isProtected(hostFactories.getModifiers()));
+        assertTrue("hostFactories is final", Modifier.isFinal(hostFactories.getModifiers()));
+        assertEquals(java.util.Map.class, hostFactories.getType());
+    }
+
+    @Test
     public void messageSigningIsTheServiceMutatorWithNoApproovServiceMethods() throws Exception {
         for (String name : new String[] {"enableMessageSigning", "disableMessageSigning", "isMessageSigningEnabled",
                 "putMessageSigningHostFactory"}) {
@@ -234,11 +246,13 @@ public class PublicSurface370Test {
             {"handleInterceptorQueryParamSubstitutionResult",
                     new Class<?>[] {Approov.TokenFetchResult.class, String.class}},
             {"handleInterceptorProcessedRequest", new Class<?>[] {Request.class, ApproovRequestMutations.class}},
-            {"handlePinningShouldProcessRequest", new Class<?>[] {Request.class}},
         };
         for (Object[] hook : hooks) {
             Method method = ApproovServiceMutator.class.getMethod((String) hook[0], (Class<?>[]) hook[1]);
             assertArrayEquals((String) hook[0], new Class<?>[] {ApproovException.class}, method.getExceptionTypes());
         }
+        // the pinning hook keeps its 3.5.x signature, so code that calls it needs no change
+        Method pinning = ApproovServiceMutator.class.getMethod("handlePinningShouldProcessRequest", Request.class);
+        assertArrayEquals("handlePinningShouldProcessRequest", new Class<?>[0], pinning.getExceptionTypes());
     }
 }

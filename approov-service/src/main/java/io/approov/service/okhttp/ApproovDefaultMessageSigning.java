@@ -89,11 +89,12 @@ public class ApproovDefaultMessageSigning implements ApproovServiceMutator {
     public final static String SIG_ID_ACCOUNT = "account";
 
     // the factory used for every host without a factory of its own, or null to sign nothing, which is
-    // volatile as it is read on the request threads
-    private volatile SignatureParametersFactory defaultFactory;
+    // volatile as it is read on the request threads; protected so that subclasses can read and set it
+    protected volatile SignatureParametersFactory defaultFactory;
 
-    // factories for individual hosts, keyed by the lowercase host name without any port
-    private final Map<String, SignatureParametersFactory> hostFactories = new ConcurrentHashMap<>();
+    // factories for individual hosts, keyed by the lowercase host name without any port; protected so that
+    // subclasses can read and change them
+    protected final Map<String, SignatureParametersFactory> hostFactories = new ConcurrentHashMap<>();
 
     /**
      * Constructs a message signing service mutator with no factory, so that nothing is signed until a
@@ -153,7 +154,7 @@ public class ApproovDefaultMessageSigning implements ApproovServiceMutator {
      * @throws RequiredBodyDigestException if a body digest configured as required cannot be generated
      */
     protected SignatureParameters buildSignatureParameters(OkHttpComponentProvider provider,
-            ApproovRequestMutations changes) throws RequiredBodyDigestException {
+            ApproovRequestMutations changes) {
         SignatureParametersFactory factory = factoryFor(provider);
         if (factory == null)
             return null;
@@ -168,8 +169,8 @@ public class ApproovDefaultMessageSigning implements ApproovServiceMutator {
      * @param request is the request to sign
      * @param changes is the mutations applied to the request by Approov
      * @return the signed request, or the request unchanged if it is not signed
-     * @throws ApproovException if a body digest configured as required cannot be generated or a configured
-     * signature algorithm is not supported
+     * @throws ApproovException if a body digest configured as required cannot be generated, with the
+     * RequiredBodyDigestException as its cause, or a configured signature algorithm is not supported
      */
     @Override
     public Request handleInterceptorProcessedRequest(Request request, ApproovRequestMutations changes)
@@ -219,15 +220,18 @@ public class ApproovDefaultMessageSigning implements ApproovServiceMutator {
      * @param request is the request as the Approov interceptor and the service mutator left it
      * @param changes is the protection the Approov interceptor applied to it
      * @return the request with the signature headers added, or the request unchanged if it is not signed
-     * @throws RequiredBodyDigestException if a body digest configured as required cannot be generated
-     * @throws ApproovException if a signature algorithm is unsupported
+     * @throws ApproovException if a body digest configured as required cannot be generated, with the
+     * RequiredBodyDigestException as its cause, or a signature algorithm is unsupported
      */
     private Request sign(Request request, ApproovRequestMutations changes) throws ApproovException {
         // any failure other than the configuration errors, including a RuntimeException from the SDK, from a
         // custom factory or from building the headers, leaves the request unsigned so that nothing but an
-        // IOException leaves the request path
+        // IOException leaves the request path; a required body digest that cannot be generated aborts the
+        // request as an IOException, so that an enqueued call reports it to onFailure
         try {
             return signOrFail(request, changes);
+        } catch (RequiredBodyDigestException e) {
+            throw new ApproovException(e.getMessage(), e);
         } catch (RuntimeException e) {
             ApproovLog.e(TAG, "Message signing: failed to add the signatures, proceeding unsigned: " + e);
             return request;
@@ -738,7 +742,7 @@ public class ApproovDefaultMessageSigning implements ApproovServiceMutator {
          * @throws RequiredBodyDigestException if a body digest configured as required cannot be generated
          */
         protected SignatureParameters buildSignatureParameters(OkHttpComponentProvider provider,
-                ApproovRequestMutations changes) throws RequiredBodyDigestException {
+                ApproovRequestMutations changes) {
             // the algorithm is left unset so that one signature per configured algorithm is produced over
             // these same parameters, while a subclass may set an explicit algorithm for a single signature
             SignatureParameters requestParameters = new SignatureParameters(baseParameters);
@@ -772,8 +776,8 @@ public class ApproovDefaultMessageSigning implements ApproovServiceMutator {
     }
 
     // RequiredBodyDigestException is thrown if a body digest configured as required cannot be generated, which
-    // aborts the request
-    public static class RequiredBodyDigestException extends ApproovException {
+    // aborts the request: the request fails with an ApproovException that has it as its cause
+    public static class RequiredBodyDigestException extends IllegalStateException {
         /**
          * Constructs an exception due to a required body digest that cannot be generated.
          *

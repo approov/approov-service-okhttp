@@ -58,14 +58,13 @@ public class HookApproovException370Test {
     private LocalHttpsFixture fixture;
     private RequestPathProbe probe;
 
-    // the request path hooks, which all declare ApproovException
+    // the request path hooks that declare ApproovException
     private static final String[] HOOKS = {
         "handleInterceptorShouldProcessRequest",
         "handleInterceptorFetchTokenResult",
         "handleInterceptorHeaderSubstitutionResult",
         "handleInterceptorQueryParamSubstitutionResult",
         "handleInterceptorProcessedRequest",
-        "handlePinningShouldProcessRequest",
     };
 
     private static final List<Supplier<ApproovException>> APPROOV_EXCEPTIONS = new ArrayList<>();

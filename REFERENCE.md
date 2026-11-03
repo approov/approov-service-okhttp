@@ -28,7 +28,7 @@ Some requests are never failed by a token fetch:
 
 Whatever mutator is installed, these other exceptions can reach your code from a request:
 
-* Your app's own configuration errors. A required body digest that cannot be generated throws `ApproovDefaultMessageSigning.RequiredBodyDigestException`. An unsupported signing algorithm throws `ApproovException`. Both are `IOException`s, and they fail every request they apply to.
+* Your app's own configuration errors. A required body digest that cannot be generated, and an unsupported signing algorithm, fail every request they apply to with an `ApproovException`, an `IOException`. For the body digest, its cause is `ApproovDefaultMessageSigning.RequiredBodyDigestException`.
 * Pinning failures on your API domains throw `javax.net.ssl.SSLPeerUnverifiedException`, as for any OkHttp pinning failure.
 * An abort your app opted in to through a service mutator throws an `ApproovException` that names the hook, with your exception as its cause.
 
@@ -280,7 +280,7 @@ The standard mutator is `ApproovServiceMutator.DEFAULT`, and passing `null` puts
 
 Message signing is a mutator too, [ApproovDefaultMessageSigning](#approovdefaultmessagesigning). Installing another mutator removes it.
 
-The package reads the mutator at each decision point. A stale protection refresh, a redirect, a retry and the pinning hook all use the mutator installed at that moment. That may not be the one that first processed the request. So install your mutator once at startup, not while requests are in flight.
+A request keeps the mutator that was installed when the package first processed it. A stale protection refresh, a redirect, a retry and the pinning hook for that request all use it, even if another mutator is installed while the request is in flight. A new mutator applies to requests processed after the call.
 
 Three standard mutators are provided:
 
@@ -343,6 +343,7 @@ Sets the `header` that carries the Approov token, and an optional `prefix` such 
 * The header carries a token only on a request whose token fetch succeeded. If no token could be obtained and the mutator lets the request go ahead, the header is sent with an empty token after the prefix, or with the fetch status name if [setUseApproovStatusIfNoToken](#setuseapproovstatusifnotoken) is on.
 * `initialize` puts back the default header and prefix, so call this after it.
 * With message signing installed, a token header that is also a covered optional header (`Authorization` in the default factory) is covered only once.
+* A `null` header adds no token header to any request, and logs a warning.
 
 **Java:**
 ```Java
@@ -516,12 +517,12 @@ fun setStaleProtectionRefreshPeriod(periodMS: Long)
 Adds a `header` whose value is replaced by a [secure string](https://approov.io/docs/latest/approov-usage-documentation/#secure-strings). If the header is present on a request, its value is used as a key to look up a secure string, which then replaces the header value. This makes it easy to move existing code to secure strings. See [secure strings](ADVANCED.md#secure-strings).
 
 * `requiredPrefix` handles values with a fixed start, such as "`Bearer `" in an authorization header. Set it to `null` if you don't need one.
-* If the secure string fetch returns any status other than `SUCCESS` and the request goes ahead, the status name, unchanged, goes after the prefix instead (`Bearer REJECTED`, `UNKNOWN_KEY`).
-* A secure string is only substituted into a request sent over TLS (`https`) whose token fetch did not return `BAD_URL`. Any other request keeps the placeholder under every mutator, custom mutators included. No secure string is fetched, the substitution hooks are not consulted, and a warning names the header.
+* If the secure string fetch returns any status other than `SUCCESS` and the request goes ahead, the status name, unchanged, goes after the prefix instead (`X-Api-Key: REJECTED`, `X-Api-Key: UNKNOWN_KEY`).
+* A secure string is only substituted into a request sent over TLS (`https`) whose token fetch returned `SUCCESS` or `UNPROTECTED_URL`. Any other request keeps the placeholder under every mutator, custom mutators included. No secure string is fetched and the substitution hooks are not consulted. A cleartext or `BAD_URL` request logs a warning naming the header; the others log it at DEBUG.
 * It applies to requests processed after the call, including through clients you already have.
 * `initialize` removes every substitution header, so call this after it.
 
-Header names are matched without regard to case. Adding the same header again replaces its configuration, and keeps the casing from the latest call. A substitution header cannot also be the token binding header. Either configuration call throws `IllegalArgumentException` when it detects the conflict.
+Header names are matched without regard to case. Adding the same header again replaces its configuration, and keeps the casing from the latest call. A substitution header cannot also be the token binding header. Either configuration call throws `IllegalArgumentException` when it detects the conflict. A `null` header throws `IllegalArgumentException` too.
 
 **Java:**
 ```Java
@@ -573,7 +574,7 @@ Adds the `key` of a query parameter whose value is replaced by a [secure string]
 
 A redirect target URL is used exactly as the server sent it. Its query values are never looked up, even under a substitution query parameter. If the server echoes a secure string into it, the secure string is not changed back to the placeholder (see [ADVANCED.md](ADVANCED.md#redirects-to-another-origin)).
 
-A response to a request whose query carries a substituted secure string is never stored in the client's OkHttp `Cache`. So the URL with the secret never reaches the disk cache, and the request always goes to the network. The network interceptor marks that response `no-store`, and the token interceptor gives your app the server's own `Cache-Control` back (see [ADVANCED.md](ADVANCED.md#secure-strings-and-the-okhttp-cache)).
+If your client has an OkHttp `Cache`, a response to a request whose query carries a substituted secure string is stored with the secret in its URL, unless the request says `Cache-Control: no-store` (see [ADVANCED.md](ADVANCED.md#secure-strings-and-the-okhttp-cache)).
 
 > **Note**: The package inserts secure strings into the URL exactly as the Approov cloud returns them. It does **not** URL-encode them. A secure string that OkHttp would not carry unchanged (one with `&`, `#`, a tab, CR or LF) is not substituted. The placeholder stays and the request goes ahead. If your secure strings contain reserved characters, store them URL-encoded when you add them with the Approov CLI.
 
@@ -916,7 +917,7 @@ The classes below complete the public API of the package. A standard integration
 
 An interface with default methods, which you install with `setServiceMutator`. Its interceptor defaults are the `CLOSE_FAILURE` decisions, the same as in 3.5.x. See [service mutators](ADVANCED.md#service-mutators).
 
-Every interceptor hook declares `ApproovException`, `handlePinningShouldProcessRequest` included. A mutator aborts a request by throwing one. The request then fails with a plain `ApproovException` whose message is `ApproovServiceMutator.<hook> failed: <your exception>`, with yours as its cause. A pinning failure itself is unchanged: it fails with `SSLPeerUnverifiedException`.
+Every `handleInterceptor...` hook declares `ApproovException`, and a mutator aborts a request by throwing one. `handlePinningShouldProcessRequest` declares no checked exception, so it aborts by throwing a `RuntimeException`. The request then fails with a plain `ApproovException` whose message is `ApproovServiceMutator.<hook> failed: <your exception>`, with yours as its cause. A pinning failure itself is unchanged: it fails with `SSLPeerUnverifiedException`.
 
 Anything else a hook throws is treated as a failed request too, never as a crash. That includes a `NullPointerException` or other programming error, and a deliberate `RuntimeException`:
 * The request fails with an `ApproovException` whose cause is the original exception.
@@ -941,7 +942,7 @@ If a direct method hook (`handleFetchTokenResult`, `handleFetchSecureStringResul
 | `boolean handleInterceptorQueryParamSubstitutionResult(TokenFetchResult, String queryKey) throws ApproovException` | as for headers |
 | `Request handleInterceptorProcessedRequest(Request, ApproovRequestMutations) throws ApproovException` | returns the request unchanged; `ApproovDefaultMessageSigning` signs here |
 | `boolean supportsProtectionRefresh()` | `false`; `true` for `DEFAULT`, `CLOSE_FAILURE` and `ALWAYS_PROCEED` |
-| `boolean handlePinningShouldProcessRequest(Request) throws ApproovException` | `true` |
+| `boolean handlePinningShouldProcessRequest(Request)` | `true` |
 | `void handlePrecheckResult(TokenFetchResult) throws ApproovException` | throws for every status except `SUCCESS` and `UNKNOWN_KEY` |
 | `void handleFetchTokenResult(TokenFetchResult) throws ApproovException` | throws for every status except `SUCCESS` |
 | `void handleFetchSecureStringResult(TokenFetchResult, String operation, String key) throws ApproovException` | throws for every status except `SUCCESS` and `UNKNOWN_KEY` |
@@ -1000,6 +1001,10 @@ The setters are used by the interceptor, and by tests that build a mutations obj
 | `InnerList toComponentValue()` | the `Signature-Input` member value for this set |
 | `static SignatureParameters fromDictionaryEntry(Dictionary, String sigId)` | parses a `Signature-Input` member back into a parameter set. It keeps the components exactly as received, repeats included |
 
+## Supporting signing classes
+
+The packages `io.approov.util.okhttp.sig` (`ComponentProvider`, `SignatureBaseBuilder` and `SignatureParameters`) and `io.approov.util.okhttp.http.sfv` (the RFC 8941 structured field values, such as `StringItem`, `Dictionary` and `InnerList`) are public because the signing extension points use them. `ComponentProvider` names the derived components of RFC 9421 section 2.2, such as `DC_METHOD` and `DC_TARGET_URI`, and `SignatureBaseBuilder` builds the signature base that `ApproovDefaultMessageSigning` signs. Your app needs them only in a subclass of the signer or in a custom factory.
+
 ## ApproovDefaultMessageSigning
 
 The message signing service mutator. Install it with `setServiceMutator` to sign requests (RFC 9421). See [message signing](ADVANCED.md#message-signing).
@@ -1021,14 +1026,14 @@ Every request that carries the Approov token header is signed after all the othe
 
 Signing is off unless you install it. The signer makes the interface default decisions, the same as `CLOSE_FAILURE`. Installing another mutator, passing `null` to `setServiceMutator` or calling `initialize` removes it. To sign under other decisions, subclass it and override the decision hooks (see [signing with other decisions](ADVANCED.md#signing-with-other-decisions)).
 
-A signature that cannot be produced is left out, and the request goes ahead with the other one, or unsigned. Only configuration errors fail the request: a required body digest that cannot be generated (`RequiredBodyDigestException`), or an unsupported signature algorithm (`ApproovException` with the message `Message signing: unsupported algorithm identifier: <alg>`).
+A signature that cannot be produced is left out, and the request goes ahead with the other one, or unsigned. Only configuration errors fail the request: a required body digest that cannot be generated (an `ApproovException` whose cause is `RequiredBodyDigestException`), or an unsupported signature algorithm (`ApproovException` with the message `Message signing: unsupported algorithm identifier: <alg>`).
 
 | Member | Meaning |
 | :--- | :--- |
 | `ApproovDefaultMessageSigning()` | a signer with no factory, which signs nothing until you set one |
 | `ApproovDefaultMessageSigning setDefaultFactory(SignatureParametersFactory)` | the factory for every host without one of its own, or `null` to sign nothing for such hosts. Returns the signer |
 | `ApproovDefaultMessageSigning putHostFactory(String hostName, SignatureParametersFactory)` | the factory for one host, matched without regard to case and without the port. `null` removes it, so the default applies again. Returns the signer |
-| `protected SignatureParameters buildSignatureParameters(OkHttpComponentProvider, ApproovRequestMutations) throws RequiredBodyDigestException` | The override point for choosing parameters per request. The default builds them with the factory for the request's host. Returning `null` leaves the request unsigned. An override that calls `super` must declare or handle `RequiredBodyDigestException`. See [choosing parameters per request](ADVANCED.md#choosing-parameters-per-request) |
+| `protected SignatureParameters buildSignatureParameters(OkHttpComponentProvider, ApproovRequestMutations)` | The override point for choosing parameters per request. The default builds them with the factory for the request's host. Returning `null` leaves the request unsigned. Let a `RequiredBodyDigestException` from `super` propagate. See [choosing parameters per request](ADVANCED.md#choosing-parameters-per-request) |
 | `Request handleInterceptorProcessedRequest(Request, ApproovRequestMutations) throws ApproovException` | signs the request. A subclass that overrides it makes its changes, then calls `super` |
 | `boolean supportsProtectionRefresh()` | `true` |
 | `Request processedRequest(Request, ApproovRequestMutations) throws ApproovException` | deprecated; the same as `handleInterceptorProcessedRequest` |
@@ -1037,7 +1042,7 @@ A signature that cannot be produced is left out, and the request goes ahead with
 | `DIGEST_SHA256`, `DIGEST_SHA512` | body digest algorithms |
 | `ALG_ES256`, `ALG_HS256` | signature algorithms (`ecdsa-p256-sha256`, `hmac-sha256`) |
 | `SIG_ID_INSTALL`, `SIG_ID_ACCOUNT` | dictionary member names `install` and `account` |
-| `RequiredBodyDigestException` | An `ApproovException` (an `IOException`) thrown when a required body digest cannot be generated, with the message `Message signing: required body digest not generated`. `execute()` throws it, and an enqueued call receives it in `onFailure` |
+| `RequiredBodyDigestException` | An `IllegalStateException` thrown by `buildSignatureParameters` when a required body digest cannot be generated. The request then fails with an `ApproovException` (an `IOException`) that has it as its cause, with the message `Message signing: required body digest not generated`. `execute()` throws the `ApproovException`, and an enqueued call receives it in `onFailure` |
 | `protected OkHttpComponentProvider` | the view of the request passed to `buildSignatureParameters` (`getRequest()`, `getPath()`, `hasField(name)`, `getField(name)`, ...). Only a subclass of `ApproovDefaultMessageSigning` can use it |
 
 ## ApproovDefaultMessageSigning.SignatureParametersFactory
@@ -1057,4 +1062,4 @@ Builds the signature parameters for each request. All setters return the factory
 | `setAddApproovTraceIDHeader(boolean)` | cover the trace header when present |
 | `addOptionalHeaders(String...)` | cover these headers when present |
 | `setBodyDigestConfig(String algorithm, boolean required)` | compute `Content-Digest` with `DIGEST_SHA256` or `DIGEST_SHA512`, or pass `null` for none. With `required` set, the request fails when the digest cannot be generated |
-| `protected SignatureParameters buildSignatureParameters(OkHttpComponentProvider, ApproovRequestMutations) throws RequiredBodyDigestException` | Builds the parameters for one request; the signer calls it. If the returned parameter set has an explicit `alg`, that single signature is produced. Otherwise the algorithms come from the factory (`getAlgs()`). To choose parameters per request, override `buildSignatureParameters` on `ApproovDefaultMessageSigning` instead |
+| `protected SignatureParameters buildSignatureParameters(OkHttpComponentProvider, ApproovRequestMutations)` | Builds the parameters for one request; the signer calls it. If the returned parameter set has an explicit `alg`, that single signature is produced. Otherwise the algorithms come from the factory (`getAlgs()`). To choose parameters per request, override `buildSignatureParameters` on `ApproovDefaultMessageSigning` instead |

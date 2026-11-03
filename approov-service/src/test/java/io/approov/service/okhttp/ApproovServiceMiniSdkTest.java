@@ -2186,22 +2186,25 @@ public class ApproovServiceMiniSdkTest {
     }
 
     /**
-     * Every interceptor hook, including the pinning hook, declares exactly
-     * ApproovException (3.5.8), so that an app aborts a request with an
-     * ApproovException and a delegating override can declare it. Message signing
-     * is a mutator, with a processed request override of its own.
+     * Every handleInterceptor hook declares exactly ApproovException, so that an
+     * app aborts a request with an ApproovException and a delegating override can
+     * declare it. The pinning hook keeps its 3.5.x signature with no checked
+     * exception. Message signing is a mutator, with a processed request override of
+     * its own.
      */
     @Test
     public void testAllInterceptorHooksDeclareApproovException() throws Exception {
         int hooks = 0;
         for (java.lang.reflect.Method m : ApproovServiceMutator.class.getMethods()) {
-            if (m.getName().startsWith("handleInterceptor") || m.getName().equals("handlePinningShouldProcessRequest")) {
+            if (m.getName().startsWith("handleInterceptor")) {
                 hooks++;
                 assertEquals(m.getName(), java.util.Collections.singletonList(ApproovException.class),
                     java.util.Arrays.asList(m.getExceptionTypes()));
             }
         }
-        assertEquals(6, hooks);
+        assertEquals(5, hooks);
+        assertEquals(0, ApproovServiceMutator.class.getMethod("handlePinningShouldProcessRequest", Request.class)
+            .getExceptionTypes().length);
         assertTrue(ApproovServiceMutator.class.isAssignableFrom(ApproovDefaultMessageSigning.class));
         assertEquals(ApproovDefaultMessageSigning.class, ApproovDefaultMessageSigning.class.getMethod(
             "handleInterceptorProcessedRequest", Request.class, ApproovRequestMutations.class).getDeclaringClass());
@@ -2211,7 +2214,7 @@ public class ApproovServiceMiniSdkTest {
                 return ApproovServiceMutator.DEFAULT.handleInterceptorProcessedRequest(request, changes);
             }
             @Override
-            public boolean handlePinningShouldProcessRequest(Request request) throws ApproovException {
+            public boolean handlePinningShouldProcessRequest(Request request) {
                 return ApproovServiceMutator.DEFAULT.handlePinningShouldProcessRequest(request);
             }
         };

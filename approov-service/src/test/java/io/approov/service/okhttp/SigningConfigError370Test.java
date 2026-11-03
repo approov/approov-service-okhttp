@@ -20,6 +20,7 @@ package io.approov.service.okhttp;
 import static org.junit.Assert.assertEquals;
 import static org.junit.Assert.assertFalse;
 import static org.junit.Assert.assertNull;
+import static org.junit.Assert.assertSame;
 import static org.junit.Assert.assertTrue;
 
 import org.junit.After;
@@ -74,12 +75,11 @@ public class SigningConfigError370Test {
     }
 
     @Test
-    public void requiredBodyDigestExceptionIsAnApproovException() {
-        assertTrue(ApproovException.class.isAssignableFrom(
+    public void requiredBodyDigestExceptionKeepsItsType() {
+        // the 3.5.x type, so that a buildSignatureParameters override that calls super needs no change
+        assertTrue(IllegalStateException.class.isAssignableFrom(
                 ApproovDefaultMessageSigning.RequiredBodyDigestException.class));
-        assertTrue(IOException.class.isAssignableFrom(
-                ApproovDefaultMessageSigning.RequiredBodyDigestException.class));
-        assertFalse(RuntimeException.class.isAssignableFrom(
+        assertFalse(IOException.class.isAssignableFrom(
                 ApproovDefaultMessageSigning.RequiredBodyDigestException.class));
     }
 
@@ -90,11 +90,13 @@ public class SigningConfigError370Test {
         for (boolean enqueued : new boolean[] {true, false}) {
             String what = enqueued ? "enqueue" : "execute";
             RequestPathProbe.Outcome outcome = probe.run(get(), enqueued);
-            ApproovDefaultMessageSigning.RequiredBodyDigestException e = RequestPathProbe.assertFailure(what,
-                    outcome, ApproovDefaultMessageSigning.RequiredBodyDigestException.class);
+            ApproovException e = RequestPathProbe.assertFailure(what, outcome, ApproovException.class);
             assertEquals(what, "Message signing: required body digest not generated", e.getMessage());
-            // a signing decision passes through, not wrapped as a failure of the mutator hook that signs
-            assertNull(what + ": not wrapped", e.getCause());
+            // a signing decision, not a failure of the mutator hook that signs, with the digest failure as
+            // its cause
+            assertSame(what + ": " + e, ApproovException.class, e.getClass());
+            assertTrue(what + ": cause " + e.getCause(),
+                    e.getCause() instanceof ApproovDefaultMessageSigning.RequiredBodyDigestException);
         }
         assertEquals("a failed request never reaches the network", 0, fixture.server.getRequestCount());
     }

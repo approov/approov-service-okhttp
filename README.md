@@ -144,7 +144,7 @@ The connection is checked against the certificate keys configured for the domain
 
 A domain you added with `-noApproovToken` gets a checked connection and its secure strings, but no Approov headers. Requests to any other domain are sent unchanged.
 
-If a secure string cannot be fetched, its placeholder is replaced by the fetch status name, for example `REJECTED` or `UNKNOWN_KEY`. A required prefix stays in front of it, so a header becomes `Bearer REJECTED`. This lets your backend see why the secret is missing.
+If a secure string cannot be fetched, its placeholder is replaced by the fetch status name, so a header becomes, for example, `X-Api-Key: REJECTED` or `X-Api-Key: UNKNOWN_KEY`, and a required prefix stays in front of the status. This lets your backend see why the secret is missing.
 
 ### When the app cannot get a token
 
@@ -211,26 +211,18 @@ Read the [changelog](CHANGELOG.md) for the full list of changes, and test your a
 ### Code changes
 
 * The message signing helper classes moved. Change imports of `io.approov.util.sig.*` to `io.approov.util.okhttp.sig.*`, and `io.approov.util.http.sfv.*` to `io.approov.util.okhttp.http.sfv.*`.
+* A `SignatureParametersFactory` subclass that sets `useAccountMessageSigning = true` directly now produces both the install and the account signature. Call `setUseAccountMessageSigning()` instead to keep the account signature only.
 * The package now brings in OkHttp 5.3.2 instead of 4.12.0. Keep your other OkHttp libraries on the same version, and use Kotlin 2.1 or later if your app compiles Kotlin. You can also stay on OkHttp 4.12 or later. See [OkHttp version](ADVANCED.md#okhttp-version).
-* `ApproovDefaultMessageSigning.RequiredBodyDigestException` is now an `ApproovException`, which is a checked `IOException`. It used to be an `IllegalStateException`. Code that caught `IllegalStateException` must catch `IOException`, and a `buildSignatureParameters` override that calls `super` must declare or handle it.
 * `setProceedOnNetworkFail`, `getProceedOnNetworkFail` and `prefetch` are removed. To go ahead on network failures, install `ApproovServiceMutator.ALWAYS_PROCEED` or turn on `setUseApproovStatusIfNoToken(true)`. The SDK handles prefetching itself.
 * `setApproovInterceptorExtensions`, `getApproovInterceptorExtensions` and the `ApproovInterceptorExtensions` interface are removed. Use `setServiceMutator` and `getServiceMutator`.
-* `handlePinningShouldProcessRequest` now declares `ApproovException`, like the other interceptor hooks. Code that calls it directly must handle the exception.
 
 ### What you may notice
 
-* A secure string that cannot be fetched no longer fails the request. The placeholder is replaced by the status name, such as `REJECTED` or `UNKNOWN_KEY` (or `Bearer REJECTED` with a prefix). In 3.5.x the request failed instead. If your backend checks the value it receives, it must expect these status values.
+* A secure string that cannot be fetched no longer fails the request. The placeholder is replaced by the status name, such as `X-Api-Key: REJECTED` or `X-Api-Key: UNKNOWN_KEY`. If your backend checks the value it receives, it must expect these status values.
 * A failed token fetch only affects requests to your Approov API domains. A request to any other host is sent unchanged instead of failing.
-* An API added with `approov api -add <domain> -noApproovToken` gets its secure strings again. Versions 3.5.2 to 3.5.8 left the placeholders in place.
-* Secure strings are only substituted into `https` requests. A cleartext request keeps its placeholder.
-* A cleartext (`http`) request is no longer failed by the connection check. To one of your Approov API domains it fails under `CLOSE_FAILURE` with `ApproovFetchStatusException` (`BAD_URL`). To any other host it is sent.
 * A WebSocket upgrade request is sent untouched, with no token or secure strings.
-* An exception your own mutator throws, or a `RuntimeException` from the SDK, fails the request with an `ApproovException` that names the hook, with the original as its cause. Before, it reached your code unchanged, or crashed an enqueued call.
-* `getLastARC()` no longer makes a token fetch. It returns the ARC of the most recent fetch, and `initialize` clears it.
-* `getOkHttpClient()` can now be called before `initialize`. 3.5.x threw `IllegalStateException`. Until protection is on, its requests are sent untouched.
-* Message signatures take their `created` and `expires` times from the Approov servers' clock. The signer can now add the account signature next to the install signature. A host factory is matched without regard to case and without the port.
-* The package no longer depends on BouncyCastle. It bundles its own relocated copy of Google Tink, which cannot clash with your app's Tink, Gson or BouncyCastle, or with another Approov package.
-* Logging now has a level, `INFO` by default. The loggable token and the device ID are debug lines, so they only appear after `ApproovService.setLoggingLevel(ApproovLogLevel.DEBUG)` or `adb shell setprop log.tag.ApproovService DEBUG`.
+* An exception from your own mutator, from the SDK, or from a required body digest that cannot be generated fails the request with an `ApproovException`, with the original as its cause. Code that caught the original exception must look at `getCause()`.
+* Logging now has a level, `INFO` by default. The loggable token and the device ID only appear at `DEBUG`.
 
 ## NEXT STEPS
 

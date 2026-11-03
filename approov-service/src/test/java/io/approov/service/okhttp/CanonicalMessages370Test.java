@@ -206,5 +206,20 @@ public class CanonicalMessages370Test {
                 () -> ApproovService.initialize(fixture.context, null)).getMessage());
         assertEquals("setLoggingLevel: null level", assertThrows(IllegalArgumentException.class,
                 () -> ApproovService.setLoggingLevel(null)).getMessage());
+        assertEquals("addSubstitutionHeader: null header", assertThrows(IllegalArgumentException.class,
+                () -> ApproovService.addSubstitutionHeader(null, "Bearer ")).getMessage());
+        assertTrue("a null header is never stored", ApproovService.getSubstitutionHeaders().isEmpty());
+    }
+
+    @Test
+    public void aNullTokenHeaderIsAWarning() {
+        // a null token header still means no token header, so it is warned about rather than refused
+        ApproovService.setTokenHeader(null, null);
+        int warnings = 0;
+        for (ShadowLog.LogItem item : ShadowLog.getLogs()) {
+            if ((item.type == Log.WARN) && item.msg.contains("setTokenHeader: null header"))
+                warnings++;
+        }
+        assertEquals("one warning naming the method", 1, warnings);
     }
 }
