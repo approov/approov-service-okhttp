@@ -4,6 +4,45 @@ All notable changes to this package will be documented in this file.
 
 The format is based on Keep a Changelog and this project adheres to Semantic Versioning.
 
+## [3.7.0] - 2026-11-02
+
+Entries marked **Breaking** need a source change. See [Upgrading from 3.5.x](README.md#upgrading-from-35x).
+
+### Changed
+- BouncyCastle is replaced by Google Tink 1.23.0, bundled in the AAR and relocated, so it cannot clash with your own dependencies and the published POM adds none. The release AAR shrinks from 5.7 MB to 3.4 MB.
+- **Breaking:** The message signing helper classes moved from `io.approov.util.http.sfv` and `io.approov.util.sig` to `io.approov.util.okhttp.http.sfv` and `io.approov.util.okhttp.sig`. Update imports of classes such as `SignatureParameters` and `ComponentProvider`.
+- **Breaking:** `SignatureParametersFactory` has a new protected field, `useInstallMessageSigning`, which starts `true`. A subclass that sets `useAccountMessageSigning = true` directly now produces both signatures. Call `setUseAccountMessageSigning()` to produce the account signature only.
+- The package depends on OkHttp 5.3.2, where 3.5.x depended on 4.12.0. OkHttp 5 brings Happy Eyeballs: it tries IPv6 and IPv4 addresses side by side, so requests connect on networks that drop IPv6. Apps that compile Kotlin need Kotlin 2.1 or later. See [OkHttp version](ADVANCED.md#okhttp-version).
+- A failed secure string fetch no longer fails the request. The status name replaces the placeholder, such as `X-Api-Key: REJECTED`, so a backend that checks the value must expect it. See [secure strings](ADVANCED.md#secure-strings).
+- A failed token fetch only affects requests to your Approov API domains, the hosts in your pin set. Requests to other hosts are sent unchanged.
+- A WebSocket upgrade request is sent untouched, with no Approov token, secure strings or signature. See [WebSockets](ADVANCED.md#websockets).
+
+### Deprecated
+- `getMessageSignature(message)`. Use `getAccountMessageSignature`.
+- `setApproovHeader`, `setApproovTraceIDHeader`, `getApproovTokenHeader`, `getApproovTokenPrefix` and `getApproovTraceIDHeader`. Use `setTokenHeader(header, prefix)`, `getTokenHeader()`, `getTokenPrefix()`, `setTraceIDHeader(header)` and `getTraceIDHeader()`.
+
+### Added
+- `ApproovServiceMutator.CLOSE_FAILURE`, the default, which keeps the 3.5.x decisions, and `ALWAYS_PROCEED`, which never aborts a request. See [what happens by default](ADVANCED.md#what-happens-by-default).
+- `ApproovService.getServerAdjustedCurrentTimeMS()`, the current time corrected to the Approov servers' clock. Message signatures take their `created` and `expires` times from it.
+- `ApproovService.setLoggingLevel(ApproovLogLevel)`, `INFO` by default. See [diagnostics](ADVANCED.md#diagnostics).
+- Message signing can produce the account signature as well as the install signature: `SignatureParametersFactory.setUseInstallAndAccountMessageSigning()`. See [message signing](ADVANCED.md#message-signing).
+- The names shared by all Approov packages: `isApproovServiceEnabled()`, `isApproovProtectionEnabled()`, `setInstallAttributes(String)` and the header methods listed under Deprecated.
+
+### Removed
+- `setProceedOnNetworkFail(boolean)` and `getProceedOnNetworkFail()`, which had no effect in 3.5.x. Use `ALWAYS_PROCEED` or `setUseApproovStatusIfNoToken(true)`.
+- `prefetch()`. The SDK manages prefetching itself.
+- `setApproovInterceptorExtensions`, `getApproovInterceptorExtensions` and the `ApproovInterceptorExtensions` interface. Use `setServiceMutator` with an `ApproovServiceMutator`.
+
+### Fixed
+- An exception from your mutator hook, from the Approov SDK or from a required body digest that cannot be generated fails the request with an `ApproovException` whose cause is the original, and never crashes an enqueued call.
+- Cleartext requests are no longer blocked by the pinning interceptor.
+- A connection that fails validation is no longer closed. Only the request fails. OkHttp can share one HTTP/2 connection between several hosts, so leaving it open keeps requests to the other hosts on it from failing.
+- Each request's token is bound to its own binding header value.
+- APIs added with `approov api -add <domain> -noApproovToken` get their secure strings.
+- Redirects, `Authenticator` retries and stale refreshes are protected for what they send, with the mutator the request was first processed with.
+- Message signing signs the request exactly as OkHttp sends it, as RFC 9421 requires.
+- `getLastARC()` makes no token fetch of its own.
+
 ## [3.5.8] - 2026-07-16
 
 ### Added
@@ -22,8 +61,8 @@ The format is based on Keep a Changelog and this project adheres to Semantic Ver
 - **Substitution header configuration**: adding and removing secure-string substitution headers now matches names case-insensitively. Re-adding the same logical header replaces its configuration without creating duplicate entries.
 - **Binding/substitution conflict**: configuring the same header for both token binding and secure-string substitution now fails fast with `IllegalArgumentException`, preventing a token from being bound to a placeholder that differs from the substituted value sent to the backend.
 - **Trace ID header**: an empty trace ID returned by the SDK is now emitted as an empty header value rather than omitted, so the backend has evidence that Approov processing occurred.
-- **`NO_APPROOV_SERVICE`**: the request now proceeds emitting an **empty** `Approov-Token` header (and a trace ID if the SDK provides one) as evidence that Approov processing occurred, instead of omitting the headers (root TESTING_REQUIREMENTS §2 Missing Artifacts Fallback). `UNKNOWN_URL`/`UNPROTECTED_URL` still send no headers.
-- **REFERENCE.md**: corrected the deprecated `setApproovInterceptorExtensions` signature — its parameter is an `ApproovServiceMutator` (the legacy `ApproovInterceptorExtensions` interface is a deprecated subtype), not `ApproovInterceptorExtensions`.
+- **`NO_APPROOV_SERVICE`**: the request now proceeds emitting an **empty** `Approov-Token` header (and a trace ID if the SDK provides one) as evidence that Approov processing occurred, instead of omitting the headers. `UNKNOWN_URL`/`UNPROTECTED_URL` still send no headers.
+- **REFERENCE.md**: corrected the deprecated `setApproovInterceptorExtensions` signature: its parameter is an `ApproovServiceMutator` (the legacy `ApproovInterceptorExtensions` interface is a deprecated subtype), not `ApproovInterceptorExtensions`.
 
 ## [3.5.7] - 2026-04-09
 
@@ -38,7 +77,7 @@ The format is based on Keep a Changelog and this project adheres to Semantic Ver
 - `setProceedOnNetworkFail()` and `getProceedOnNetworkFail()` are now obsolete no-ops. Mutator defaults dynamically enforce exceptions upon network drops.
 - Shaded and relocated the BouncyCastle dependency (`io.approov.internal.okhttp.bouncycastle`) to prevent version collisions for consuming applications.
 - Removed the transitive `org.bouncycastle:bcprov-jdk18on` dependency from `pom.xml`.
-- Simplified `initialize` — removed the service-layer re-initialization guards (same-config short-circuit, `reinit` comment check). The service layer now always resets its own state and forwards non-empty config directly to the platform SDK. The SDK returns `false` if already initialized with the same config (service layer logs and continues), or throws `IllegalStateException` for a different config (service layer re-throws).
+- Simplified `initialize`: removed the service-layer re-initialization guards (same-config short-circuit, `reinit` comment check). The service layer now always resets its own state and forwards non-empty config directly to the platform SDK. The SDK returns `false` if already initialized with the same config (service layer logs and continues), or throws `IllegalStateException` for a different config (service layer re-throws).
 
 ### Fixed
 - Enforced SDK initialization gating across all public API endpoints (`fetchCustomJWT`, `getDeviceID`, `setDataHashInToken`, `setInstallAttrsInToken`, etc.) to prevent unhandled `IllegalStateException` crashes from the platform SDK when the service layer is operating in bypass/uninitialized mode.
