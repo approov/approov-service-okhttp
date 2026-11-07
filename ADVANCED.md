@@ -167,14 +167,14 @@ You can add the account signature, `hmac-sha256`, with `setUseInstallAndAccountM
 
 A request to a secrets-only API added with `-noApproovToken` carries no token header and is not signed. A request that goes ahead after a failed token fetch still carries the token header, empty or with the status, so it is signed too, over that value. Your backend verifies the install signature with the public key from a valid token, so it cannot verify the install signature of such a request.
 
-The signer makes the standard decisions, the same as `CLOSE_FAILURE`. Because it is the service mutator, installing another mutator, passing `null` to `setServiceMutator` or calling `initialize` removes it. To sign under other decisions, such as `ALWAYS_PROCEED`, subclass it (see [signing with other decisions](#signing-with-other-decisions)).
+The signer makes the standard decisions, the same as `CLOSE_FAILURE`. Because it is the service mutator, installing another mutator, passing `null` to `setServiceMutator` or calling `initialize` removes it. To sign under other decisions, such as `ALWAYS_PROCEED`, call it from your own mutator (see [signing with other decisions](#signing-with-other-decisions)).
 
 See [Installation Message Signing](https://approov.io/docs/latest/approov-usage-documentation/#installation-message-signing) and [Account Message Signing](https://approov.io/docs/latest/approov-usage-documentation/#account-message-signing).
 
 
 ### When signing runs
 
-The signer signs in its `handleInterceptorProcessedRequest` hook. That runs after the mutator's decisions and the secure string substitutions, so the signature covers what the package sends. A subclass that changes the request there makes its changes first and then calls `super`, so the signature covers them too.
+The signer signs in its `handleInterceptorProcessedRequest` hook. That runs after the mutator's decisions and the secure string substitutions, so the signature covers what the package sends. A mutator of your own that changes the request makes its changes first and then calls the signer, so the signature covers them too.
 
 `Content-Type` and `Content-Length` are covered with the values OkHttp sends. OkHttp sets them from the request body after the package has signed. It replaces any value your app set, and sends no `Content-Length` for a chunked body.
 
@@ -236,87 +236,38 @@ A host factory applies to requests to that host. The host is matched without reg
 
 ### Choosing parameters per request
 
-To change the covered components per request, subclass `ApproovDefaultMessageSigning` and override its protected `buildSignatureParameters(provider, changes)`. Call `super` to get the parameters from the factory for the request's host, then adjust them, or return `null` to leave the request unsigned.
-
-This example leaves health checks unsigned, and covers an `Idempotency-Key` header on payment requests when it is present:
-
-```kotlin
-import io.approov.service.okhttp.ApproovDefaultMessageSigning
-import io.approov.service.okhttp.ApproovRequestMutations
-import io.approov.service.okhttp.ApproovService
-import io.approov.util.okhttp.sig.SignatureParameters
-
-class PathAwareSigning : ApproovDefaultMessageSigning() {
-    override fun buildSignatureParameters(provider: ApproovDefaultMessageSigning.OkHttpComponentProvider,
-                                          changes: ApproovRequestMutations): SignatureParameters? {
-        // leave health checks unsigned
-        if (provider.path.startsWith("/health"))
-            return null
-        val params = super.buildSignatureParameters(provider, changes) ?: return null
-        // cover the idempotency key on payment requests, when present
-        if (provider.path.startsWith("/payments") && provider.hasField("Idempotency-Key"))
-            params.addComponentIdentifier("Idempotency-Key")
-        return params
-    }
-}
-
-ApproovService.setServiceMutator(PathAwareSigning().setDefaultFactory(
-    ApproovDefaultMessageSigning.generateDefaultSignatureParametersFactory()))
-```
-
-The same in Java:
-
-```java
-public class PathAwareSigning extends ApproovDefaultMessageSigning {
-    @Override
-    protected SignatureParameters buildSignatureParameters(ApproovDefaultMessageSigning.OkHttpComponentProvider provider,
-            ApproovRequestMutations changes) {
-        // leave health checks unsigned
-        if (provider.getPath().startsWith("/health"))
-            return null;
-        SignatureParameters params = super.buildSignatureParameters(provider, changes);
-        if (params == null)
-            return null;
-        // cover the idempotency key on payment requests, when present
-        if (provider.getPath().startsWith("/payments") && provider.hasField("Idempotency-Key"))
-            params.addComponentIdentifier("Idempotency-Key");
-        return params;
-    }
-}
-```
-
-Keep three things in mind when you write one:
-
-* The factory for the host decides which signatures are made (`getAlgs()`). Parameters that set an explicit `alg` make that single signature instead.
-* Returning `null` leaves the request unsigned. So does an override that throws, except for `RequiredBodyDigestException`, which fails the request with an `ApproovException` that has it as its cause. Let that exception propagate from `super`.
-* The method runs for every signed request. Keep it fast, and do not change the factories from it.
+The factories cover most needs. To leave some requests unsigned, call the signer only for the others from your own mutator (see [signing with other decisions](#signing-with-other-decisions)). The signer can still be subclassed, as in 3.5.x, by overriding its protected `buildSignatureParameters` (see the [reference](REFERENCE.md#approovdefaultmessagesigning)).
 
 ### Signing with other decisions
 
-The signer makes the standard `CLOSE_FAILURE` decisions. To sign under other decisions, subclass it and override the decision hooks. This signer makes the `ALWAYS_PROCEED` decisions:
+The signer makes the standard `CLOSE_FAILURE` decisions. To sign under other decisions, install your own mutator and call the signer from its `handleInterceptorProcessedRequest`. This mutator makes the `ALWAYS_PROCEED` decisions and signs:
 
 ```kotlin
 import com.criticalblue.approovsdk.Approov
 import io.approov.service.okhttp.*
+import okhttp3.Request
 
-class ProceedAndSign : ApproovDefaultMessageSigning() {
-    private val base = ApproovServiceMutator.ALWAYS_PROCEED
+class ProceedAndSign : ApproovServiceMutator {
+    private val signer = ApproovDefaultMessageSigning().setDefaultFactory(
+        ApproovDefaultMessageSigning.generateDefaultSignatureParametersFactory())
 
     override fun handleInterceptorFetchTokenResult(result: Approov.TokenFetchResult, url: String): Boolean =
-        base.handleInterceptorFetchTokenResult(result, url)
+        ApproovServiceMutator.ALWAYS_PROCEED.handleInterceptorFetchTokenResult(result, url)
 
-    override fun handleInterceptorHeaderSubstitutionResult(result: Approov.TokenFetchResult, header: String): Boolean =
-        base.handleInterceptorHeaderSubstitutionResult(result, header)
+    override fun handleInterceptorProcessedRequest(request: Request, changes: ApproovRequestMutations): Request =
+        signer.handleInterceptorProcessedRequest(request, changes)
 
-    override fun handleInterceptorQueryParamSubstitutionResult(result: Approov.TokenFetchResult, queryKey: String): Boolean =
-        base.handleInterceptorQueryParamSubstitutionResult(result, queryKey)
+    override fun supportsProtectionRefresh(): Boolean = true
 }
 
-ApproovService.setServiceMutator(ProceedAndSign().setDefaultFactory(
-    ApproovDefaultMessageSigning.generateDefaultSignatureParametersFactory()))
+ApproovService.setServiceMutator(ProceedAndSign())
 ```
 
-If your subclass overrides `handleInterceptorProcessedRequest`, make your changes and then return `super.handleInterceptorProcessedRequest(request, changes)`, which signs. The signer already supports a stale protection refresh, so a subclass that overrides that hook must keep it safe to run more than once. [Service mutators](#service-mutators) has a fuller example.
+The substitution decisions are the same in both standard mutators, so the defaults serve. Keep these in mind:
+
+* Return `true` from `supportsProtectionRefresh()`. Otherwise a request held past the refresh period is sent with its old token and signature, and a redirect or an authenticator retry is sent unsigned. Your `handleInterceptorProcessedRequest` then runs again on each of those attempts, so keep it safe to repeat.
+* To change the request before it is signed, make your change and then call the signer, as in the [fuller example](#opting-in-to-aborting-requests).
+* Let an exception from the signer propagate unchanged. A required body digest that cannot be generated then fails the request exactly as it does when the signer is installed on its own.
 
 ### Verifying signatures on the backend
 
@@ -543,7 +494,7 @@ An `ApproovServiceMutator` holds your app's own policy, so you don't need to for
 
 The interceptor defaults are the `CLOSE_FAILURE` decisions (see [What happens by default](#what-happens-by-default)). So a custom mutator that should never abort a request delegates those decisions to `ApproovServiceMutator.ALWAYS_PROCEED`.
 
-The package's signer, `ApproovDefaultMessageSigning`, is itself a mutator. Installing another mutator removes it, so a mutator of your own that should also sign extends `ApproovDefaultMessageSigning` (see [signing with other decisions](#signing-with-other-decisions)). Every `initialize` puts back `DEFAULT`.
+The package's signer, `ApproovDefaultMessageSigning`, is itself a mutator. Installing another mutator removes it, so a mutator of your own that should also sign calls the signer from its `handleInterceptorProcessedRequest` (see [signing with other decisions](#signing-with-other-decisions)). Every `initialize` puts back `DEFAULT`.
 
 The hooks:
 
@@ -552,7 +503,7 @@ The hooks:
 | `handleInterceptorShouldProcessRequest` | whether a request gets Approov processing at all (by default, every request that is not excluded) |
 | `handleInterceptorFetchTokenResult` | given the token fetch result, whether to send the request with its Approov headers, send it without them, or abort it (see below) |
 | `handleInterceptorHeaderSubstitutionResult`, `handleInterceptorQueryParamSubstitutionResult` | whether to apply a secure string substitution (see below) |
-| `handleInterceptorProcessedRequest` | final changes to the processed request. The signer signs here, so a subclass of it calls `super` after its own changes |
+| `handleInterceptorProcessedRequest` | final changes to the processed request. The signer signs here, so a mutator that calls it makes its own changes first |
 | `supportsProtectionRefresh` | whether the processed request callback may run again on a stale request (see [Stale protection refresh](#stale-protection-refresh)) |
 | `handlePinningShouldProcessRequest` | whether Approov connection checks (Managed Trust Roots or configured public keys) apply to a request |
 | `handlePrecheckResult`, `handleFetchTokenResult`, `handleFetchSecureStringResult`, `handleFetchCustomJWTResult` | how the direct methods turn a result into an exception |
@@ -596,7 +547,7 @@ This applies to any `ApproovException` or subclass your hook throws, whether you
 
 The aborts that `CLOSE_FAILURE` makes keep the 3.5.x Approov exception types. That also holds in a custom mutator that inherits those decisions or calls them, for example `ApproovServiceMutator.CLOSE_FAILURE.handleInterceptorFetchTokenResult(results, url)`. A decision your hook catches and rethrows unchanged keeps its type too. The standard substitution decisions, `closeFailureSubstitution` included, never throw.
 
-Delegate to `ALWAYS_PROCEED` for every decision you don't change. This mutator also signs, so it extends the signer:
+Delegate to `ALWAYS_PROCEED` for every decision you don't change. This mutator also signs, so it calls the signer:
 
 ```kotlin
 import android.util.Log
@@ -604,8 +555,10 @@ import com.criticalblue.approovsdk.Approov
 import io.approov.service.okhttp.*
 import okhttp3.Request
 
-class AppPolicy : ApproovDefaultMessageSigning() {
+class AppPolicy : ApproovServiceMutator {
     private val base = ApproovServiceMutator.ALWAYS_PROCEED
+    private val signer = ApproovDefaultMessageSigning().setDefaultFactory(
+        ApproovDefaultMessageSigning.generateDefaultSignatureParametersFactory())
 
     // opt out of proceeding for one outcome: with no network the request will not
     // reach the backend, so fail it now instead of sending it. Every other outcome proceeds.
@@ -617,25 +570,20 @@ class AppPolicy : ApproovDefaultMessageSigning() {
         return base.handleInterceptorFetchTokenResult(result, url)
     }
 
-    override fun handleInterceptorHeaderSubstitutionResult(result: Approov.TokenFetchResult, header: String): Boolean =
-        base.handleInterceptorHeaderSubstitutionResult(result, header)
-
-    override fun handleInterceptorQueryParamSubstitutionResult(result: Approov.TokenFetchResult, queryKey: String): Boolean =
-        base.handleInterceptorQueryParamSubstitutionResult(result, queryKey)
-
     // add app metadata after Approov processing, then sign, so the signature covers it; this only
     // replaces a header, so it stays safe to run again on a refresh
     override fun handleInterceptorProcessedRequest(request: Request, changes: ApproovRequestMutations): Request =
-        super.handleInterceptorProcessedRequest(
+        signer.handleInterceptorProcessedRequest(
             request.newBuilder().header("X-Client-Platform", "android").build(), changes)
+
+    override fun supportsProtectionRefresh(): Boolean = true
 
     // skip Approov connection validation for a telemetry host
     override fun handlePinningShouldProcessRequest(request: Request): Boolean =
         request.url.host != "metrics.example.com"
 }
 
-ApproovService.setServiceMutator(AppPolicy().setDefaultFactory(
-    ApproovDefaultMessageSigning.generateDefaultSignatureParametersFactory()))
+ApproovService.setServiceMutator(AppPolicy())
 ```
 
 Keep hooks fast and free of side effects, because they run on the request path.

@@ -188,7 +188,7 @@ ApproovService.setServiceMutator(new ApproovDefaultMessageSigning().setDefaultFa
 ```
 </details>
 
-Every request that carries the Approov token header is then signed with the install signature. Call `setUseInstallAndAccountMessageSigning()` on the factory to add the account signature as well. The signer makes the same decisions as `CLOSE_FAILURE`. To sign under other decisions, such as `ALWAYS_PROCEED`, subclass it; see [signing with other decisions](ADVANCED.md#signing-with-other-decisions).
+Every request that carries the Approov token header is then signed with the install signature. Call `setUseInstallAndAccountMessageSigning()` on the factory to add the account signature as well. The signer makes the same decisions as `CLOSE_FAILURE`. To sign under other decisions, such as `ALWAYS_PROCEED`, call it from your own mutator; see [signing with other decisions](ADVANCED.md#signing-with-other-decisions).
 
 The full list of headers, and what your backend should do with each, is in [what each request carries](ADVANCED.md#what-each-request-carries). Choosing signatures, per-host settings and verifying signatures are covered in [message signing](ADVANCED.md#message-signing).
 
