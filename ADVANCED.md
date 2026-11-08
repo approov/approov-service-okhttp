@@ -2,17 +2,26 @@
 
 A standard integration of the Approov Package for OkHttp needs nothing in this document. You add the dependency, initialize, and use the client, as the [README](README.md) shows. The options below change the defaults, for apps with specific needs. Every method is documented in [REFERENCE.md](REFERENCE.md).
 
+| What you need | Read first | Then |
+| :--- | :--- | :--- |
+| Understand what reaches your backend | [What each request carries](#what-each-request-carries) | [What happens by default](#what-happens-by-default) |
+| Change how token-fetch failures are handled | [What happens by default](#what-happens-by-default) | [Sending the status in the token header](#sending-the-status-in-the-token-header), or [Service mutators](#service-mutators) |
+| Protect request contents with signatures | [Message signing](#message-signing) | [Choosing the signatures and the covered components](#choosing-the-signatures-and-the-covered-components), then [Verifying signatures on the backend](#verifying-signatures-on-the-backend) |
+| Replace an embedded API secret | [Secure strings](#secure-strings) | [Secure string results](#secure-string-results), [When placeholders stay in place](#when-placeholders-stay-in-place) |
+| Configure startup or runtime activation | [Initialize, then configure](#initialize-then-configure) | [Bypass initialization](#bypass-initialization) |
+| Investigate an unexpected result | [Diagnostics](#diagnostics) | the matching table in [What happens by default](#what-happens-by-default) |
+
 ## What each request carries
 
 What the client adds to a request depends on where the request goes, and on the token fetch status the Approov SDK reports for its URL:
 
 | Request goes to | SDK status | What the client adds |
 | :--- | :--- | :--- |
-| an API domain you added to Approov (token-protected) | `SUCCESS` | the token and trace headers; your secure strings, or the [status of each one that could not be fetched](#secure-strings); the signatures, once you install [message signing](#message-signing); a checked connection |
-| an API domain you added with `approov api -add <domain> -noApproovToken` (secrets-only) | `UNPROTECTED_URL` | your secure strings, or the status of each one that could not be fetched; a checked connection. No token or trace header, and no signatures. |
-| a host you have not added to Approov | `UNKNOWN_URL` | nothing. The connection relies on the device's trust store. |
-| an API domain you added (either kind), when the SDK could not fetch a token at that moment | a failure status | depends on the service mutator (see below) |
-| any other host | a failure status | nothing (see below) |
+| a token-protected domain: an API domain you added to Approov | `SUCCESS` | the token and trace headers; your secure strings, or the [status of each one that could not be fetched](#secure-strings); the signatures, once you install [message signing](#message-signing); a checked connection |
+| a secrets-only domain: an API domain you added with `approov api -add <domain> -noApproovToken` | `UNPROTECTED_URL` | your secure strings, or the status of each one that could not be fetched; a checked connection. No token or trace header, and no signatures. |
+| any other host: a host you have not added to Approov | `UNKNOWN_URL` | nothing. The connection relies on the device's trust store. |
+| a token-fetch failure, to a token-protected or secrets-only domain | a failure status | depends on the service mutator (see below) |
+| a token-fetch failure, to any other host | a failure status | nothing (see below) |
 
 A failure status means the SDK could not fetch a token at that moment. For example, there was no network, or the Approov service could not be reached.
 
@@ -52,6 +61,12 @@ For every request, the `ApproovService` interceptor fetches an Approov token for
 * `ApproovServiceMutator.ALWAYS_PROCEED` never fails a request because of its token fetch. Whatever the token fetch outcome, the request is sent, and your backend decides. Your backend is then the enforcement point.
 * `ApproovServiceMutator.DEFAULT` is the mutator installed out of the box. `setServiceMutator(null)` puts it back, and so does every `initialize`. `DEFAULT` points to whatever the release considers default behaviour, which is currently `CLOSE_FAILURE`.
 
+To opt in to always proceeding:
+
+```kotlin
+ApproovService.setServiceMutator(ApproovServiceMutator.ALWAYS_PROCEED)
+```
+
 In the table below, "a host in the pin set" means one of the API domains you added to Approov, of either kind. The next section explains the term.
 
 | Approov token fetch status | `CLOSE_FAILURE` (default) | `ALWAYS_PROCEED` |
@@ -65,6 +80,8 @@ In the table below, "a host in the pin set" means one of the API domains you add
 | any failure status, host not in the pin set (or the pin set is empty or cannot be read) | proceeds untouched, never fails | same |
 
 "The status" in this table means the status name in the token header, after any prefix, when you turn on [setUseApproovStatusIfNoToken](#sending-the-status-in-the-token-header). A request that goes ahead after a failed token fetch is signed too, if you installed [message signing](#message-signing).
+
+`NO_APPROOV_SERVICE` means the app could not reach the Approov service or its failover. Requests to your API domains then go out with an empty token header (or the status) under either standard mutator.
 
 These are the token fetch decisions only: under either mutator, a TLS connection that fails the check, a message signing configuration error and an abort your own hooks ask for still fail the request (see [Exceptions your app can see](#exceptions-your-app-can-see)).
 
@@ -112,12 +129,6 @@ The Approov token and the trace ID are always base64url. If the SDK issues one t
 
 A value you supply yourself that a header cannot carry is a configuration error. Examples are a token prefix given to `setTokenHeader`, or a header your mutator sets in `handleInterceptorProcessedRequest`. The request fails with `ApproovException("Approov header <name>: invalid character in value")`, which never quotes the value.
 
-To opt in to always proceeding:
-
-```kotlin
-ApproovService.setServiceMutator(ApproovServiceMutator.ALWAYS_PROCEED)
-```
-
 ### Exceptions your app can see
 
 A request that fails under `CLOSE_FAILURE` never reaches the network. All the exceptions above are `ApproovException`s, and so `IOException`s. `execute()` throws them, and an enqueued call receives them in `Callback.onFailure`.
@@ -150,7 +161,11 @@ The flag is off by default, and every `initialize` turns it off again.
 
 ## Message signing
 
-Message signing is **off unless you install it**. The signer, `ApproovDefaultMessageSigning`, is a service mutator. Give it a default factory and install it after `initialize`:
+Message signing is **off unless you install it**. If you do not need signatures, keep the default and install nothing.
+
+The signer, `ApproovDefaultMessageSigning`, is a service mutator. So installing another mutator, passing `null` to `setServiceMutator` or calling `initialize` removes it.
+
+The signer makes the standard decisions, the same as `CLOSE_FAILURE`. If those suit you, give it a default factory and install it right after `initialize`:
 
 ```kotlin
 ApproovService.setServiceMutator(
@@ -163,15 +178,15 @@ ApproovService.setServiceMutator(new ApproovDefaultMessageSigning().setDefaultFa
         ApproovDefaultMessageSigning.generateDefaultSignatureParametersFactory()));
 ```
 
-From then on, every request that carries the Approov token header is signed with the install signature, `ecdsa-p256-sha256`. It uses a key unique to the app installation, held in the device's secure hardware. Its dictionary member is `install`.
+To sign under other decisions, such as `ALWAYS_PROCEED`, install your own mutator and have it call the signer (see [signing with other decisions](#signing-with-other-decisions)).
+
+Once the signer is installed, every request that carries the Approov token header is signed with the install signature, `ecdsa-p256-sha256`. It uses a key unique to the app installation, held in the device's secure hardware. Its dictionary member is `install`.
 
 You can add the account signature, `hmac-sha256`, with `setUseInstallAndAccountMessageSigning()` on the factory. It uses a shared account key, delivered to the app when it passes attestation. Its member is `account`. Both are members of the same `Signature` and `Signature-Input` headers, over the same covered components. The covered components are the parts of the request a signature protects, such as the method, the URL and chosen headers. Sending both means a device without secure hardware still produces a signature your backend can verify. Your backend chooses which one it verifies. If one signature cannot be produced, the request goes ahead with the other, or unsigned.
 
 A request to a secrets-only API added with `-noApproovToken` carries no token header and is not signed. A request that goes ahead after a failed token fetch still carries the token header, empty or with the status, so it is signed too, over that value. Your backend verifies the install signature with the public key from a valid token, so it cannot verify the install signature of such a request.
 
-The signer makes the standard decisions, the same as `CLOSE_FAILURE`. Because it is the service mutator, installing another mutator, passing `null` to `setServiceMutator` or calling `initialize` removes it. To sign under other decisions, such as `ALWAYS_PROCEED`, call it from your own mutator (see [signing with other decisions](#signing-with-other-decisions)).
-
-See [Installation Message Signing](https://approov.io/docs/latest/approov-usage-documentation/#installation-message-signing) and [Account Message Signing](https://approov.io/docs/latest/approov-usage-documentation/#account-message-signing).
+The sections below cover [what the default signature covers](#what-the-default-signature-covers), [choosing the signatures and the covered components](#choosing-the-signatures-and-the-covered-components) and [verifying signatures on the backend](#verifying-signatures-on-the-backend). See [Installation Message Signing](https://approov.io/docs/latest/approov-usage-documentation/#installation-message-signing) and [Account Message Signing](https://approov.io/docs/latest/approov-usage-documentation/#account-message-signing).
 
 
 ### When signing runs
@@ -328,9 +343,9 @@ Call `initialize` and check the result. It is synchronous, so there is nothing t
 * the stale protection refresh period
 * the `OkHttpClient` builders
 
-Make these calls straight after `initialize`, in the same `Application.onCreate`, before the app sends protected requests.
+Configure immediately after `initialize`, before protected requests begin. Where to call `initialize` is in the [README](README.md#initializing).
 
-Every `initialize` that is not ignored resets the configuration to its defaults. That covers all the settings above except the logging level, and it also drops cached clients and clears `getLastARC()`. A repeat call with the same account ID resets too. An empty account ID while protection is on is ignored and resets nothing. So a setting made before `initialize` is lost.
+Every `initialize` that is not ignored resets the configuration to its defaults: the token, trace and binding headers, `setUseApproovStatusIfNoToken`, the substitutions, the exclusions, the service mutator, the stale protection refresh period and the client builders. It also drops cached clients and clears `getLastARC()`, and keeps the logging level. A repeat call with the same account ID resets too. An empty account ID while protection is on is ignored and resets nothing. So a setting made before `initialize` is lost.
 
 Initialization can also be done for you, for example by a one-line native bootstrap in a React Native app. This is supported, but it configures nothing. It calls `initialize` with the account ID and comment, and that is all. Your app makes all the configuration calls afterwards, after the last `initialize`.
 
@@ -665,19 +680,13 @@ The package's network interceptors run last in the client, after any your app ad
 
 A request keeps the mutator that was installed when the package first processed it. Its refresh, its redirects, its retries and the connection validation hook for each of its attempts all use that mutator, even if you install another one while the request is in flight. A mutator you install applies to requests processed after the call.
 
+## Multiple service layers
+
+You can use more than one Approov package in the same app. The Approov SDK is initialized once: a later `initialize` with the same account ID does not initialize the SDK again but still resets this package's configuration, and one with a different account ID fails.
+
 ## Diagnostics
 
-The package never logs a token. For each fetch, it logs the [loggable form](https://approov.io/docs/latest/approov-usage-documentation/#loggable-tokens) of the result at debug level, which is off by default (see the logging levels below). The loggable form is the token's claims plus a short fragment of its signature. It cannot be turned back into a usable token.
-
-The claim to look at is `arc`, the [Attestation Response Code](https://approov.io/docs/latest/approov-usage-documentation/#attestation-response-code). It encodes why attestation produced the result it did. For example:
-
-```
-D/ApproovTokenInterceptor: Token for https://api.example.com/v1/items: {"did":"...","exp":1757400000,"arc":"IXPSB7TRK26LXE3M","sip":"a1b2c3", ...}
-```
-
-The URL in the line is the request URL without its user info, query or fragment. So no query value, such as a substituted secure string or personal data, is logged.
-
-To see these lines, set the level in a debug build:
+The package's diagnostic lines are written at debug level, which is off by default (see the logging levels below). To see them, set the level in a debug build:
 
 ```Java
 ApproovService.setLoggingLevel(ApproovLogLevel.DEBUG);
@@ -688,6 +697,16 @@ Or enable debug logging for the `ApproovService` tag, with no rebuild. This work
 ```sh
 adb shell setprop log.tag.ApproovService DEBUG
 ```
+
+The package never logs a token. For each fetch, it logs the [loggable form](https://approov.io/docs/latest/approov-usage-documentation/#loggable-tokens) of the result. The loggable form is the token's claims plus a short fragment of its signature. It cannot be turned back into a usable token.
+
+The claim to look at is `arc`, the [Attestation Response Code](https://approov.io/docs/latest/approov-usage-documentation/#attestation-response-code). It encodes why attestation produced the result it did. For example:
+
+```
+D/ApproovTokenInterceptor: Token for https://api.example.com/v1/items: {"did":"...","exp":1757400000,"arc":"IXPSB7TRK26LXE3M","sip":"a1b2c3", ...}
+```
+
+The URL in the line is the request URL without its user info, query or fragment. So no query value, such as a substituted secure string or personal data, is logged.
 
 To decode an `arc`, ask the CLI for the decoding command once. It prints a `curl` command with your account's API key filled in and an `<arc>` placeholder:
 
