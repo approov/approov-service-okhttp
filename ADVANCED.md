@@ -11,24 +11,24 @@ What the client adds to a request depends on where the request goes, and on the 
 | an API domain you added to Approov (token-protected) | `SUCCESS` | the token and trace headers; your secure strings, or the [status of each one that could not be fetched](#secure-strings); the signatures, once you install [message signing](#message-signing); a checked connection |
 | an API domain you added with `approov api -add <domain> -noApproovToken` (secrets-only) | `UNPROTECTED_URL` | your secure strings, or the status of each one that could not be fetched; a checked connection. No token or trace header, and no signatures. |
 | a host you have not added to Approov | `UNKNOWN_URL` | nothing. The connection relies on the device's trust store. |
-| an API domain you added (either kind), when the SDK could not attest the app at that moment | a failure status | depends on the service mutator (see below) |
+| an API domain you added (either kind), when the SDK could not fetch a token at that moment | a failure status | depends on the service mutator (see below) |
 | any other host | a failure status | nothing (see below) |
 
-A failure status means the SDK could not attest the app at that moment. For example, there was no network, the device or app was rejected, or the Approov service could not be reached.
+A failure status means the SDK could not fetch a token at that moment. For example, there was no network, or the Approov service could not be reached.
 
-For an API domain you added, the [service mutator](#what-happens-by-default) decides what happens. A service mutator is the object that holds the package's decisions, such as whether a failed attestation fails the request. It decides whether the request fails in the app or is sent. A request that is sent carries the `Approov-Token` header with an empty token after any prefix, or with the status name if you turned on [setUseApproovStatusIfNoToken](#sending-the-status-in-the-token-header). It also carries the trace header whenever the SDK gives one. It has no secure strings. With message signing installed, it is signed.
+For an API domain you added, the [service mutator](#what-happens-by-default) decides what happens. A service mutator is the object that holds the package's decisions, such as whether a failed token fetch fails the request. It decides whether the request fails in the app or is sent. A request that is sent carries the `Approov-Token` header with an empty token after any prefix, or with the status name if you turned on [setUseApproovStatusIfNoToken](#sending-the-status-in-the-token-header). It also carries the trace header whenever the SDK gives one. It has no secure strings. With message signing installed, it is signed.
 
 For any other host, the request goes out unchanged. The standard mutators never fail it in the app. Only your own mutator can, by throwing from `handleInterceptorFetchTokenResult` (see [Service mutators](#service-mutators)).
 
 The headers your backend may receive:
 
-* `Approov-Token` carries the Approov token. This is a short-lived signed JWT that proves the app passed attestation for this request. If no token could be obtained and the request goes ahead, the header carries an empty token after any prefix, or the fetch status name if you turned on [setUseApproovStatusIfNoToken](#sending-the-status-in-the-token-header). Your backend checks the token's signature and expiry, and rejects a request whose token is missing or invalid. The token also carries the public key of the app installation, which verifies the `install` message signature described below.
+* `Approov-Token` carries the Approov token. This is a short-lived signed JWT that shows Approov performed attestation for this request. It does not show the app passed: the result is inside the token, the app and the package cannot read it, and only your backend can tell, by checking the token's signature (see [token signing](https://docs.approov.io/core-concepts/approov-tokens/architecture-and-security/#jws-token-signing)). If no token could be obtained and the request goes ahead, the header carries an empty token after any prefix, or the fetch status name if you turned on [setUseApproovStatusIfNoToken](#sending-the-status-in-the-token-header). A request with no token carries no proof that Approov checked it. Your backend checks the token's signature and expiry, and rejects a request whose token is missing or invalid. The token also carries the public key of the app installation, which verifies the `install` message signature described below.
 * `Signature` and `Signature-Input` appear once you install [message signing](#message-signing), which is off by default. They hold RFC 9421 message signatures, on a request that carries the token header. See below.
 * `Approov-TraceID` is an optional debug header, added whenever the SDK gives a value. Your backend does nothing with it; pass it through unchanged.
 
 The signature headers hold the `install` member, made with a key unique to the app installation. If you choose both signatures, they also hold the `account` member, made with your account key. Both cover the method, the URL, the headers above, the body digest when there is a body, and any headers you choose to add. Your backend verifies whichever signature it is set up for.
 
-A signature means the request cannot be changed, signed headers and body included. It also links the request to this token, and so to the attested app installation. If you sign your session or `Authorization` header too, the request is linked to the user as well.
+When your backend verifies a signature, it detects a change to any covered component, signed headers and body digest included. Nothing is detected if your backend does not verify, and components the signature does not cover can still change. A signature also links the request to this token, and so to the attested app installation. If you sign your session or `Authorization` header too, the request is linked to the user as well.
 
 Whatever the attestation outcome, the package checks the TLS connection to each domain you have added, token-protected or secrets-only. It checks against the specific certificate public keys you configure for that domain, or else against the [Managed Trust Roots](https://approov.io/docs/latest/approov-usage-documentation/#managed-trust-roots). These are the trusted root certificate keys that Approov maintains for your account. The set of keys is updated dynamically, without an app release, and checked for the request's host on every request.
 
@@ -48,8 +48,8 @@ The SDK reports such an API as `UNPROTECTED_URL`. Despite the name, this does no
 
 For every request, the `ApproovService` interceptor fetches an Approov token for the request URL. It then applies the decisions of the installed `ApproovServiceMutator`. A service mutator is an object with one method for each decision the package makes, such as whether a failed token fetch fails the request (see [Service mutators](#service-mutators)). The package provides three standard ones:
 
-* `ApproovServiceMutator.CLOSE_FAILURE` keeps the 3.5.x token decisions. A failed attestation fails the request in the app, with the same `ApproovException` types as 3.5.x. A secure string that cannot be obtained never fails a request, whatever its status. The status replaces the placeholder and the request goes ahead.
-* `ApproovServiceMutator.ALWAYS_PROCEED` never fails a request. Whatever the outcome, the request is sent, and your backend decides. Your backend is then the enforcement point.
+* `ApproovServiceMutator.CLOSE_FAILURE` keeps the 3.5.x token decisions. A failed token fetch fails the request in the app, with the same `ApproovException` types as 3.5.x. A secure string that cannot be obtained never fails a request, whatever its status. The status replaces the placeholder and the request goes ahead.
+* `ApproovServiceMutator.ALWAYS_PROCEED` never fails a request because of its token fetch. Whatever the token fetch outcome, the request is sent, and your backend decides. Your backend is then the enforcement point.
 * `ApproovServiceMutator.DEFAULT` is the mutator installed out of the box. `setServiceMutator(null)` puts it back, and so does every `initialize`. `DEFAULT` points to whatever the release considers default behaviour, which is currently `CLOSE_FAILURE`.
 
 In the table below, "a host in the pin set" means one of the API domains you added to Approov, of either kind. The next section explains the term.
@@ -65,6 +65,8 @@ In the table below, "a host in the pin set" means one of the API domains you add
 | any failure status, host not in the pin set (or the pin set is empty or cannot be read) | proceeds untouched, never fails | same |
 
 "The status" in this table means the status name in the token header, after any prefix, when you turn on [setUseApproovStatusIfNoToken](#sending-the-status-in-the-token-header). A request that goes ahead after a failed token fetch is signed too, if you installed [message signing](#message-signing).
+
+These are the token fetch decisions only: under either mutator, a TLS connection that fails the check, a message signing configuration error and an abort your own hooks ask for still fail the request (see [Exceptions your app can see](#exceptions-your-app-can-see)).
 
 ### Hosts in the pin set
 
@@ -130,7 +132,7 @@ The direct methods (`fetchToken`, `fetchSecureString`, `fetchCustomJWT`, `preche
 
 ## Sending the status in the token header
 
-By default, a request that goes ahead without a token carries the token header with an empty token after any prefix. Your backend sees that the request has no proof of attestation, but not why.
+By default, a request that goes ahead without a token carries the token header with an empty token after any prefix. Your backend sees that the request carries no proof that Approov checked it, but not why.
 
 To send the reason, turn on:
 
@@ -138,9 +140,9 @@ To send the reason, turn on:
 ApproovService.setUseApproovStatusIfNoToken(true)
 ```
 
-The token header then carries the SDK's token fetch status name after any prefix, unchanged: `NO_NETWORK`, `POOR_NETWORK`, `MITM_DETECTED`, `NO_APPROOV_SERVICE`, `REJECTED`, `INTERNAL_ERROR` and so on. Your backend can log the reason when it rejects the request. A status name is never a valid token, so a backend that checks the token rejects the request as before.
+The token header then carries the SDK's token fetch status name after any prefix, unchanged: `NO_NETWORK`, `POOR_NETWORK`, `MITM_DETECTED`, `NO_APPROOV_SERVICE`, `INTERNAL_ERROR` and so on. Your backend can log the reason when it rejects the request. A status name is never a valid token, so a backend that checks the token rejects the request as before.
 
-The flag also changes one `CLOSE_FAILURE` decision. `NO_NETWORK`, `POOR_NETWORK` and `MITM_DETECTED` then let the request go ahead with the status, instead of failing it with `ApproovNetworkException`. Every other failure still fails the request.
+The flag changes what the token header carries, and also one `CLOSE_FAILURE` decision: `NO_NETWORK`, `POOR_NETWORK` and `MITM_DETECTED` then let the request go ahead with the status, instead of failing it with `ApproovNetworkException`. `NO_APPROOV_SERVICE` goes ahead with or without the flag. Every other failure still fails the request.
 
 The status is only sent to a host in your account's pin set (see [What happens by default](#what-happens-by-default)). It is never sent to hosts you have not added to Approov, nor to a secrets-only API added with `-noApproovToken`. It never reports a secure string fetch; for those, the value left in the header or query parameter is the evidence.
 
@@ -712,8 +714,8 @@ In these cases the package writes a line at debug level only, and nothing at `IN
 The line names the header or query parameter, never its value. It gives the fetch status, with the ARC and the rejection reasons when the SDK supplies them. For example:
 
 ```
-D/ApproovTokenInterceptor: Approov token fetch for api.example.com: REJECTED, ARC IXPSB7TRK26LXE3M, rejection reasons root, proceeding with an empty token header
-D/ApproovTokenInterceptor: Secure string not substituted in header Api-Key: token fetch status REJECTED, ARC IXPSB7TRK26LXE3M, rejection reasons root, placeholder left
+D/ApproovTokenInterceptor: Approov token fetch for api.example.com: NO_NETWORK, proceeding with an empty token header
+D/ApproovTokenInterceptor: Secure string not substituted in header Api-Key: token fetch status NO_NETWORK, placeholder left
 D/ApproovTokenInterceptor: Secure string not substituted in query parameter api_key: secure string fetch status NO_NETWORK, status sent in its place
 ```
 

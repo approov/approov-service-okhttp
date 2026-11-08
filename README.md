@@ -137,7 +137,7 @@ val client = ApproovService.getOkHttpClient()
 
 For a domain you have added to Approov, each request carries:
 
-* the `Approov-Token` header, the proof that the app passed attestation
+* the `Approov-Token` header, which shows Approov performed attestation for the request. Only your backend can tell from it whether the app passed.
 * the `Approov-TraceID` header, an optional debug value, whenever the SDK gives one
 
 The connection is checked against the certificate keys configured for the domain, or your account's Managed Trust Roots if it has none. If the check fails, the request fails with OkHttp's standard `SSLPeerUnverifiedException`.
