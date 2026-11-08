@@ -143,29 +143,33 @@ The direct methods (`fetchToken`, `fetchSecureString`, `fetchCustomJWT`, `preche
 
 ## Sending the status in the token header
 
-By default, a request that goes ahead without a token carries the token header with an empty token after any prefix. Your backend sees that the request carries no proof that Approov checked it, but not why.
+**What it does.** A request that goes ahead without a token carries the SDK's token fetch status name in the token header, after any prefix, unchanged: `NO_NETWORK`, `POOR_NETWORK`, `MITM_DETECTED`, `NO_APPROOV_SERVICE`, `INTERNAL_ERROR` and so on.
 
-To send the reason, turn on:
+**Default.** Off. A request that goes ahead without a token carries the token header with an empty token after any prefix. Your backend sees that the request carries no proof that Approov checked it, but not why.
+
+**When to change it.** Turn it on when your backend should log the reason when it rejects such a request. A status name is never a valid token, so a backend that checks the token rejects the request as before.
+
+**Example.**
 
 ```kotlin
 ApproovService.setUseApproovStatusIfNoToken(true)
 ```
 
-The token header then carries the SDK's token fetch status name after any prefix, unchanged: `NO_NETWORK`, `POOR_NETWORK`, `MITM_DETECTED`, `NO_APPROOV_SERVICE`, `INTERNAL_ERROR` and so on. Your backend can log the reason when it rejects the request. A status name is never a valid token, so a backend that checks the token rejects the request as before.
+**Effects.** The flag changes what the token header carries, and also one `CLOSE_FAILURE` decision: `NO_NETWORK`, `POOR_NETWORK` and `MITM_DETECTED` then let the request go ahead with the status, instead of failing it with `ApproovNetworkException`. `NO_APPROOV_SERVICE` goes ahead with or without the flag. Every other failure still fails the request.
 
-The flag changes what the token header carries, and also one `CLOSE_FAILURE` decision: `NO_NETWORK`, `POOR_NETWORK` and `MITM_DETECTED` then let the request go ahead with the status, instead of failing it with `ApproovNetworkException`. `NO_APPROOV_SERVICE` goes ahead with or without the flag. Every other failure still fails the request.
+The status is only sent to a host in your account's pin set (see [What happens by default](#what-happens-by-default)). It is never sent to hosts you have not added to Approov, nor to a secrets-only API added with `-noApproovToken`. It never reports a secure string fetch; for those, the value left in the header or query parameter is the evidence. Every `initialize` turns the flag off again.
 
-The status is only sent to a host in your account's pin set (see [What happens by default](#what-happens-by-default)). It is never sent to hosts you have not added to Approov, nor to a secrets-only API added with `-noApproovToken`. It never reports a secure string fetch; for those, the value left in the header or query parameter is the evidence.
-
-The flag is off by default, and every `initialize` turns it off again.
+**Check it.** At debug level, the log line for such a request ends `proceeding with the status in the token header` (see [Diagnostics](#diagnostics)), and your backend receives the status name in the token header.
 
 ## Message signing
 
-Message signing is **off unless you install it**. If you do not need signatures, keep the default and install nothing.
+**What it does.** The signer, `ApproovDefaultMessageSigning`, adds RFC 9421 message signatures to every request that carries the Approov token header.
 
-The signer, `ApproovDefaultMessageSigning`, is a service mutator. So installing another mutator, passing `null` to `setServiceMutator` or calling `initialize` removes it.
+**Default.** Message signing is **off unless you install it**. If you do not need signatures, keep the default and install nothing.
 
-The signer makes the standard decisions, the same as `CLOSE_FAILURE`. If those suit you, give it a default factory and install it right after `initialize`:
+**When to change it.** Install it when your backend verifies signatures. The signer is a service mutator, so installing another mutator, passing `null` to `setServiceMutator` or calling `initialize` removes it. The signer makes the standard decisions, the same as `CLOSE_FAILURE`. If those suit you, give it a default factory and install it right after `initialize`, as in the example. To sign under other decisions, such as `ALWAYS_PROCEED`, install your own mutator and have it call the signer (see [signing with other decisions](#signing-with-other-decisions)).
+
+**Example.**
 
 ```kotlin
 ApproovService.setServiceMutator(
@@ -178,13 +182,15 @@ ApproovService.setServiceMutator(new ApproovDefaultMessageSigning().setDefaultFa
         ApproovDefaultMessageSigning.generateDefaultSignatureParametersFactory()));
 ```
 
-To sign under other decisions, such as `ALWAYS_PROCEED`, install your own mutator and have it call the signer (see [signing with other decisions](#signing-with-other-decisions)).
-
-Once the signer is installed, every request that carries the Approov token header is signed with the install signature, `ecdsa-p256-sha256`. It uses a key unique to the app installation, held in the device's secure hardware. Its dictionary member is `install`.
+**Effects.** Once the signer is installed, every request that carries the Approov token header is signed with the install signature, `ecdsa-p256-sha256`. It uses a key unique to the app installation, held in the device's secure hardware. Its dictionary member is `install`.
 
 You can add the account signature, `hmac-sha256`, with `setUseInstallAndAccountMessageSigning()` on the factory. It uses a shared account key, delivered to the app when it passes attestation. Its member is `account`. Both are members of the same `Signature` and `Signature-Input` headers, over the same covered components. The covered components are the parts of the request a signature protects, such as the method, the URL and chosen headers. Sending both means a device without secure hardware still produces a signature your backend can verify. Your backend chooses which one it verifies. If one signature cannot be produced, the request goes ahead with the other, or unsigned.
 
 A request to a secrets-only API added with `-noApproovToken` carries no token header and is not signed. A request that goes ahead after a failed token fetch still carries the token header, empty or with the status, so it is signed too, over that value. Your backend verifies the install signature with the public key from a valid token, so it cannot verify the install signature of such a request.
+
+Every `initialize` puts back the `DEFAULT` mutator, which removes the signer, so install it again after each `initialize`.
+
+**Check it.** Your backend receives `Signature` and `Signature-Input` headers whose members include `install` (and `account`, if you chose it). A signature that cannot be produced is logged as an error under the `ApproovMsgSign` tag.
 
 The sections below cover [what the default signature covers](#what-the-default-signature-covers), [choosing the signatures and the covered components](#choosing-the-signatures-and-the-covered-components) and [verifying signatures on the backend](#verifying-signatures-on-the-backend). See [Installation Message Signing](https://approov.io/docs/latest/approov-usage-documentation/#installation-message-signing) and [Account Message Signing](https://approov.io/docs/latest/approov-usage-documentation/#account-message-signing).
 
@@ -198,8 +204,6 @@ The signer signs in its `handleInterceptorProcessedRequest` hook. That runs afte
 Your own network interceptors run after signing, before the package's network interceptors. They must not change a signed header, the URL or the body, or the signature no longer verifies.
 
 A redirect within a protected domain, an authenticator retry and a stale protection refresh are each signed afresh.
-
-Every `initialize` puts back the `DEFAULT` mutator, which removes the signer. So install it after `initialize`.
 
 ### What the default signature covers
 
@@ -218,9 +222,13 @@ To turn signing off again, install another mutator, or pass `null` to `setServic
 
 ### Choosing the signatures and the covered components
 
-A signature parameters factory decides which signatures a request gets and which components they cover. Give the signer a default factory with `setDefaultFactory`, and a factory for a single host with `putHostFactory`.
+**What it does.** A signature parameters factory decides which signatures a request gets and which components they cover.
 
-Start from the default factory and override what you need. A bare `SignatureParametersFactory()` covers nothing, so it is of no use:
+**Default.** `generateDefaultSignatureParametersFactory()` makes the install signature only, over the components in [what the default signature covers](#what-the-default-signature-covers).
+
+**When to change it.** Change it to add the account signature, cover more headers, require a body digest, or use different settings for one host. Give the signer a default factory with `setDefaultFactory`, and a factory for a single host with `putHostFactory`. Start from the default factory and override what you need. A bare `SignatureParametersFactory()` covers nothing, so it is of no use.
+
+**Example.**
 
 ```kotlin
 import io.approov.service.okhttp.ApproovDefaultMessageSigning
@@ -247,17 +255,27 @@ ApproovService.setServiceMutator(
         .putHostFactory("payments.example.com", paymentsFactory))
 ```
 
-A host factory applies to requests to that host. The host is matched without regard to case, and without the port. The default factory applies to every other protected host. A signer with no factory for a host leaves its requests unsigned.
+**Effects.** A host factory applies to requests to that host. The host is matched without regard to case, and without the port. The default factory applies to every other protected host. A signer with no factory for a host leaves its requests unsigned. `putHostFactory(host, null)` removes a host factory. To build custom covered components, use `io.approov.util.okhttp.sig.SignatureParameters`. Every `initialize` removes the signer, and its factories with it.
 
-`putHostFactory(host, null)` removes a host factory. To build custom covered components, use `io.approov.util.okhttp.sig.SignatureParameters`.
+**Check it.** The `Signature-Input` header your backend receives lists, for each member (`install`, `account`), the components it covers and its `created` and `expires` parameters.
 
 ### Choosing parameters per request
 
-The factories cover most needs. To leave some requests unsigned, call the signer only for the others from your own mutator (see [signing with other decisions](#signing-with-other-decisions)). The signer can still be subclassed, as in 3.5.x, by overriding its protected `buildSignatureParameters` (see the [reference](REFERENCE.md#approovdefaultmessagesigning)).
+**What it does.** Leaves some requests unsigned, beyond what the per-host factories choose.
+
+**Default.** Every request that carries the token header, to a host with a factory, is signed with that factory's parameters.
+
+**When to change it.** The factories cover most needs. To leave some requests unsigned, call the signer only for the others from your own mutator (see [signing with other decisions](#signing-with-other-decisions)). The signer can still be subclassed, as in 3.5.x, by overriding its protected `buildSignatureParameters` (see the [reference](REFERENCE.md#approovdefaultmessagesigning)).
 
 ### Signing with other decisions
 
-The signer makes the standard `CLOSE_FAILURE` decisions. To sign under other decisions, install your own mutator and call the signer from its `handleInterceptorProcessedRequest`. This mutator makes the `ALWAYS_PROCEED` decisions and signs:
+**What it does.** Your own mutator makes its decisions and calls the signer from its `handleInterceptorProcessedRequest`, so requests are signed under those decisions.
+
+**Default.** The signer makes the standard `CLOSE_FAILURE` decisions.
+
+**When to change it.** When your app needs other decisions, such as `ALWAYS_PROCEED`, together with signatures.
+
+**Example.** This mutator makes the `ALWAYS_PROCEED` decisions and signs:
 
 ```kotlin
 import com.criticalblue.approovsdk.Approov
@@ -280,11 +298,13 @@ class ProceedAndSign : ApproovServiceMutator {
 ApproovService.setServiceMutator(ProceedAndSign())
 ```
 
-The substitution decisions are the same in both standard mutators, so the defaults serve. Keep these in mind:
+**Effects.** The substitution decisions are the same in both standard mutators, so the defaults serve. Keep these in mind:
 
 * Return `true` from `supportsProtectionRefresh()`. Otherwise a request held past the refresh period is sent with its old token and signature, and a redirect or an authenticator retry is sent unsigned. Your `handleInterceptorProcessedRequest` then runs again on each of those attempts, so keep it safe to repeat.
 * To change the request before it is signed, make your change and then call the signer, as in the [fuller example](#opting-in-to-aborting-requests).
 * Let an exception from the signer propagate unchanged. A required body digest that cannot be generated then fails the request exactly as it does when the signer is installed on its own.
+
+**Check it.** A request that goes ahead after a failed token fetch to one of your API domains reaches your backend with the empty token header (or the status) and the `Signature` and `Signature-Input` headers.
 
 ### Verifying signatures on the backend
 
@@ -294,7 +314,13 @@ The CLI prints the key with `approov secret -messageSigningKey get-base64url`. T
 
 ## Header names
 
-You can change the name of each header the package adds. Passing `null` turns the trace header off:
+**What it does.** Changes the name of each header the package adds, and the prefix in front of the token.
+
+**Default.** The token goes in `Approov-Token` with no prefix, and the trace ID in `Approov-TraceID`.
+
+**When to change it.** When your backend expects the token in another header, such as `Authorization` with a `Bearer ` prefix, or does not want the trace header. Passing `null` turns the trace header off.
+
+**Example.**
 
 ```kotlin
 ApproovService.setTokenHeader("Authorization", "Bearer ")   // default "Approov-Token", no prefix
@@ -302,38 +328,52 @@ ApproovService.setTraceIDHeader(null)                       // default "Approov-
 ApproovService.setUseApproovStatusIfNoToken(true)           // default false: an empty token
 ```
 
-Every `initialize` puts these back to their defaults, so set them after it.
+**Effects.** Every `initialize` puts these back to their defaults, so set them after it.
+
+**Check it.** Your backend receives the token under the header name and prefix you set.
 
 ## About the Approov account ID
 
-The string you pass to `initialize` looks like `#your-account#p6nZ...=`. The CLI and the SDK call it the SDK config string (`approov sdk -getConfigString`).
+**What it does.** The string you pass to `initialize` looks like `#your-account#p6nZ...=`. The CLI and the SDK call it the SDK config string. It names your account and carries a fingerprint of the account's public key. From it, the SDK knows which Approov service to attest against. It can also verify the configuration it downloads later.
 
-It names your account and carries a fingerprint of the account's public key. From it, the SDK knows which Approov service to attest against. It can also verify the configuration it downloads later.
+**When to change it.** It does not rotate, and the same value serves every app in the account.
 
-The account ID is not a secret, and it does not rotate. The same value serves every app in the account. Registering an app is a separate step. It is not an API key either: knowing it grants nothing.
+**Example.** Print it with the CLI:
+
+```sh
+approov sdk -getConfigString
+```
+
+**Effects.** The account ID is not a secret. It is not an API key either: knowing it grants nothing. Registering an app is a separate step.
+
+**Check it.** After `initialize` with the account ID, the `ApproovService` tag logs `initialize: Approov protection enabled` at `INFO`.
 
 ## Bypass initialization
 
-Initialize with an empty string instead of the account ID to start the package in bypass mode. In bypass mode the package is enabled but protects nothing: `isApproovServiceEnabled()` is `true` and `isApproovProtectionEnabled()` is `false`. In this mode:
+**What it does.** Initialize with an empty string instead of the account ID to start the package in bypass mode. In bypass mode the package is enabled but protects nothing: `isApproovServiceEnabled()` is `true` and `isApproovProtectionEnabled()` is `false`. In this mode:
 
 * requests through the `OkHttpClient` go out with no Approov processing. There is no token, signing, secure strings or Approov connection check, only OS trust.
 * the methods that call the SDK throw `ApproovException` without calling it.
 
-A request made before any `initialize` is handled the same way. It is neither failed nor held.
+**Default.** Before any `initialize`, a request is handled the same way as in bypass mode. It is neither failed nor held.
+
+**When to change it.** Bypass mode is a starting or fallback state. Use it, for example, while your app fetches the account ID remotely. The README example also uses it as a guard, in case the account ID does not reach the app intact.
+
+**Example.**
 
 ```java
 ApproovService.initialize(context, "");
 ```
 
-Bypass mode is a starting or fallback state. Use it, for example, while your app fetches the account ID remotely. The README example also uses it as a guard, in case the account ID does not reach the app intact.
-
-A later `initialize` with the account ID turns Approov on at runtime, if the SDK accepts it. Like every `initialize`, it resets the configuration to its defaults, client builders included, so make your configuration calls again after it. Clients you already got from `getOkHttpClient()` protect their requests from then on.
+**Effects.** A later `initialize` with the account ID turns Approov on at runtime, if the SDK accepts it. Like every `initialize`, it resets the configuration to its defaults, client builders included, so make your configuration calls again after it. Clients you already got from `getOkHttpClient()` protect their requests from then on.
 
 Once protection is on, an `initialize` with an empty string is ignored, and resets nothing. Initializing again with a different account ID is rejected by the SDK. Its exception reaches your code, and the package state is unchanged. See [initialize in the reference](REFERENCE.md#initialize).
 
+**Check it.** `isApproovServiceEnabled()` is `true` and `isApproovProtectionEnabled()` is `false`, and the `ApproovService` tag logs `initialize: bypass mode, Approov protection not active` at `INFO`.
+
 ## Initialize, then configure
 
-Call `initialize` and check the result. It is synchronous, so there is nothing to wait for. Then make every configuration call your app needs, such as:
+**What it does.** Call `initialize` and check the result. It is synchronous, so there is nothing to wait for. Then make every configuration call your app needs, such as:
 
 * the token, trace and binding headers, and `setUseApproovStatusIfNoToken`
 * substitution headers and query parameters
@@ -343,11 +383,22 @@ Call `initialize` and check the result. It is synchronous, so there is nothing t
 * the stale protection refresh period
 * the `OkHttpClient` builders
 
-Configure immediately after `initialize`, before protected requests begin. Where to call `initialize` is in the [README](README.md#initializing).
+**Default.** Until your configuration calls run, requests use the defaults (see [requests before the configuration call](#requests-before-the-configuration-call)).
+
+**Example.**
+
+```kotlin
+ApproovService.initialize(applicationContext, "<account ID>")
+ApproovService.setServiceMutator(ApproovServiceMutator.ALWAYS_PROCEED)
+```
+
+**Effects.** Configure immediately after `initialize`, before protected requests begin. Where to call `initialize` is in the [README](README.md#initializing).
 
 Every `initialize` that is not ignored resets the configuration to its defaults: the token, trace and binding headers, `setUseApproovStatusIfNoToken`, the substitutions, the exclusions, the service mutator, the stale protection refresh period and the client builders. It also drops cached clients and clears `getLastARC()`, and keeps the logging level. A repeat call with the same account ID resets too. An empty account ID while protection is on is ignored and resets nothing. So a setting made before `initialize` is lost.
 
 Initialization can also be done for you, for example by a one-line native bootstrap in a React Native app. This is supported, but it configures nothing. It calls `initialize` with the account ID and comment, and that is all. Your app makes all the configuration calls afterwards, after the last `initialize`.
+
+**Check it.** The first `initialize` with the account ID logs `initialize: Approov protection enabled` at `INFO`. A repeat call with the same account ID logs `initialize: Approov SDK already initialized with the same config and comment` at `DEBUG`.
 
 ### Requests before the configuration call
 
@@ -374,23 +425,35 @@ Configure straight after `initialize`, before the app sends protected requests. 
 
 ## Token binding
 
-[Token binding](https://approov.io/docs/latest/approov-usage-documentation/#token-binding) ties the Approov token to the value of a header on the request, typically an OAuth `Authorization` header. A token then cannot be replayed with different credentials. Only a hash of the value reaches Approov. It appears as the `pay` claim of the token, which your backend checks.
+**What it does.** [Token binding](https://approov.io/docs/latest/approov-usage-documentation/#token-binding) ties the Approov token to the value of a header on the request, typically an OAuth `Authorization` header. A token then cannot be replayed with different credentials. Only a hash of the value reaches Approov. It appears as the `pay` claim of the token, which your backend checks.
+
+**Default.** No binding header.
+
+**When to change it.** When your requests carry a credential header, such as an OAuth `Authorization` header, that a replayed token must not be used with. `setDataHashInToken` binds arbitrary data instead. Never use both: the binding header overrides the data hash on every request.
+
+**Example.**
 
 ```kotlin
 ApproovService.setBindingHeader("Authorization")
 ```
 
-Each request's token is bound to that request's own header value. This holds even when requests with different values are in flight at once, as during an OAuth token refresh.
+**Effects.** Each request's token is bound to that request's own header value. This holds even when requests with different values are in flight at once, as during an OAuth token refresh.
 
 The SDK holds one binding value for the whole app. So for every request that carries the binding header, the package sets the value and fetches the token as one step. It does this on the first attempt, and whenever the request's protection is reapplied: on a stale protection refresh, a redirect or an authenticator retry. Requests that carry no binding header are not held up by this.
 
-The package can only order the calls it makes itself. A `setDataHashInToken` or `fetchToken` call from your own code, or a token fetch by another Approov package in the same app, can run between the package setting a request's value and fetching its token. That request's token is then bound to the other value, and your backend rejects it. Do not call `setDataHashInToken` or `fetchToken` while requests that carry the binding header are in flight.
+The package can only order the calls it makes itself. A `setDataHashInToken` or `fetchToken` call from your own code, or a token fetch by another Approov package in the same app, can run between the package setting a request's value and fetching its token. That request's token is then bound to the other value, and your backend rejects it. Do not call `setDataHashInToken` or `fetchToken` while requests that carry the binding header are in flight. Every `initialize` removes the binding header.
 
-`setDataHashInToken` binds arbitrary data instead. Never use both: the binding header overrides the data hash on every request.
+**Check it.** The call logs `setBindingHeader <name>` at `DEBUG` under the `ApproovService` tag, and the token your backend receives carries the `pay` claim.
 
 ## Secure strings
 
-[Secure strings](https://approov.io/docs/latest/approov-usage-documentation/#secure-strings) let you remove API keys and other secrets from your app. Approov delivers them only to attested installations. In your request you put a secure string key where the secret goes, and the package substitutes the secret. Register the headers and query parameters whose values are secure string keys:
+**What it does.** [Secure strings](https://approov.io/docs/latest/approov-usage-documentation/#secure-strings) let you remove API keys and other secrets from your app. Approov delivers them only to attested installations. In your request you put a secure string key where the secret goes, and the package substitutes the secret.
+
+**Default.** No substitution headers or query parameters, so a secure string placeholder goes out unchanged.
+
+**When to change it.** When your app would otherwise embed an API key or other secret. Register the headers and query parameters whose values are secure string keys.
+
+**Example.**
 
 ```kotlin
 ApproovService.addSubstitutionHeader("X-Api-Key", null)        // whole value is the key
@@ -398,9 +461,11 @@ ApproovService.addSubstitutionHeader("Authorization", "Bearer ") // value after 
 ApproovService.addSubstitutionQueryParam("api_key")
 ```
 
-If a value's secure string fetch fails, the value is replaced by the fetch status name and the request goes ahead. This includes `UNKNOWN_KEY`, which means no secure string is defined for that key. See the [secure string table](#what-happens-by-default).
+**Effects.** If a value's secure string fetch fails, the value is replaced by the fetch status name and the request goes ahead. This includes `UNKNOWN_KEY`, which means no secure string is defined for that key. See the [secure string table](#secure-string-results).
 
-Header names are matched without regard to case. A header cannot be both a binding header and a substitution header. To fetch or define a secure string directly, use `fetchSecureString`.
+Header names are matched without regard to case. A header cannot be both a binding header and a substitution header. To fetch or define a secure string directly, use `fetchSecureString`. Every `initialize` removes the substitutions.
+
+**Check it.** Your backend receives the secret in place of the key. When it does not, the value it receives (a status name such as `UNKNOWN_KEY`, or the key itself) and the `Secure string not substituted` log line give the reason (see [When placeholders stay in place](#when-placeholders-stay-in-place)).
 
 ### Keys and values
 
@@ -441,21 +506,37 @@ If your client has a `Cache`, send requests that carry secure strings with `Cach
 
 ## Excluding URLs
 
-Requests whose URL matches an exclusion regular expression are sent untouched, without a token fetch:
+**What it does.** Requests whose URL matches an exclusion regular expression are sent untouched, without a token fetch.
+
+**Default.** No exclusions.
+
+**When to change it.** For requests to your API domains that should not fetch a token, such as a health check.
+
+**Example.**
 
 ```kotlin
 ApproovService.addExclusionURLRegex("https://api\\.example\\.com/health.*")
 ```
 
-Connection checks still apply to excluded requests on domains added to Approov.
+**Effects.** Connection checks still apply to excluded requests on domains added to Approov.
 
 The keys for those checks are updated only when a request that is not excluded fetches a token through the client, and the SDK reports a configuration change. A direct `fetchToken` call does not update them. So make sure your app keeps calling some URL that is not excluded on each protected domain.
 
-An invalid regular expression is logged as an error and nothing is added. No exception is thrown, so check the log when you add one. Exclusions are part of the configuration that every `initialize` resets.
+Exclusions are part of the configuration that every `initialize` resets.
+
+**Check it.** `addExclusionURLRegex` logs the expression at `DEBUG`. An invalid regular expression is logged as an error and nothing is added. No exception is thrown, so check the log when you add one.
 
 ## Connection validation
 
-The pinning interceptor checks the TLS connection to each domain you have added to Approov. Pinning means a connection is accepted only if its certificate matches keys known in advance. The interceptor checks against the certificate public keys configured for the domain. For a domain with none of its own, it falls back to the Managed Trust Roots.
+**What it does.** The pinning interceptor checks the TLS connection to each domain you have added to Approov. Pinning means a connection is accepted only if its certificate matches keys known in advance. The interceptor checks against the certificate public keys configured for the domain. For a domain with none of its own, it falls back to the Managed Trust Roots.
+
+**Default.** On for every domain you added to Approov. The keys come from the Approov SDK's configuration, not from your configuration calls.
+
+**When to change it.** To skip it for a host, override `handlePinningShouldProcessRequest` in your own mutator (see [opting in to aborting requests](#opting-in-to-aborting-requests)).
+
+**Effects.** A connection that fails the check is refused with `SSLPeerUnverifiedException`. Only that request fails.
+
+**Check it.** A failure logs an error under the `ApproovPinningInterceptor` tag that names the host, never a key (see [failures in the log](#failures-in-the-log)).
 
 ### WebSockets
 
@@ -485,9 +566,15 @@ If the keys cannot be read from the SDK, the connection fails closed, which mean
 
 ## OkHttp version
 
-The package depends on OkHttp 5.3.2. This is a minimum: Gradle uses the highest OkHttp version that anything in your app asks for, so an app that declares a later OkHttp keeps it.
+**What it does.** The package depends on OkHttp 5.3.2. OkHttp 5 tries a host's IPv6 and IPv4 addresses side by side. On a network that drops IPv6 traffic, requests still connect quickly. The Approov SDK makes its own calls with your app's OkHttp, so its token fetches get the same benefit.
 
-OkHttp 5 tries a host's IPv6 and IPv4 addresses side by side. On a network that drops IPv6 traffic, requests still connect quickly. The Approov SDK makes its own calls with your app's OkHttp, so its token fetches get the same benefit.
+**Default.** OkHttp 5.3.2 is a minimum: Gradle uses the highest OkHttp version that anything in your app asks for, so an app that declares a later OkHttp keeps it.
+
+**When to change it.** To keep your app on OkHttp 4, see [staying on OkHttp 4](#staying-on-okhttp-4).
+
+**Effects.** See [what OkHttp 5 asks of your build](#what-okhttp-5-asks-of-your-build).
+
+**Check it.** Gradle's `dependencies` task for your app module shows the OkHttp version it resolved.
 
 ### What OkHttp 5 asks of your build
 
@@ -513,11 +600,21 @@ Your app then does not get the side-by-side IPv6 and IPv4 connections. React Nat
 
 ## Service mutators
 
-An `ApproovServiceMutator` holds your app's own policy, so you don't need to fork the package. The package asks the installed mutator at each decision point. Every method has a default, so override only what you need.
+**What it does.** An `ApproovServiceMutator` holds your app's own policy, so you don't need to fork the package. The package asks the installed mutator at each decision point. Every method has a default, so override only what you need.
 
-The interceptor defaults are the `CLOSE_FAILURE` decisions (see [What happens by default](#what-happens-by-default)). So a custom mutator that should never abort a request delegates those decisions to `ApproovServiceMutator.ALWAYS_PROCEED`.
+**Default.** `DEFAULT`, which is `CLOSE_FAILURE`. The interceptor defaults are the `CLOSE_FAILURE` decisions too (see [What happens by default](#what-happens-by-default)).
 
-The package's signer, `ApproovDefaultMessageSigning`, is itself a mutator. Installing another mutator removes it, so a mutator of your own that should also sign calls the signer from its `handleInterceptorProcessedRequest` (see [signing with other decisions](#signing-with-other-decisions)). Every `initialize` puts back `DEFAULT`.
+**When to change it.** Install a standard mutator to change the token fetch decisions, or your own when your app needs a decision the standard ones do not make. A custom mutator that should never abort a request delegates those decisions to `ApproovServiceMutator.ALWAYS_PROCEED`.
+
+**Example.**
+
+```kotlin
+ApproovService.setServiceMutator(ApproovServiceMutator.ALWAYS_PROCEED)
+```
+
+**Effects.** The package's signer, `ApproovDefaultMessageSigning`, is itself a mutator. Installing another mutator removes it, so a mutator of your own that should also sign calls the signer from its `handleInterceptorProcessedRequest` (see [signing with other decisions](#signing-with-other-decisions)). Every `initialize` puts back `DEFAULT`. A mutator you install applies to requests processed after the call.
+
+**Check it.** `ApproovService.getServiceMutator()` returns the installed mutator.
 
 The hooks:
 
@@ -533,13 +630,17 @@ The hooks:
 
 ### The token fetch decision
 
-`handleInterceptorFetchTokenResult` receives the token fetch result and gives one of three answers:
+**What it does.** `handleInterceptorFetchTokenResult` receives the token fetch result and gives one of three answers:
 
 * `true` sends the request with the Approov headers its status allows. On `SUCCESS` those are the token and trace headers. On a failure status, the token header with an empty token or the status, and any trace header. On `UNKNOWN_URL` or `UNPROTECTED_URL`, none.
 * `false` sends the request with no Approov headers at all.
 * throwing an `ApproovException` aborts the request.
 
-For a failure status on a host not in the pin set, the answer is ignored and the request goes out untouched. The only exception is when your own code throws, which aborts the request. A `CLOSE_FAILURE` decision you inherit or call is ignored there.
+**Default.** The `CLOSE_FAILURE` decision (see [What happens by default](#what-happens-by-default)).
+
+**When to change it.** To abort on an outcome that would otherwise go ahead, see [opting in to aborting requests](#opting-in-to-aborting-requests).
+
+**Effects.** For a failure status on a host not in the pin set, the answer is ignored and the request goes out untouched. The only exception is when your own code throws, which aborts the request. A `CLOSE_FAILURE` decision you inherit or call is ignored there.
 
 The hook governs the Approov headers only. Secure strings follow the token fetch status. A `SUCCESS` or `UNPROTECTED_URL` request gets them whatever the hook returns, and a request with a failure status never does.
 
@@ -547,30 +648,31 @@ With message signing installed, any request that gets the token header is signed
 
 The processed request callback, `handleInterceptorProcessedRequest`, runs for every request the package processes. That is a `SUCCESS` or `UNPROTECTED_URL` request, or a request with a failure status that the mutator lets go ahead to a host in the pin set.
 
+**Check it.** At `DEBUG`, a request that goes ahead on a failure status logs a line that starts `Approov token fetch for <host>: <status>` and ends `proceeding with an empty token header`, `proceeding with the status in the token header` or `proceeding with no Approov header`.
+
 ### The substitution hooks
 
-`handleInterceptorHeaderSubstitutionResult` and `handleInterceptorQueryParamSubstitutionResult` decide whether to apply a secure string substitution. They are asked only on a `SUCCESS` or `UNPROTECTED_URL` request over `https`.
+**What it does.** `handleInterceptorHeaderSubstitutionResult` and `handleInterceptorQueryParamSubstitutionResult` decide whether to apply a secure string substitution. They are asked only on a `SUCCESS` or `UNPROTECTED_URL` request over `https`.
 
-* Both standard mutators return `true` only for `SUCCESS`, and never throw.
+**Default.** Both standard mutators return `true` only for `SUCCESS`, and never throw.
+
+**Effects.**
+
 * Returning `false` on `SUCCESS` leaves the placeholder.
 * On any other status there is no secure string to substitute. The request goes ahead with the status in place of the placeholder, whether the hook returns `false` or `true`.
 * Your own mutator may throw an `ApproovException` to abort the request.
 
+**Check it.** A placeholder the hook leaves in place is logged at `DEBUG` as `Secure string not substituted in header <name>` or `in query parameter <name>`, never with its value.
+
 ### Opting in to aborting requests
 
-Under `ALWAYS_PROCEED`, every outcome goes ahead. Your app may decide that some outcome should not.
+**What it does.** Your own mutator fails a request for an outcome that would otherwise go ahead, by overriding the hook and throwing an `ApproovException`. That is your app's policy, not the package's. Every `handleInterceptor...` hook declares `ApproovException`. `handlePinningShouldProcessRequest` declares no checked exception, so it aborts by throwing a `RuntimeException`, with the same result. The request then fails with a plain `ApproovException` that names the hook, with yours as its cause. Your app's error handling finds your exception with `getCause()`. The Approov status is still available from the result for your own logging.
 
-The common case is `NO_NETWORK`. The device could not reach Approov, and the API call is about to fail on the same network anyway. Your app may prefer to get a network error at once and show its offline state, rather than send a request that will not reach your backend.
+**Default.** Under `ALWAYS_PROCEED`, every outcome goes ahead. Your app may decide that some outcome should not.
 
-That is your app's policy, so you express it by overriding the hook and throwing an `ApproovException`. Every `handleInterceptor...` hook declares `ApproovException`. `handlePinningShouldProcessRequest` declares no checked exception, so it aborts by throwing a `RuntimeException`, with the same result. The request then fails with a plain `ApproovException` that names the hook, with yours as its cause. Your app's error handling finds your exception with `getCause()`. The Approov status is still available from the result for your own logging.
+**When to change it.** The common case is `NO_NETWORK`. The device could not reach Approov, and the API call is about to fail on the same network anyway. Your app may prefer to get a network error at once and show its offline state, rather than send a request that will not reach your backend.
 
-A hook that throws something else is treated as a failed request too, never as a crash. That includes a `NullPointerException` or other programming error, and a deliberate `RuntimeException`. The request fails with an `ApproovException` whose cause is the original exception. The hook is named in its message and in an error-level log line. `execute()` throws it, and an enqueued call receives it in `onFailure`. Otherwise OkHttp would rethrow the exception on its dispatcher thread for an enqueued call, which would terminate your app.
-
-This applies to any `ApproovException` or subclass your hook throws, whether your code built it or let it escape from a direct method such as `fetchToken` or `fetchSecureString`. It is your hook's failure, not an Approov decision, so it never looks like one.
-
-The aborts that `CLOSE_FAILURE` makes keep the 3.5.x Approov exception types. That also holds in a custom mutator that inherits those decisions or calls them, for example `ApproovServiceMutator.CLOSE_FAILURE.handleInterceptorFetchTokenResult(results, url)`. A decision your hook catches and rethrows unchanged keeps its type too. The standard substitution decisions, `closeFailureSubstitution` included, never throw.
-
-Delegate to `ALWAYS_PROCEED` for every decision you don't change. This mutator also signs, so it calls the signer:
+**Example.** Delegate to `ALWAYS_PROCEED` for every decision you don't change. This mutator also signs, so it calls the signer:
 
 ```kotlin
 import android.util.Log
@@ -609,26 +711,42 @@ class AppPolicy : ApproovServiceMutator {
 ApproovService.setServiceMutator(AppPolicy())
 ```
 
+**Effects.** A hook that throws something else is treated as a failed request too, never as a crash. That includes a `NullPointerException` or other programming error, and a deliberate `RuntimeException`. The request fails with an `ApproovException` whose cause is the original exception. The hook is named in its message and in an error-level log line. `execute()` throws it, and an enqueued call receives it in `onFailure`. Otherwise OkHttp would rethrow the exception on its dispatcher thread for an enqueued call, which would terminate your app.
+
+This applies to any `ApproovException` or subclass your hook throws, whether your code built it or let it escape from a direct method such as `fetchToken` or `fetchSecureString`. It is your hook's failure, not an Approov decision, so it never looks like one.
+
+The aborts that `CLOSE_FAILURE` makes keep the 3.5.x Approov exception types. That also holds in a custom mutator that inherits those decisions or calls them, for example `ApproovServiceMutator.CLOSE_FAILURE.handleInterceptorFetchTokenResult(results, url)`. A decision your hook catches and rethrows unchanged keeps its type too. The standard substitution decisions, `closeFailureSubstitution` included, never throw.
+
 Keep hooks fast and free of side effects, because they run on the request path.
 
 The stale protection refresh may run a mutator's processed request callback again, but only if `supportsProtectionRefresh()` returns `true`. It does for `DEFAULT`, `CLOSE_FAILURE`, `ALWAYS_PROCEED` and `ApproovDefaultMessageSigning`. A custom mutator that does not opt in gets no stale refresh at all.
 
+**Check it.** The request fails with an `ApproovException` whose message names the hook and whose `getCause()` is your exception.
+
 ## Stale protection refresh
 
-A request can be held between Approov processing and sending, for example during a device doze period or in an app-level queue. It would then go out with an expired token or signature.
+**What it does.** A request can be held between Approov processing and sending, for example during a device doze period or in an app-level queue. It would then go out with an expired token or signature.
 
-To prevent this, a network interceptor strips the request's protection and applies it again just before sending, if the request was held longer than the refresh period. The default period is 3000 ms. On a refresh:
+To prevent this, a network interceptor strips the request's protection and applies it again just before sending, if the request was held longer than the refresh period. On a refresh:
 
 * the token is fetched again, from the SDK cache if it is still valid
 * the token header reflects the new result
 * substitutions are redone
 * with message signing installed, the signatures are made again
 
+**Default.** On, with a period of 3000 ms.
+
+**When to change it.** Set another period, or turn the refresh off with a period of 0 or less.
+
+**Example.**
+
 ```kotlin
 ApproovService.setStaleProtectionRefreshPeriod(1000)   // <= 0 disables
 ```
 
-The refresh runs on every network attempt, so OkHttp's own retries are refreshed too.
+**Effects.** The refresh runs on every network attempt, so OkHttp's own retries are refreshed too. It runs a mutator's processed request callback again only if `supportsProtectionRefresh()` returns `true`. Every `initialize` puts the period back to 3000 ms.
+
+**Check it.** At `DEBUG`, the `ApproovFreshness` tag logs `refreshProtection: held <n>ms, refreshing before transmission`.
 
 ### Redirects and retries
 
@@ -692,7 +810,13 @@ You can use more than one Approov package in the same app. The Approov SDK is in
 
 ## Diagnostics
 
-The package's diagnostic lines are written at debug level, which is off by default (see the logging levels below). To see them, set the level in a debug build:
+**What it does.** The package writes a diagnostic line for each token fetch, and for each secure string it does not deliver.
+
+**Default.** These lines are written at debug level, which is off by default (see [log tags and levels](#log-tags-and-levels)).
+
+**When to change it.** When you investigate an unexpected result.
+
+**Example.** Set the level in a debug build:
 
 ```Java
 ApproovService.setLoggingLevel(ApproovLogLevel.DEBUG);
@@ -704,7 +828,7 @@ Or enable debug logging for the `ApproovService` tag, with no rebuild. This work
 adb shell setprop log.tag.ApproovService DEBUG
 ```
 
-The package never logs a token. For each fetch, it logs the [loggable form](https://approov.io/docs/latest/approov-usage-documentation/#loggable-tokens) of the result. The loggable form is the token's claims plus a short fragment of its signature. It cannot be turned back into a usable token.
+**Check it.** The package never logs a token. For each fetch, it logs the [loggable form](https://approov.io/docs/latest/approov-usage-documentation/#loggable-tokens) of the result. The loggable form is the token's claims plus a short fragment of its signature. It cannot be turned back into a usable token.
 
 The claim to look at is `arc`, the [Attestation Response Code](https://approov.io/docs/latest/approov-usage-documentation/#attestation-response-code). It encodes why attestation produced the result it did. For example:
 
@@ -752,9 +876,7 @@ Three cases are configuration problems, so they stay warnings, visible at the de
 
 ### Log tags and levels
 
-The `Approov-TraceID` header is a debug header; pass it through unchanged.
-
-The package writes its log output under the tags `ApproovService`, `ApproovTokenInterceptor`, `ApproovFreshness`, `ApproovPinningInterceptor` and `ApproovMsgSign`. [setLoggingLevel](REFERENCE.md#setlogginglevel) controls what is written:
+**What it does.** The package writes its log output under the tags `ApproovService`, `ApproovTokenInterceptor`, `ApproovFreshness`, `ApproovPinningInterceptor` and `ApproovMsgSign`. [setLoggingLevel](REFERENCE.md#setlogginglevel) controls what is written:
 
 * `ApproovLogLevel.ERROR` writes errors only
 * `WARNING` adds warnings
@@ -762,7 +884,17 @@ The package writes its log output under the tags `ApproovService`, `ApproovToken
 * `DEBUG` adds the debug lines
 * `OFF` writes nothing, errors included
 
-The loggable token carries the device ID and the client IP claims, and `getDeviceID` logs the device ID. So both are debug lines, and at the default level a release build writes neither.
+**Default.** `INFO`. The loggable token carries the device ID and the client IP claims, and `getDeviceID` logs the device ID. So both are debug lines, and at the default level a release build writes neither.
+
+**When to change it.** Raise it to `DEBUG` while you investigate, as in [Diagnostics](#diagnostics), or lower it to write less.
+
+**Example.**
+
+```Java
+ApproovService.setLoggingLevel(ApproovLogLevel.WARNING);
+```
+
+**Effects.** `initialize` keeps the logging level. The `Approov-TraceID` header is a debug header; pass it through unchanged.
 
 You can [check](https://approov.io/docs/latest/approov-usage-documentation/#loggable-tokens) the loggable form of each fetched token with the Approov CLI. No token, secure string value, signature, query or substituted URL is ever logged.
 
