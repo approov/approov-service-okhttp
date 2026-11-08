@@ -412,7 +412,9 @@ A `+` in a value substituted into a query reaches a backend that decodes the que
 
 ### When placeholders stay in place
 
-A secure string is only ever substituted into a request sent over TLS to an API domain you added to Approov. That domain is either token-protected (`SUCCESS`) or secrets-only (`UNPROTECTED_URL`, added with `-noApproovToken`).
+A request can go out without the secret in three cases: no substitution attempted, fetch failed and status substituted, and value cannot be carried.
+
+**No substitution attempted.** A secure string is only ever substituted into a request sent over TLS to an API domain you added to Approov. That domain is either token-protected (`SUCCESS`) or secrets-only (`UNPROTECTED_URL`, added with `-noApproovToken`).
 
 These requests keep their placeholders, with no status written:
 
@@ -426,6 +428,10 @@ This holds under every mutator, `ALWAYS_PROCEED` and custom mutators included. N
 A log line names the header or query parameter, never the value. It is a warning for a cleartext or `BAD_URL` request, because that is a configuration problem. Otherwise it is a DEBUG line (see [Diagnostics](#diagnostics)).
 
 This matters under `ALWAYS_PROCEED`, which sends a request whatever its token fetch status. That includes a redirect from your API to an `http` URL. Under `CLOSE_FAILURE` a cleartext or `BAD_URL` request to one of your Approov API domains never gets this far: the SDK reports `BAD_URL` for it, and the request fails with `ApproovFetchStatusException`. A cleartext request to any other host is sent unchanged.
+
+**Fetch failed and status substituted.** On a request that does get secure strings, a secure string fetch that does not return `SUCCESS` writes its status name in place of the placeholder, and the request goes ahead (see [Secure string results](#secure-string-results)).
+
+**Value cannot be carried.** A secure string whose value the header or URL cannot carry keeps the placeholder, and a warning names the header or query parameter, never the value (see [Values a header or URL cannot carry](#values-a-header-or-url-cannot-carry)).
 
 ### Secure strings and the OkHttp cache
 
