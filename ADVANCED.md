@@ -83,7 +83,7 @@ The signer, `ApproovDefaultMessageSigning`, adds RFC 9421 message signatures to 
 
 Message signing is **off unless you install it**. If you do not need signatures, keep the default and install nothing.
 
-The signer is implemented as a service mutator, so installing another mutator, passing `null` to `setServiceMutator` or a successful `initialize` removes it. The signer makes the standard decisions, the same as `CLOSE_FAILURE`. If those suit you, give it a default factory and install it right after `initialize`, as in the example. To sign under other decisions, such as `ALWAYS_PROCEED`, combine them with the signer in a mutator of your own, as shown below.
+The signer is implemented as a service mutator, so installing another mutator, passing `null` to `setServiceMutator` or a successful `initialize` removes it. The signer that you construct with no argument makes the standard decisions, the same as `CLOSE_FAILURE`. If those suit you, give it a default factory and install it right after `initialize`, as in the example. To sign under other decisions, such as `ALWAYS_PROCEED`, pass the mutator that makes them to the constructor, as shown below.
 
 ```kotlin
 ApproovService.setServiceMutator(
@@ -104,60 +104,24 @@ A request to a secrets-only API that the SDK reports as `UNPROTECTED_URL` carrie
 
 Each `initialize` that succeeds puts back the `DEFAULT` mutator, which removes the signer. So install it again after each `initialize`.
 
-To sign under other decisions, combine them with the signer in a mutator of your own. Your mutator makes its decisions and calls the signer from its `handleInterceptorProcessedRequest`. This mutator makes the `ALWAYS_PROCEED` token decisions and signs:
+To sign under other decisions, pass the mutator that makes them to the signer's constructor. This signer makes the `ALWAYS_PROCEED` decisions and signs:
 
 ```kotlin
-class ProceedAndSign : ApproovServiceMutator {
-    private val signer = ApproovDefaultMessageSigning().setDefaultFactory(
-        ApproovDefaultMessageSigning.generateDefaultSignatureParametersFactory())
-
-    override fun handleInterceptorFetchTokenResult(result: Approov.TokenFetchResult, url: String): Boolean =
-        ApproovServiceMutator.ALWAYS_PROCEED.handleInterceptorFetchTokenResult(result, url)
-
-    override fun handleInterceptorProcessedRequest(request: Request, changes: ApproovRequestMutations): Request =
-        signer.handleInterceptorProcessedRequest(request, changes)
-
-    override fun supportsProtectionRefresh(): Boolean = true
-}
-
-ApproovService.setServiceMutator(ProceedAndSign())
+ApproovService.setServiceMutator(
+    ApproovDefaultMessageSigning(ApproovServiceMutator.ALWAYS_PROCEED).setDefaultFactory(
+        ApproovDefaultMessageSigning.generateDefaultSignatureParametersFactory()))
 ```
 
 <details>
 <summary>Java</summary>
 
 ```java
-class ProceedAndSign implements ApproovServiceMutator {
-    private final ApproovDefaultMessageSigning signer = new ApproovDefaultMessageSigning().setDefaultFactory(
-            ApproovDefaultMessageSigning.generateDefaultSignatureParametersFactory());
-
-    @Override
-    public boolean handleInterceptorFetchTokenResult(Approov.TokenFetchResult result, String url)
-            throws ApproovException {
-        return ApproovServiceMutator.ALWAYS_PROCEED.handleInterceptorFetchTokenResult(result, url);
-    }
-
-    @Override
-    public Request handleInterceptorProcessedRequest(Request request, ApproovRequestMutations changes)
-            throws ApproovException {
-        return signer.handleInterceptorProcessedRequest(request, changes);
-    }
-
-    @Override
-    public boolean supportsProtectionRefresh() {
-        return true;
-    }
-}
-
-ApproovService.setServiceMutator(new ProceedAndSign());
+ApproovService.setServiceMutator(new ApproovDefaultMessageSigning(ApproovServiceMutator.ALWAYS_PROCEED)
+        .setDefaultFactory(ApproovDefaultMessageSigning.generateDefaultSignatureParametersFactory()));
 ```
 </details>
 
-When you write such a mutator:
-
-* Return `true` from `supportsProtectionRefresh()`. Otherwise a request held past the refresh period goes out with its old token and signature. A redirect or an authenticator retry goes out unsigned. Your `handleInterceptorProcessedRequest` then runs again on each of those attempts, so keep it safe to repeat.
-* To change the request before it is signed, make your change first and then call the signer.
-* Let an exception from the signer propagate unchanged. A required body digest that cannot be generated then fails the request, as it does when the signer is installed on its own.
+This works with any mutator, your own included. The package asks that mutator for every decision and calls its `handleInterceptorProcessedRequest` first. The package then signs the result, so the signature covers the changes your mutator makes there. On a redirect, an authenticator retry or a stale protection refresh, the package calls that method again, so keep it safe to repeat.
 
 Your backend receives `Signature` and `Signature-Input` headers whose members include `install`, `account` or both. A signature that cannot be produced is logged as an error under the `ApproovMsgSign` tag, and the request goes ahead with the other signature or unsigned. Only a configuration error, such as a required body digest that cannot be generated, fails the request.
 
@@ -313,7 +277,7 @@ A service mutator, an `ApproovServiceMutator`, is the object that holds the pack
 
 Write your own mutator when your app needs a decision that the standard ones do not make. Every method has a default, so override only what you need. A mutator of your own that should never abort a request delegates the token decisions to `ApproovServiceMutator.ALWAYS_PROCEED`. A mutator you install, at any time, applies only to requests processed after the call.
 
-The package's signer is also a mutator. To combine it with decisions of your own, see [Message signing](#message-signing).
+The package's signer is also a mutator. To sign under the decisions of your own mutator, pass your mutator to the signer's constructor. See [Message signing](#message-signing).
 
 The hooks:
 
@@ -322,7 +286,7 @@ The hooks:
 | `handleInterceptorShouldProcessRequest` | whether a request gets Approov processing at all (by default, every request that is not excluded) |
 | `handleInterceptorFetchTokenResult` | given the token fetch result, whether to send the request with its Approov headers, send it without them, or abort it |
 | `handleInterceptorHeaderSubstitutionResult`, `handleInterceptorQueryParamSubstitutionResult` | whether to apply a secure string substitution |
-| `handleInterceptorProcessedRequest` | final changes to the processed request. The signer signs here, so a mutator that calls it makes its own changes first |
+| `handleInterceptorProcessedRequest` | final changes to the processed request. The signer signs here, after the changes of the mutator you pass to its constructor |
 | `supportsProtectionRefresh` | whether the processed request callback may run again on a stale request, a redirect or a retry with changed headers (see [setStaleProtectionRefreshPeriod](REFERENCE.md#setstaleprotectionrefreshperiod)) |
 | `handlePinningShouldProcessRequest` | whether Approov connection checks (Managed Trust Roots or configured public keys) apply to a request |
 | `handlePrecheckResult`, `handleFetchTokenResult`, `handleFetchSecureStringResult`, `handleFetchCustomJWTResult` | how the direct methods turn a result into an exception |

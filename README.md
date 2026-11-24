@@ -32,7 +32,7 @@ The [Approov documentation for this package](https://docs.approov.io/app-integra
 Make sure `mavenCentral()` is in your repositories. Then add the package to your app's Gradle dependencies:
 
 ```groovy
-implementation("io.approov:service.okhttp:3.7.0")
+implementation("io.approov:service.okhttp:3.7.1")
 ```
 
 The package supports Android 6.0 (API level 23) and later. It brings in OkHttp 5.3.2, and also works if your app stays on OkHttp 4.12 or later. OkHttp 3.x is not supported. If your app compiles Kotlin, it needs Kotlin 2.1 or later. See [OkHttp version](ADVANCED.md#okhttp-version).
