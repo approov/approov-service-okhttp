@@ -20,7 +20,7 @@ What the package adds to a request depends on two things:
 * the kind of host: a token-protected API domain, a secrets-only API domain, or a host not protected by Approov (one you have not added)
 * the outcome of the attestation attempt for the request
 
-Both come from that one outcome. From it, the package and its [service mutator](#service-mutators) decide what to add to the request, and whether the request goes ahead at all.
+Based on the attestation outcome and the kind of host, the package and its [service mutator](#service-mutators) decide what to add to the request. They also decide whether the request goes ahead at all.
 
 | Request goes to | Outcome | What the package adds |
 | :--- | :--- | :--- |
@@ -30,7 +30,7 @@ Both come from that one outcome. From it, the package and its [service mutator](
 | a token-fetch failure, to a host protected by Approov | a failure status | depends on the service mutator (see below) |
 | a token-fetch failure, to a host not protected by Approov | a failure status | nothing (see below) |
 
-A failure status means the app has no token to add. For example, there was no network, or the Approov service could not be reached. The [service mutator](#what-happens-by-default) then decides whether the request fails in the app or is sent. A request that is sent carries the `Approov-Token` header with an empty token after any prefix. If you turned on [setUseApproovStatusIfNoToken](REFERENCE.md#setuseapproovstatusifnotoken), it carries the status name instead. It has no trace header and no secure strings. With message signing installed, it is signed.
+A failure status means the app could not complete the attestation. For example, there was no network, or the Approov service could not be reached. The [service mutator](#what-happens-by-default) then decides whether the request fails in the app or is sent. A request that is sent carries the `Approov-Token` header with an empty token after any prefix. If you turned on [setUseApproovStatusIfNoToken](REFERENCE.md#setuseapproovstatusifnotoken), it carries the status name instead. It has no trace header and no secure strings.
 
 For a host not protected by Approov, the request goes out unchanged, whatever the outcome. The standard mutators never fail it in the app. Only your own mutator can, by throwing from `handleInterceptorFetchTokenResult` (see [Service mutators](#service-mutators)).
 
@@ -44,9 +44,9 @@ Whatever the attestation outcome, the package checks the TLS connection to each 
 
 ## What happens by default
 
-For every request it processes, the `ApproovService` interceptor fetches an Approov token for the request URL. It does not process a request before `initialize` or in [bypass mode](#bypass-initialization), a WebSocket upgrade, or a request to an [excluded URL](#excluding-urls). It then applies the decisions of the installed `ApproovServiceMutator`. A service mutator is an object with one method for each decision that the package makes. For example, one method decides whether a failed token fetch fails the request (see [Service mutators](#service-mutators)). The package provides three standard ones:
+For every request it processes, the `ApproovService` interceptor fetches an Approov token for the request URL. It does not process a request before `initialize` or in [bypass mode](#bypass-initialization), a WebSocket upgrade, or a request to an [excluded URL](#excluding-urls). It then applies the decisions of the installed `ApproovServiceMutator`, which is an object with one method for each decision that the package makes. For example, one method decides whether a failed token fetch fails the request (see [Service mutators](#service-mutators)). The package provides three standard ones:
 
-* `ApproovServiceMutator.CLOSE_FAILURE` keeps the 3.5.x token decisions for your API domains. A failed token fetch fails the request in the app, with the same `ApproovException` types as 3.5.x. A failed token fetch for a host not in the pin set no longer fails the request. A secure string that cannot be fetched never fails a request, whatever its status. The status replaces the placeholder and the request goes ahead.
+* `ApproovServiceMutator.CLOSE_FAILURE` keeps the 3.5.x token decisions for your API domains. A failed token fetch fails the request in the app, with the same `ApproovException` types as 3.5.x.
 * `ApproovServiceMutator.ALWAYS_PROCEED` never fails a request because of its token fetch. Whatever the token fetch outcome, the request is sent, and your backend decides. Your backend is then the enforcement point.
 * `ApproovServiceMutator.DEFAULT` is the mutator installed out of the box. `setServiceMutator(null)` puts it back, and so does each `initialize` that succeeds. `DEFAULT` points to whatever the release considers default behaviour, which is currently `CLOSE_FAILURE`.
 
@@ -56,17 +56,17 @@ To opt in to always proceeding:
 ApproovService.setServiceMutator(ApproovServiceMutator.ALWAYS_PROCEED)
 ```
 
-In the table below, "a host in the pin set" means one of the API domains you added to Approov, of either kind.
+In the table below, "an Approov protected host" means one of the API domains you added to Approov, of either kind.
 
 | Approov token fetch status | `CLOSE_FAILURE` (default) | `ALWAYS_PROCEED` |
 | :--- | :--- | :--- |
 | `SUCCESS` | proceeds with the token, any trace header, the secure strings and, with message signing installed, the signatures | same |
 | `UNPROTECTED_URL` (secrets-only API) | proceeds with the secure strings only, no Approov headers | same |
 | `UNKNOWN_URL` (host not protected by Approov) | proceeds untouched | same |
-| `NO_APPROOV_SERVICE`, host in the pin set | proceeds with an empty token header (or the status), but no trace header and no secure strings | same |
-| `NO_NETWORK`, `POOR_NETWORK`, `MITM_DETECTED`, host in the pin set | fails with `ApproovNetworkException`, which can be retried. This is a deprecated subclass of `ApproovFetchStatusException`, so catch `ApproovFetchStatusException` and read `getTokenFetchStatus()`. With `setUseApproovStatusIfNoToken(true)` it proceeds with the status in the token header instead | proceeds with an empty token header (or the status), but no trace header and no secure strings |
-| any other status (`INTERNAL_ERROR`, `BAD_URL`, ...), host in the pin set | fails with `ApproovFetchStatusException` | proceeds with an empty token header (or the status), but no trace header and no secure strings |
-| any failure status, host not in the pin set (or the pin set is empty or cannot be read) | proceeds untouched, and no standard mutator fails it | same |
+| `NO_APPROOV_SERVICE`, Approov protected host | proceeds with an empty token header (or the status), but no trace header and no secure strings | same |
+| `NO_NETWORK`, `POOR_NETWORK`, `MITM_DETECTED`, Approov protected host | fails with `ApproovNetworkException`, which can be retried. This is a deprecated subclass of `ApproovFetchStatusException`, so catch `ApproovFetchStatusException` and read `getTokenFetchStatus()`. With `setUseApproovStatusIfNoToken(true)` it proceeds with the status in the token header instead | proceeds with an empty token header (or the status), but no trace header and no secure strings |
+| any other status (`INTERNAL_ERROR`, `BAD_URL`, ...), Approov protected host | fails with `ApproovFetchStatusException` | proceeds with an empty token header (or the status), but no trace header and no secure strings |
+| any failure status, host not protected by Approov, or any host before the app has its first Approov configuration | proceeds untouched, and no standard mutator fails it | same |
 
 "The status" in this table means the status name in the token header, after any prefix, when you turn on [setUseApproovStatusIfNoToken](REFERENCE.md#setuseapproovstatusifnotoken). A request that goes ahead after a failed token fetch is signed too, if you installed [message signing](#message-signing).
 
@@ -75,9 +75,7 @@ In the table below, "a host in the pin set" means one of the API domains you add
 These are the token fetch decisions only. Under either mutator, these still fail the request:
 
 * a TLS connection that fails the check
-* a message signing configuration error
 * an abort that your own hooks ask for
-* a failure of the Approov SDK itself, or a value that the request cannot carry
 
 ## Message signing
 
@@ -85,7 +83,7 @@ The signer, `ApproovDefaultMessageSigning`, adds RFC 9421 message signatures to 
 
 Message signing is **off unless you install it**. If you do not need signatures, keep the default and install nothing.
 
-Install it when your backend verifies signatures. The signer is a service mutator, so installing another mutator, passing `null` to `setServiceMutator` or a successful `initialize` removes it. The signer makes the standard decisions, the same as `CLOSE_FAILURE`. If those suit you, give it a default factory and install it right after `initialize`, as in the example. To sign under other decisions, such as `ALWAYS_PROCEED`, install your own mutator and have it call the signer (see [ApproovDefaultMessageSigning](REFERENCE.md#approovdefaultmessagesigning)).
+The signer is implemented as a service mutator, so installing another mutator, passing `null` to `setServiceMutator` or a successful `initialize` removes it. The signer makes the standard decisions, the same as `CLOSE_FAILURE`. If those suit you, give it a default factory and install it right after `initialize`, as in the example. To sign under other decisions, such as `ALWAYS_PROCEED`, combine them with the signer in a mutator of your own, as shown below.
 
 ```kotlin
 ApproovService.setServiceMutator(
@@ -98,15 +96,70 @@ ApproovService.setServiceMutator(new ApproovDefaultMessageSigning().setDefaultFa
         ApproovDefaultMessageSigning.generateDefaultSignatureParametersFactory()));
 ```
 
-Once the signer is installed, every request that carries the Approov token header is signed with the install signature, `ecdsa-p256-sha256`. It uses a key unique to the app installation, held in the Android Keystore. The Keystore uses the device's secure hardware when the device has it. Its dictionary member is `install`.
+Once the signer is installed, every request that carries the Approov token header is signed with the install signature, `ecdsa-p256-sha256`. It uses a key unique to the app installation, held in the Android Keystore. The Keystore keeps the private key in the device's secure hardware when the device has it. Its dictionary member is `install`.
 
 You can add the account signature, `hmac-sha256`, with `setUseInstallAndAccountMessageSigning()` on the factory. It uses a shared account key, delivered to the app when it passes attestation. Its member is `account`. Both are members of the same `Signature` and `Signature-Input` headers, over the same covered components. If one signature cannot be produced, the request goes ahead with the other, or unsigned.
 
-A request to a secrets-only API that the SDK reports as `UNPROTECTED_URL` carries no token header and is not signed. A request to a host in your pin set can go ahead after a failed token fetch. It then still carries the token header, empty or with the status. So the signer signs it too, over that value.
+A request to a secrets-only API that the SDK reports as `UNPROTECTED_URL` carries no token header and is not signed. A request to an Approov protected host can go ahead after a failed token fetch. It then still carries the token header, empty or with the status. So the signer signs it too, over that value.
 
 Each `initialize` that succeeds puts back the `DEFAULT` mutator, which removes the signer. So install it again after each `initialize`.
 
-Your backend receives `Signature` and `Signature-Input` headers whose members include `install` (and `account`, if you chose it). A signature that cannot be produced is logged as an error under the `ApproovMsgSign` tag.
+To sign under other decisions, combine them with the signer in a mutator of your own. Your mutator makes its decisions and calls the signer from its `handleInterceptorProcessedRequest`. This mutator makes the `ALWAYS_PROCEED` token decisions and signs:
+
+```kotlin
+class ProceedAndSign : ApproovServiceMutator {
+    private val signer = ApproovDefaultMessageSigning().setDefaultFactory(
+        ApproovDefaultMessageSigning.generateDefaultSignatureParametersFactory())
+
+    override fun handleInterceptorFetchTokenResult(result: Approov.TokenFetchResult, url: String): Boolean =
+        ApproovServiceMutator.ALWAYS_PROCEED.handleInterceptorFetchTokenResult(result, url)
+
+    override fun handleInterceptorProcessedRequest(request: Request, changes: ApproovRequestMutations): Request =
+        signer.handleInterceptorProcessedRequest(request, changes)
+
+    override fun supportsProtectionRefresh(): Boolean = true
+}
+
+ApproovService.setServiceMutator(ProceedAndSign())
+```
+
+<details>
+<summary>Java</summary>
+
+```java
+class ProceedAndSign implements ApproovServiceMutator {
+    private final ApproovDefaultMessageSigning signer = new ApproovDefaultMessageSigning().setDefaultFactory(
+            ApproovDefaultMessageSigning.generateDefaultSignatureParametersFactory());
+
+    @Override
+    public boolean handleInterceptorFetchTokenResult(Approov.TokenFetchResult result, String url)
+            throws ApproovException {
+        return ApproovServiceMutator.ALWAYS_PROCEED.handleInterceptorFetchTokenResult(result, url);
+    }
+
+    @Override
+    public Request handleInterceptorProcessedRequest(Request request, ApproovRequestMutations changes)
+            throws ApproovException {
+        return signer.handleInterceptorProcessedRequest(request, changes);
+    }
+
+    @Override
+    public boolean supportsProtectionRefresh() {
+        return true;
+    }
+}
+
+ApproovService.setServiceMutator(new ProceedAndSign());
+```
+</details>
+
+When you write such a mutator:
+
+* Return `true` from `supportsProtectionRefresh()`. Otherwise a request held past the refresh period goes out with its old token and signature. A redirect or an authenticator retry goes out unsigned. Your `handleInterceptorProcessedRequest` then runs again on each of those attempts, so keep it safe to repeat.
+* To change the request before it is signed, make your change first and then call the signer.
+* Let an exception from the signer propagate unchanged. A required body digest that cannot be generated then fails the request, as it does when the signer is installed on its own.
+
+Your backend receives `Signature` and `Signature-Input` headers whose members include `install`, `account` or both. A signature that cannot be produced is logged as an error under the `ApproovMsgSign` tag.
 
 Your backend verifies the signatures as [Installation Message Signing](https://docs.approov.io/operations/message-signing/installation/) and [Account Message Signing](https://docs.approov.io/operations/message-signing/account/) describe.
 
