@@ -530,7 +530,7 @@ public class ApproovServiceMiniSdkTest {
         try (Response response = client.newCall(unknown).execute()) {
             assertEquals(200, response.code());
             JSONObject reply = new JSONObject(response.body().string());
-            assertTrue(reply.getString("url"), reply.getString("url").contains("api_key=UNKNOWN_KEY"));
+            assertTrue(reply.getString("url"), reply.getString("url").contains("api_key=not-a-secure-string"));
             assertSuccessToken(reply);
         }
     }
@@ -1154,15 +1154,15 @@ public class ApproovServiceMiniSdkTest {
             reply = send(client, query);
             assertTrue(reply.getString("url"), reply.getString("url").contains("api_key=the-secret"));
 
-            // a value that is not a secure string key is replaced by unknown_key
+            // a value that is not a secure string key is left as the app wrote it
             reply = send(client, new Request.Builder().url(getTargetURL()).header("Api-Key", "not-a-key").build());
-            assertEquals("UNKNOWN_KEY", getHeader(reply, "Api-Key"));
+            assertEquals("not-a-key", getHeader(reply, "Api-Key"));
             assertFalse(getHeader(reply, "Approov-Token").isEmpty());
             reply = send(client, new Request.Builder().url(getTargetURL() + "?api_key=not-a-key").build());
-            assertTrue(reply.getString("url"), reply.getString("url").contains("api_key=UNKNOWN_KEY"));
+            assertTrue(reply.getString("url"), reply.getString("url").contains("api_key=not-a-key"));
 
             for (String status : new String[] {"UNKNOWN_KEY", "REJECTED", "NO_APPROOV_SERVICE"}) {
-                String expected = status;
+                String expected = "UNKNOWN_KEY".equals(status) ? "the-key" : status;
                 setDirective("{\"operation\": \"fetchSecureString\", \"response\": {\"status\": \"" + status + "\"}}");
                 reply = send(client, header);
                 assertEquals(status + " in place of the placeholder", expected, getHeader(reply, "Api-Key"));
@@ -1210,7 +1210,7 @@ public class ApproovServiceMiniSdkTest {
         for (String status : new String[] {"REJECTED", "NO_NETWORK", "POOR_NETWORK", "MITM_DETECTED",
                 "NO_APPROOV_SERVICE", "INTERNAL_ERROR", "UNKNOWN_KEY"}) {
             setDirective("{\"operation\": \"fetchSecureString\", \"response\": {\"status\": \"" + status + "\"}}");
-            String expected = status;
+            String expected = "UNKNOWN_KEY".equals(status) ? "the-key" : status;
             JSONObject reply = send(client, new Request.Builder().url(getTargetURL()).header("Api-Key", "the-key").build());
             assertEquals(status, expected, getHeader(reply, "Api-Key"));
             assertFalse(status, getHeader(reply, "Approov-Token").isEmpty());
@@ -2943,8 +2943,9 @@ public class ApproovServiceMiniSdkTest {
             assertEquals(status + ": " + e, expected, e.getClass());
             assertEquals(status, Approov.TokenFetchStatus.valueOf(status),
                 ((ApproovFetchStatusException) e).getTokenFetchStatus());
-            // the full URL of the request, as OkHttp spells it
-            assertEquals("Approov token fetch for " + okhttp3.HttpUrl.get(getTargetURL()) + ": " + status,
+            // the URL of the request without its query, as OkHttp spells it
+            assertEquals("Approov token fetch for "
+                + okhttp3.HttpUrl.get(getTargetURL()).newBuilder().query(null).build() + ": " + status,
                 e.getMessage());
         }
         assertEquals(status + " must send nothing", before, attempts.get());

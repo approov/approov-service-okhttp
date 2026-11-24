@@ -286,7 +286,7 @@ Three standard mutators are provided:
 
 | Mutator | Decisions |
 | :--- | :--- |
-| `ApproovServiceMutator.CLOSE_FAILURE` | The 3.5.x token decisions, which are also the interface defaults. A token fetch goes ahead on `SUCCESS` (token and trace headers) and on `NO_APPROOV_SERVICE` (an empty token header, or the status with `setUseApproovStatusIfNoToken`, and any trace header). `UNKNOWN_URL` and `UNPROTECTED_URL` send the request with no Approov headers (`UNPROTECTED_URL` with its secure strings). `NO_NETWORK`, `POOR_NETWORK` and `MITM_DETECTED` throw `ApproovNetworkException`, unless `setUseApproovStatusIfNoToken` is on, when they go ahead with the status. Every other status throws `ApproovFetchStatusException`, `REJECTED` included. These failure decisions apply only to a host in the SDK pin set. A failure for any other host goes out untouched. A secure string is substituted on `SUCCESS`. For every other secure string status, `UNKNOWN_KEY` included, the status name, unchanged, replaces the placeholder and the request goes ahead. |
+| `ApproovServiceMutator.CLOSE_FAILURE` | The 3.5.x token decisions, which are also the interface defaults. A token fetch goes ahead on `SUCCESS` (token and trace headers) and on `NO_APPROOV_SERVICE` (an empty token header, or the status with `setUseApproovStatusIfNoToken`, and any trace header). `UNKNOWN_URL` and `UNPROTECTED_URL` send the request with no Approov headers (`UNPROTECTED_URL` with its secure strings). `NO_NETWORK`, `POOR_NETWORK` and `MITM_DETECTED` throw `ApproovNetworkException`, unless `setUseApproovStatusIfNoToken` is on, when they go ahead with the status. Every other status throws `ApproovFetchStatusException`, `REJECTED` included. These failure decisions apply only to a host in the SDK pin set. A failure for any other host goes out untouched. A secure string is substituted on `SUCCESS`. `UNKNOWN_KEY` leaves the value as the app wrote it. For every other secure string status, the status name, unchanged, replaces the placeholder and the request goes ahead. |
 | `ApproovServiceMutator.ALWAYS_PROCEED` | Never aborts. Every token fetch status except `UNKNOWN_URL` and `UNPROTECTED_URL` goes ahead with the Approov headers its status allows. On a failure status that is the token header with an empty token (or the status with `setUseApproovStatusIfNoToken`) and any trace header, and no secure strings. A failure for a host not in the SDK pin set goes out untouched. A secure string is substituted on `SUCCESS`, and otherwise its status name, unchanged, replaces the placeholder. A request the SDK answers with `BAD_URL` keeps its placeholders and never gets a secure string. That is every cleartext `http` request, and an `https` URL the SDK cannot parse. |
 | `ApproovServiceMutator.DEFAULT` | Points to the release's default behaviour: `CLOSE_FAILURE`. If your app wants a fixed behaviour, name `CLOSE_FAILURE` or `ALWAYS_PROCEED` explicitly. |
 
@@ -517,7 +517,8 @@ fun setStaleProtectionRefreshPeriod(periodMS: Long)
 Adds a `header` whose value is replaced by a [secure string](https://approov.io/docs/latest/approov-usage-documentation/#secure-strings). If the header is present on a request, its value is used as a key to look up a secure string, which then replaces the header value. This makes it easy to move existing code to secure strings. See [secure strings](ADVANCED.md#secure-strings).
 
 * `requiredPrefix` handles values with a fixed start, such as "`Bearer `" in an authorization header. Set it to `null` if you don't need one.
-* If the secure string fetch returns any status other than `SUCCESS` and the request goes ahead, the status name, unchanged, goes after the prefix instead (`X-Api-Key: REJECTED`, `X-Api-Key: UNKNOWN_KEY`).
+* If the secure string fetch returns `UNKNOWN_KEY`, the value is not a secure string key and the header is left as the app wrote it.
+* If it returns any other status than `SUCCESS` and the request goes ahead, the status name, unchanged, goes after the prefix instead (`X-Api-Key: REJECTED`).
 * A secure string is only substituted into a request sent over TLS (`https`) whose token fetch returned `SUCCESS` or `UNPROTECTED_URL`. Any other request keeps the placeholder under every mutator, custom mutators included. No secure string is fetched and the substitution hooks are not consulted. A cleartext or `BAD_URL` request logs a warning naming the header; the others log it at DEBUG.
 * It applies to requests processed after the call, including through clients you already have.
 * `initialize` removes every substitution header, so call this after it.
@@ -568,7 +569,8 @@ Adds the `key` of a query parameter whose value is replaced by a [secure string]
 * The `key` is matched as literal text, not as a regular expression. A `.` in it matches only a `.`.
 * Every occurrence of the key in a URL's query is substituted. Each value is looked up as its own secure string key, and checked on its own.
 * An occurrence whose secure string OkHttp would not carry unchanged keeps its placeholder, while the others are substituted.
-* An occurrence whose fetch returns any status other than `SUCCESS` becomes that status name (`REJECTED`, `UNKNOWN_KEY` and so on).
+* An occurrence whose fetch returns `UNKNOWN_KEY` is left as the app wrote it.
+* An occurrence whose fetch returns any other status than `SUCCESS` becomes that status name (`REJECTED`, `NO_NETWORK` and so on).
 * A cleartext (`http`) request, or one whose token fetch returned `BAD_URL`, keeps every placeholder under every mutator.
 * `initialize` removes every substitution query parameter, so call this after it.
 

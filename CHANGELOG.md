@@ -13,9 +13,14 @@ Entries marked **Breaking** need a source change. See [Upgrading from 3.5.x](REA
 - **Breaking:** The message signing helper classes moved from `io.approov.util.http.sfv` and `io.approov.util.sig` to `io.approov.util.okhttp.http.sfv` and `io.approov.util.okhttp.sig`. Update imports of classes such as `SignatureParameters` and `ComponentProvider`.
 - **Breaking:** `SignatureParametersFactory` has a new protected field, `useInstallMessageSigning`, which starts `true`. A subclass that sets `useAccountMessageSigning = true` directly now produces both signatures. Call `setUseAccountMessageSigning()` to produce the account signature only.
 - The package depends on OkHttp 5.3.2, where 3.5.x depended on 4.12.0. OkHttp 5 brings Happy Eyeballs: it tries IPv6 and IPv4 addresses side by side, so requests connect on networks that drop IPv6. Apps that compile Kotlin need Kotlin 2.1 or later. See [OkHttp version](ADVANCED.md#okhttp-version).
-- A failed secure string fetch no longer fails the request. The status name replaces the placeholder, such as `X-Api-Key: REJECTED`, so a backend that checks the value must expect it. See [secure strings](ADVANCED.md#secure-strings).
+- The package depends on Approov SDK 3.7.0, where 3.5.x depended on 3.5.3.
+- A failed secure string fetch no longer fails the request. The status name replaces the placeholder, such as `X-Api-Key: REJECTED`, so a backend that checks the value must expect it. A value that is not a secure string key (`UNKNOWN_KEY`) is left as your app wrote it, as in 3.5.x. See [secure strings](ADVANCED.md#secure-strings).
 - A failed token fetch only affects requests to your Approov API domains, the hosts in your pin set. Requests to other hosts are sent unchanged.
 - A WebSocket upgrade request is sent untouched, with no Approov token, secure strings or signature. See [WebSockets](ADVANCED.md#websockets).
+- `getOkHttpClient()` no longer throws before `initialize`. Requests through that client go out without Approov protection until `initialize` is called.
+- `initialize` throws `IllegalArgumentException` for a null context, also in bypass mode (`""`).
+- An `ApproovException` that your own mutator throws, such as an `ApproovNetworkException`, reaches your app as a plain `ApproovException` with the original as its cause.
+- The token fetch exception message names the URL without its query, user info or fragment.
 
 ### Deprecated
 - `getMessageSignature(message)`. Use `getAccountMessageSignature`.
@@ -41,6 +46,7 @@ Entries marked **Breaking** need a source change. See [Upgrading from 3.5.x](REA
 - APIs added with `approov api -add <domain> -noApproovToken` get their secure strings.
 - Redirects, `Authenticator` retries and stale refreshes are protected for what they send, with the mutator the request was first processed with.
 - Message signing signs the request exactly as OkHttp sends it, as RFC 9421 requires.
+- The body digest is calculated as the body is written, without a copy of the body in memory. A body that fails while it is written is signed without a digest, unless the digest is configured as required.
 - `getLastARC()` makes no token fetch of its own.
 
 ## [3.5.8] - 2026-07-16

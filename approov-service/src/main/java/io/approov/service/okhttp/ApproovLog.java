@@ -99,6 +99,18 @@ final class ApproovLog {
         return url.newBuilder().username("").password("").query(null).fragment(null).build().toString();
     }
 
+    /**
+     * Gets a URL string in its loggable form, as loggableURL(HttpUrl) gives it. A string that is not an
+     * http or https URL is not shown, as it may hold anything.
+     *
+     * @param url is the URL string
+     * @return the URL without credentials, query or fragment
+     */
+    static String loggableURL(String url) {
+        HttpUrl parsed = (url == null) ? null : HttpUrl.parse(url);
+        return (parsed == null) ? "(URL not shown)" : loggableURL(parsed);
+    }
+
     // writers for each level, each only writing if its level is enabled
     static void e(String tag, String message) {
         if (isEnabled(ApproovLogLevel.ERROR))

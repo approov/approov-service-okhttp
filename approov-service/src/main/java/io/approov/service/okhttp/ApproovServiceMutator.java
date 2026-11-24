@@ -303,7 +303,7 @@ public interface ApproovServiceMutator {
                 // host is a secrets-only API that needs no token
                 return false;
             default:
-                String message = "Approov token fetch for " + url + ": " + status;
+                String message = "Approov token fetch for " + ApproovLog.loggableURL(url) + ": " + status;
                 if (isNetworkFailure(status)) {
                     // a network failure proceeds if the status is to be sent in the token header instead
                     if (ApproovService.getUseApproovStatusIfNoToken())

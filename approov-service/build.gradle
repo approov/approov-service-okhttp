@@ -111,7 +111,7 @@ def relocatedTinkJar = tasks.register('relocatedTinkJar', com.github.jengelman.g
 
 dependencies {
     implementation "com.squareup.okhttp3:okhttp:${okhttpVersion}"
-    implementation 'io.approov:approov-android-sdk:3.5.3'
+    implementation 'io.approov:approov-android-sdk:3.7.0'
     relocatedTink('com.google.crypto.tink:tink-android:1.23.0') {
         // androidx.annotation is a regular dependency of this library below
         exclude group: 'androidx.annotation'
@@ -249,7 +249,14 @@ tasks.register('verifyReleaseSdkVersion') {
         sdkVersions.each { where, version ->
             if (!version)
                 throw new GradleException("verifyReleaseSdkVersion: no Approov SDK dependency in ${where}")
+            if (!(version ==~ /\d+\.\d+\.\d+/))
+                throw new GradleException("verifyReleaseSdkVersion: release ${releaseVersion} depends on " +
+                        "Approov SDK ${version} in ${where}, which is not a released x.y.z version")
         }
+        // the published POM must name the SDK that the package is built against
+        if (sdkVersions['build.gradle'] != sdkVersions['pom.xml'])
+            throw new GradleException("verifyReleaseSdkVersion: Approov SDK ${sdkVersions['build.gradle']} " +
+                    "in build.gradle does not match ${sdkVersions['pom.xml']} in pom.xml")
 
         // a 3.7.x or later release is built and tested for a newer Approov SDK than the 3.5 line
         def (major, minor) = releaseVersion.tokenize('.').collect { it as int }

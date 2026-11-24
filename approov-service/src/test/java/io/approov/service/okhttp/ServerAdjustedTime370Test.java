@@ -60,6 +60,7 @@ public class ServerAdjustedTime370Test {
     // a recording SDK hook whose server adjusted time is the device clock minus OFFSET_MS, or fails
     private static final class ServerTimeSdk extends RecordingSdk {
         volatile RuntimeException failure;
+        volatile Error linkageFailure;
         volatile long lastServerTime;
 
         @Override
@@ -67,6 +68,9 @@ public class ServerAdjustedTime370Test {
             RuntimeException thrown = failure;
             if (thrown != null)
                 throw thrown;
+            Error error = linkageFailure;
+            if (error != null)
+                throw error;
             lastServerTime = System.currentTimeMillis() - OFFSET_MS;
             return lastServerTime;
         }
@@ -152,6 +156,32 @@ public class ServerAdjustedTime370Test {
         assertEquals(created + DEFAULT_EXPIRES_LIFETIME, parameter(EXPIRES, input));
         assertEquals("one warning for the one signature", 1,
                 warningsContaining("server adjusted time unavailable"));
+    }
+
+    @Test
+    public void anSdkWithoutTheMethodFallsBackToTheDeviceClockWithAWarning() throws Exception {
+        // an app that forces an older Approov SDK at runtime has no getServerAdjustedCurrentTimeMS
+        sdk.linkageFailure = new NoSuchMethodError("getServerAdjustedCurrentTimeMS");
+        long before = System.currentTimeMillis() / 1000;
+        String input = signatureInput();
+        long after = System.currentTimeMillis() / 1000;
+
+        long created = parameter(CREATED, input);
+        assertTrue("created is the device clock: " + created, (created >= before) && (created <= after));
+        assertEquals("one warning for the one signature", 1,
+                warningsContaining("server adjusted time unavailable"));
+    }
+
+    @Test
+    public void theDirectMethodWrapsAnSdkWithoutTheMethod() {
+        NoSuchMethodError missing = new NoSuchMethodError("getServerAdjustedCurrentTimeMS");
+        sdk.linkageFailure = missing;
+        try {
+            ApproovService.getServerAdjustedCurrentTimeMS();
+            fail("a missing SDK method is thrown as an ApproovException");
+        } catch (ApproovException e) {
+            assertEquals(missing, e.getCause().getCause());
+        }
     }
 
     @Test

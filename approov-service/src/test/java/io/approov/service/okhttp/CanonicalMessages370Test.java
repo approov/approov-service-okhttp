@@ -82,15 +82,18 @@ public class CanonicalMessages370Test {
     }
 
     @Test
-    public void theStandardTokenDecisionNamesTheFullUrl() throws Exception {
+    public void theStandardTokenDecisionNamesTheUrlWithoutQueryOrCredentials() throws Exception {
+        // the query and user info can hold personal data or a substituted secret, so the message leaves them out
         AttesterProxyController.setNextAttestationDirectiveJson("{\"operation\": \"fetchApproovToken\","
                 + " \"response\": {\"status\": \"REJECTED\"}}");
         Request request = new Request.Builder()
-                .url(fixture.protectedServer.url("/users/someone?email=someone@example.com")).build();
+                .url(fixture.protectedServer.url("/users/someone?email=someone@example.com").newBuilder()
+                        .username("user").password("pass").fragment("part").build()).build();
         try (Response response = ApproovService.getOkHttpClient().newCall(request).execute()) {
             fail("CLOSE_FAILURE must abort on REJECTED, got " + response.code());
         } catch (ApproovFetchStatusException e) {
-            assertEquals("Approov token fetch for " + request.url() + ": REJECTED", e.getMessage());
+            assertEquals("Approov token fetch for " + fixture.protectedServer.url("/users/someone") + ": REJECTED",
+                    e.getMessage());
         }
     }
 

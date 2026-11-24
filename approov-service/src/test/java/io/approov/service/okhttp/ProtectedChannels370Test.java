@@ -185,7 +185,7 @@ public class ProtectedChannels370Test {
             assertEquals(what + " " + status + ": " + e, expected, e.getClass());
             assertSame(Approov.TokenFetchStatus.valueOf(status),
                     ((ApproovFetchStatusException) e).getTokenFetchStatus());
-            assertEquals(what + " " + status, "Approov token fetch for " + request().url() + ": " + status,
+            assertEquals(what + " " + status, "Approov token fetch for " + request().url().newBuilder().query(null).build() + ": " + status,
                     e.getMessage());
         }
         assertEquals(what + " " + status + ": nothing sent", before, fixture.protectedServer.getRequestCount());
@@ -671,7 +671,8 @@ public class ProtectedChannels370Test {
 
     private void assertSecureStringFailureProceeds(String what, String status, boolean header,
             String tokenStatus) throws Exception {
-        String expected = status;
+        // UNKNOWN_KEY leaves the value as the app wrote it
+        String expected = "UNKNOWN_KEY".equals(status) ? PLACEHOLDER : status;
         fixture.protectedServer.enqueue(new MockResponse().setBody("ok"));
         HttpUrl.Builder url = fixture.protectedServer.url("/data").newBuilder();
         Request.Builder builder = new Request.Builder();

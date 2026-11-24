@@ -53,9 +53,10 @@ import okhttp3.mockwebserver.RecordedRequest;
  * On a request that may carry secure strings (token status
  * SUCCESS or UNPROTECTED_URL, https, not BAD_URL) a secure string fetch that fails
  * with a status the mutator lets continue replaces the placeholder with that
- * status, written as the SDK status name, keeping any required header prefix;
- * UNKNOWN_KEY included. The placeholder stays only where no secure string is
- * fetched. The token header still reports the token fetch only. A redirect to
+ * status, written as the SDK status name, keeping any required header prefix.
+ * UNKNOWN_KEY is the exception: the value is not a secure string key, so it is
+ * left as the app wrote it, as in 3.5.x. The placeholder stays only where no
+ * secure string is fetched. The token header still reports the token fetch only. A redirect to
  * another origin
  * restores the app's placeholder, and a refresh fetches the secure strings afresh
  * from the placeholders, never from the status the layer wrote.
@@ -74,7 +75,7 @@ public class SecureStringStatusEvidence370Test {
             {"POOR_NETWORK", "POOR_NETWORK"},
             {"NO_APPROOV_SERVICE", "NO_APPROOV_SERVICE"},
             {"INTERNAL_ERROR", "INTERNAL_ERROR"},
-            {"UNKNOWN_KEY", "UNKNOWN_KEY"}};
+            {"UNKNOWN_KEY", PLACEHOLDER}};
 
     // an SDK hook answering every secure string fetch with a fixed status and no value while one is set
     private static final class StatusSdk extends RecordingSdk {
@@ -176,8 +177,9 @@ public class SecureStringStatusEvidence370Test {
             for (Approov.TokenFetchStatus status : Approov.TokenFetchStatus.values()) {
                 if (status == Approov.TokenFetchStatus.SUCCESS)
                     continue;
-                assertCarries(String.valueOf(mutator), status.name(), ApproovService.statusName(
-                        result(status)));
+                String expected = status == Approov.TokenFetchStatus.UNKNOWN_KEY ? PLACEHOLDER
+                        : ApproovService.statusName(result(status));
+                assertCarries(String.valueOf(mutator), status.name(), expected);
                 assertEquals(status.name(), ApproovService.statusName(
                         result(status)));
             }
@@ -185,14 +187,26 @@ public class SecureStringStatusEvidence370Test {
     }
 
     @Test
-    public void aKeyTheSdkDoesNotHoldCarriesUnknownKey() throws Exception {
+    public void aValueThatIsNotAKeyIsLeftUntouched() throws Exception {
         // the mini SDK answers UNKNOWN_KEY itself for a key it does not hold
         start(null);
         sdk.status = null;
         RecordedRequest recorded = send(new Request.Builder().url(fixture.protectedServer.url("/data").newBuilder()
                 .addQueryParameter("key", "not-a-key").build()).header("Api-Key", "not-a-key").build());
-        assertEquals("UNKNOWN_KEY", recorded.getHeader("Api-Key"));
-        assertEquals("UNKNOWN_KEY", recorded.getRequestUrl().queryParameter("key"));
+        assertEquals("not-a-key", recorded.getHeader("Api-Key"));
+        assertEquals("not-a-key", recorded.getRequestUrl().queryParameter("key"));
+    }
+
+    @Test
+    public void anAppTokenOnASubstitutionHeaderIsLeftUntouched() throws Exception {
+        // an app that sends its own user token on a header it also uses for a secure string
+        start(null);
+        ApproovService.addSubstitutionHeader("Authorization", "Bearer ");
+        sdk.status = null;
+        RecordedRequest recorded = send(new Request.Builder().url(fixture.protectedServer.url("/data"))
+                .header("Authorization", "Bearer user-session-token").build());
+        assertEquals("Bearer user-session-token", recorded.getHeader("Authorization"));
+        assertFalse(recorded.getHeader("Approov-Token").isEmpty());
     }
 
     @Test
@@ -267,7 +281,7 @@ public class SecureStringStatusEvidence370Test {
             ApproovService.setServiceMutator(substitutionDecision(decision));
             assertCarries("custom " + decision, "REJECTED", "REJECTED");
             assertCarries("custom " + decision, "NO_NETWORK", "NO_NETWORK");
-            assertCarries("custom " + decision, "UNKNOWN_KEY", "UNKNOWN_KEY");
+            assertCarries("custom " + decision, "UNKNOWN_KEY", PLACEHOLDER);
         }
     }
 

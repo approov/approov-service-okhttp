@@ -100,4 +100,39 @@ public class ProtectedRequestReentry370Test {
         assertEquals("one signature", 1, again.getHeaders().values("Signature").size());
         assertEquals("one signature input", 1, again.getHeaders().values("Signature-Input").size());
     }
+
+    @Test
+    public void aRequestSentAgainWithAChangedURLKeepsItsSecret() throws Exception {
+        // an app that builds the next page from response.request() changes the URL, so the layer cannot
+        // restore the placeholder; the secret is then not a key and is left as it is, as in 3.5.x
+        fixture = new TwoOriginFixture(true, PLACEHOLDER, SECRET);
+        ApproovService.reset();
+        sdk = RecordingSdk.install();
+        fixture.initialize();
+        ApproovService.addSubstitutionQueryParam("key");
+        Interceptor nextPage = chain -> {
+            Response response = chain.proceed(chain.request());
+            if (response.code() != 401)
+                return response;
+            Request previous = response.request();
+            response.close();
+            return chain.proceed(previous.newBuilder()
+                    .url(previous.url().newBuilder().setQueryParameter("page", "2").build()).build());
+        };
+        ApproovService.setOkHttpClientBuilder(fixture.trustingBuilder().addInterceptor(nextPage));
+
+        fixture.protectedServer.enqueue(new MockResponse().setResponseCode(401));
+        fixture.protectedServer.enqueue(new MockResponse().setBody("ok"));
+        Request request = new Request.Builder()
+                .url(fixture.protectedServer.url("/data").newBuilder().addQueryParameter("key", PLACEHOLDER).build())
+                .build();
+        try (Response response = ApproovService.getOkHttpClient().newCall(request).execute()) {
+            assertEquals(200, response.code());
+        }
+
+        fixture.protectedServer.takeRequest(5, TimeUnit.SECONDS);
+        RecordedRequest again = fixture.protectedServer.takeRequest(5, TimeUnit.SECONDS);
+        assertEquals("2", again.getRequestUrl().queryParameter("page"));
+        assertEquals("the query keeps the secret", SECRET, again.getRequestUrl().queryParameter("key"));
+    }
 }

@@ -45,7 +45,10 @@ import okhttp3.HttpUrl;
 import okhttp3.Request;
 import okhttp3.RequestBody;
 import okio.Buffer;
+import okio.BufferedSink;
 import okio.ByteString;
+import okio.HashingSink;
+import okio.Okio;
 
 /**
  * ApproovDefaultMessageSigning is a service mutator that adds HTTP message signatures (RFC 9421) to the
@@ -692,26 +695,30 @@ public class ApproovDefaultMessageSigning implements ApproovServiceMutator {
                 }
             }
 
-            // grab the body data
-            final Buffer buffer = new Buffer();
-            try {
-                body.writeTo(buffer);
-            } catch (IOException e) {
-                // ignore bodies that can't be interrogated
-                return false;
-            }
-
-            // calculate the digest
-            ByteString digest;
+            // hash the body as it is written, into a sink that discards the bytes, so that the body is never
+            // held in memory
+            HashingSink hashingSink;
             switch (bodyDigestAlgorithm) {
                 case DIGEST_SHA256:
-                    digest = buffer.sha256();
+                    hashingSink = HashingSink.sha256(Okio.blackhole());
                     break;
                 case DIGEST_SHA512:
-                    digest = buffer.sha512();
+                    hashingSink = HashingSink.sha512(Okio.blackhole());
                     break;
                 default:
                     return false;
+            }
+            ByteString digest;
+            try (BufferedSink sink = Okio.buffer(hashingSink)) {
+                body.writeTo(sink);
+                sink.flush();
+                digest = hashingSink.hash();
+            } catch (IOException | RuntimeException e) {
+                // a body that fails while it is written gets no digest, which fails the request only if the
+                // digest is required; the exception is not logged as it may quote the body
+                ApproovLog.w(TAG, "Message signing: body digest not generated: the body failed while it was "
+                        + "written: " + e.getClass().getName());
+                return false;
             }
 
             // generate the header value

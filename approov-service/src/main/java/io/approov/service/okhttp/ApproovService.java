@@ -24,8 +24,6 @@ import androidx.annotation.VisibleForTesting;
 import com.criticalblue.approovsdk.Approov;
 
 import java.io.IOException;
-import java.lang.reflect.InvocationTargetException;
-import java.lang.reflect.Method;
 import java.security.cert.Certificate;
 import java.util.ArrayList;
 import java.util.Collections;
@@ -132,11 +130,6 @@ public class ApproovService {
 
     // set of URL regexs that should be excluded from any Approov protection, mapped to the compiled Pattern
     private static Map<String, Pattern> exclusionURLRegexs = new HashMap<>();
-
-    // Approov.getServerAdjustedCurrentTimeMS is not in every Approov SDK the package may run with, so it is
-    // looked up once by reflection and the device clock is used without it
-    // TODO call Approov.getServerAdjustedCurrentTimeMS() directly once the SDK dependency provides it
-    private static final Method SERVER_ADJUSTED_TIME = findServerAdjustedTime();
 
     /**
      * Construction is disallowed as this is a static only class.
@@ -1266,37 +1259,18 @@ public class ApproovService {
     }
 
     /**
-     * Looks up Approov.getServerAdjustedCurrentTimeMS in the Approov SDK the package runs with.
-     *
-     * @return the method, or null if the SDK does not provide it
-     */
-    private static Method findServerAdjustedTime() {
-        try {
-            return Approov.class.getMethod("getServerAdjustedCurrentTimeMS");
-        } catch (NoSuchMethodException e) {
-            return null;
-        }
-    }
-
-    /**
-     * Gets the server adjusted time from the Approov SDK, or the device clock if the SDK does not provide it.
+     * Gets the server adjusted time from the Approov SDK.
      *
      * @return the current time in milliseconds since the epoch, adjusted to the Approov servers' clock
-     * @throws RuntimeException as the SDK call throws it, such as an IllegalStateException before initialization
+     * @throws RuntimeException as the SDK call throws it, such as an IllegalStateException before
+     *         initialization, or an IllegalStateException if the Approov SDK the app runs with is older than
+     *         the one the package is built against and does not have the method
      */
     private static long sdkServerAdjustedTimeMS() {
-        if (SERVER_ADJUSTED_TIME == null)
-            return System.currentTimeMillis();
         try {
-            return (Long) SERVER_ADJUSTED_TIME.invoke(null);
-        } catch (InvocationTargetException e) {
-            // the SDK's own exception, as a direct call would throw it
-            Throwable cause = e.getCause();
-            if (cause instanceof RuntimeException)
-                throw (RuntimeException) cause;
-            throw new IllegalStateException(cause);
-        } catch (IllegalAccessException e) {
-            throw new IllegalStateException(e);
+            return Approov.getServerAdjustedCurrentTimeMS();
+        } catch (LinkageError e) {
+            throw new IllegalStateException("Approov SDK has no getServerAdjustedCurrentTimeMS", e);
         }
     }
 
@@ -2118,27 +2092,31 @@ class ApproovTokenInterceptor implements Interceptor {
 
     /**
      * Gets the value written in place of a placeholder whose secure string fetch failed while the request
-     * continues, which is the status name, such as "UNKNOWN_KEY". SUCCESS has
-     * none, as it substitutes the secure string.
+     * continues, which is the status name, such as "REJECTED". SUCCESS has none, as it substitutes the
+     * secure string. UNKNOWN_KEY has none either: the value is not a secure string key, so it is left as
+     * the app wrote it, as in 3.5.x.
      *
      * @param approovResults is the secure string fetch result
-     * @return the status to write in place of the placeholder, or null for SUCCESS
+     * @return the status to write in place of the placeholder, or null for SUCCESS and UNKNOWN_KEY
      */
     private static String failureStatusValue(Approov.TokenFetchResult approovResults) {
-        if (approovResults.getStatus() == Approov.TokenFetchStatus.SUCCESS)
+        Approov.TokenFetchStatus status = approovResults.getStatus();
+        if ((status == Approov.TokenFetchStatus.SUCCESS) || (status == Approov.TokenFetchStatus.UNKNOWN_KEY))
             return null;
         return ApproovService.statusName(approovResults);
     }
 
     /**
-     * Describes why a SUCCESS secure string fetch leaves the placeholder: the mutator declined it, or it
-     * accepted it but the SDK gave no secure string.
+     * Describes why a secure string fetch leaves the placeholder: the value is not a secure string key
+     * (UNKNOWN_KEY), the mutator declined a SUCCESS, or it accepted it but the SDK gave no secure string.
      *
      * @param substitute is the decision of the substitution hook
      * @param approovResults is the secure string fetch result
      * @return the reason for the log line
      */
     private static String placeholderLeftReason(boolean substitute, Approov.TokenFetchResult approovResults) {
+        if (approovResults.getStatus() == Approov.TokenFetchStatus.UNKNOWN_KEY)
+            return "value is not a secure string key";
         if (substitute)
             return "no secure string for " + approovResults.getStatus();
         return "secure string fetch status " + ApproovService.describeStatus(approovResults);
