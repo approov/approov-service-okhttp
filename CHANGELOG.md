@@ -16,7 +16,7 @@ Entries marked **Breaking** need a source change. See [Upgrading from 3.5.x](REA
 - The package depends on Approov SDK 3.7.0, where 3.5.x depended on 3.5.3.
 - A failed secure string fetch no longer fails the request. The status name replaces the placeholder, such as `X-Api-Key: REJECTED`, so a backend that checks the value must expect it. A value that is not a secure string key (`UNKNOWN_KEY`) is left as your app wrote it, as in 3.5.x. See [secure strings](ADVANCED.md#secure-strings).
 - A failed token fetch only affects requests to your Approov API domains, the hosts in your pin set. Requests to other hosts are sent unchanged.
-- A WebSocket upgrade request is sent untouched, with no Approov token, secure strings or signature. See [WebSockets](ADVANCED.md#websockets).
+- A WebSocket upgrade request is sent untouched, with no Approov token, secure strings or signature.
 - `getOkHttpClient()` no longer throws before `initialize`. Requests through that client go out without Approov protection until `initialize` is called.
 - `initialize` throws `IllegalArgumentException` for a null context, also in bypass mode (`""`).
 - An `ApproovException` that your own mutator throws, such as an `ApproovNetworkException`, reaches your app as a plain `ApproovException` with the original as its cause.

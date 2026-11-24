@@ -24,7 +24,7 @@ Some requests are never failed by a token fetch:
 * A token fetch failure for a host that is not one of your Approov API domains goes out unchanged. Your API domains are the keys of the SDK pin set, not counting the `*` key. If the pin set is empty or cannot be read, no host counts. No standard mutator aborts such a request. An exception raised there by the `CLOSE_FAILURE` decisions is ignored, even in a custom mutator that inherits or calls them. Only an exception your own mutator throws from `handleInterceptorFetchTokenResult` aborts it, which is an opt-in.
 * A request to an API you added with `-noApproovToken` (status `UNPROTECTED_URL`) gets its secure strings and its pins, but no Approov header.
 * A request to a host you have not added to Approov (status `UNKNOWN_URL`) is sent unchanged.
-* A WebSocket upgrade request (`Upgrade: websocket`) is sent untouched, with no token fetch, because OkHttp does not run the pinning interceptor for a WebSocket connection. See [WebSockets](ADVANCED.md#websockets).
+* A WebSocket upgrade request (`Upgrade: websocket`) is sent untouched, with no token fetch, because OkHttp does not run the pinning interceptor for a WebSocket connection.
 
 Whatever mutator is installed, these other exceptions can reach your code from a request:
 
@@ -300,7 +300,7 @@ ApproovService.setServiceMutator(ApproovServiceMutator.ALWAYS_PROCEED);
 ApproovService.setServiceMutator(ApproovServiceMutator.ALWAYS_PROCEED)
 ```
 
-A custom mutator gets the `CLOSE_FAILURE` decisions for every hook it does not override. To make one that never aborts, delegate the three interceptor decisions to `ALWAYS_PROCEED` (see [opting in to aborting requests](ADVANCED.md#opting-in-to-aborting-requests)).
+A custom mutator gets the `CLOSE_FAILURE` decisions for every hook it does not override. To make one that never aborts, delegate the three interceptor decisions to `ALWAYS_PROCEED` (see [service mutators](ADVANCED.md#service-mutators)).
 
 A custom mutator may choose to abort a request from any interceptor hook. To do so it throws an `ApproovException`. The request then fails with an `ApproovException` that names the hook, with yours as its cause. That is an explicit decision for you to make.
 
@@ -408,7 +408,7 @@ fun getTraceIDHeader(): String?
 ```
 
 ## setUseApproovStatusIfNoToken
-Sets whether a request that goes ahead without a token carries the token fetch status in the token header. See [sending the status in the token header](ADVANCED.md#sending-the-status-in-the-token-header).
+Sets whether a request that goes ahead without a token carries the token fetch status in the token header. See [what happens by default](ADVANCED.md#what-happens-by-default).
 
 * Off by default. A request that goes ahead after a failed token fetch then carries the token header with an empty token after any prefix.
 * With the flag on, the token header carries the SDK fetch status name after any prefix, unchanged, such as `NO_NETWORK`, `POOR_NETWORK`, `MITM_DETECTED`, `NO_APPROOV_SERVICE` or `REJECTED`. It always describes the token fetch, never a secure string fetch.
@@ -490,7 +490,7 @@ fun setBindingHeader(header: String)
 ```
 
 ## setStaleProtectionRefreshPeriod
-Sets how long, in milliseconds, a request can be held before it is sent until its Approov protection is refreshed. See [stale protection refresh](ADVANCED.md#stale-protection-refresh).
+Sets how long, in milliseconds, a request can be held before it is sent until its Approov protection is refreshed.
 
 A request can be held between having its Approov protection applied and actually being sent. This happens if the device goes into deep sleep or doze while the request is in flight, or if your app queues requests or backs off on its own. By the time the request is sent, the Approov token and any message signature may have expired. A message signature carries `created` and `expires` timestamps.
 
@@ -574,9 +574,9 @@ Adds the `key` of a query parameter whose value is replaced by a [secure string]
 * A cleartext (`http`) request, or one whose token fetch returned `BAD_URL`, keeps every placeholder under every mutator.
 * `initialize` removes every substitution query parameter, so call this after it.
 
-A redirect target URL is used exactly as the server sent it. Its query values are never looked up, even under a substitution query parameter. If the server echoes a secure string into it, the secure string is not changed back to the placeholder (see [ADVANCED.md](ADVANCED.md#redirects-to-another-origin)).
+A redirect target URL is used exactly as the server sent it. Its query values are never looked up, even under a substitution query parameter. If the server echoes a secure string into it, the secure string is not changed back to the placeholder.
 
-If your client has an OkHttp `Cache`, a response to a request whose query carries a substituted secure string is stored with the secret in its URL, unless the request says `Cache-Control: no-store` (see [ADVANCED.md](ADVANCED.md#secure-strings-and-the-okhttp-cache)).
+If your client has an OkHttp `Cache`, a response to a request whose query carries a substituted secure string is stored with the secret in its URL, unless the request says `Cache-Control: no-store`.
 
 > **Note**: The package inserts secure strings into the URL exactly as the Approov cloud returns them. It does **not** URL-encode them. A secure string that OkHttp would not carry unchanged (one with `&`, `#`, a tab, CR or LF) is not substituted. The placeholder stays and the request goes ahead. If your secure strings contain reserved characters, store them URL-encoded when you add them with the Approov CLI.
 
@@ -1026,7 +1026,7 @@ ApproovService.setServiceMutator(new ApproovDefaultMessageSigning().setDefaultFa
 
 Every request that carries the Approov token header is signed after all the other changes the package makes, so the signature covers what is sent. That includes a request to one of your Approov API domains that goes ahead after a failed token fetch, whose token header holds an empty token or the status. A request is signed again whenever its protection is reapplied: on a redirect within a protected domain, an authenticator retry or a stale protection refresh.
 
-Signing is off unless you install it. The signer makes the interface default decisions, the same as `CLOSE_FAILURE`. Installing another mutator, passing `null` to `setServiceMutator` or calling `initialize` removes it. To sign under other decisions, call it from your own mutator (see [signing with other decisions](ADVANCED.md#signing-with-other-decisions)).
+Signing is off unless you install it. The signer makes the interface default decisions, the same as `CLOSE_FAILURE`. Installing another mutator, passing `null` to `setServiceMutator` or calling `initialize` removes it. To sign under other decisions, call it from your own mutator (see [signing with other decisions](ADVANCED.md#message-signing)).
 
 A signature that cannot be produced is left out, and the request goes ahead with the other one, or unsigned. Only configuration errors fail the request: a required body digest that cannot be generated (an `ApproovException` whose cause is `RequiredBodyDigestException`), or an unsupported signature algorithm (`ApproovException` with the message `Message signing: unsupported algorithm identifier: <alg>`).
 
@@ -1035,7 +1035,7 @@ A signature that cannot be produced is left out, and the request goes ahead with
 | `ApproovDefaultMessageSigning()` | a signer with no factory, which signs nothing until you set one |
 | `ApproovDefaultMessageSigning setDefaultFactory(SignatureParametersFactory)` | the factory for every host without one of its own, or `null` to sign nothing for such hosts. Returns the signer |
 | `ApproovDefaultMessageSigning putHostFactory(String hostName, SignatureParametersFactory)` | the factory for one host, matched without regard to case and without the port. `null` removes it, so the default applies again. Returns the signer |
-| `protected SignatureParameters buildSignatureParameters(OkHttpComponentProvider, ApproovRequestMutations)` | The override point for choosing parameters per request. The default builds them with the factory for the request's host. Returning `null` leaves the request unsigned. Let a `RequiredBodyDigestException` from `super` propagate. See [choosing parameters per request](ADVANCED.md#choosing-parameters-per-request) |
+| `protected SignatureParameters buildSignatureParameters(OkHttpComponentProvider, ApproovRequestMutations)` | The override point for choosing parameters per request. The default builds them with the factory for the request's host. Returning `null` leaves the request unsigned. Let a `RequiredBodyDigestException` from `super` propagate. See [choosing parameters per request](ADVANCED.md#message-signing) |
 | `Request handleInterceptorProcessedRequest(Request, ApproovRequestMutations) throws ApproovException` | signs the request. A mutator that calls it from its own `handleInterceptorProcessedRequest` makes its changes first; a subclass that overrides it makes its changes, then calls `super` |
 | `boolean supportsProtectionRefresh()` | `true` |
 | `Request processedRequest(Request, ApproovRequestMutations) throws ApproovException` | deprecated; the same as `handleInterceptorProcessedRequest` |
