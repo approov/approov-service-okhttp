@@ -44,7 +44,7 @@ Whatever the attestation outcome, the package checks the TLS connection to each 
 
 ## What happens by default
 
-For every request it processes, the `ApproovService` interceptor fetches an Approov token for the request URL. It does not process a request before `initialize` or in [bypass mode](#bypass-initialization), a WebSocket upgrade, or a request to an [excluded URL](#excluding-urls). It then applies the decisions of the installed `ApproovServiceMutator`, which is an object with one method for each decision that the package makes. For example, one method decides whether a failed token fetch fails the request (see [Service mutators](#service-mutators)). The package provides three standard ones:
+For every request it processes, the `ApproovService` interceptor fetches an Approov token for the request URL. It does not process a request before `initialize` or in [bypass mode](#bypass-initialization), a WebSocket upgrade, or a request to an [excluded URL](#excluding-urls). It then applies the decisions of the installed [service mutator](#service-mutators). The package provides three standard ones:
 
 * `ApproovServiceMutator.CLOSE_FAILURE` keeps the 3.5.x token decisions for your API domains. A failed token fetch fails the request in the app, with the same `ApproovException` types as 3.5.x.
 * `ApproovServiceMutator.ALWAYS_PROCEED` never fails a request because of its token fetch. Whatever the token fetch outcome, the request is sent, and your backend decides. Your backend is then the enforcement point.
@@ -323,18 +323,11 @@ Gradle's `dependencies` task for your app module shows the OkHttp version it res
 
 ## Service mutators
 
-A service mutator is the object that holds the package's decisions, such as whether a failed token fetch fails the request.
-An `ApproovServiceMutator` holds your app's own policy, so you don't need to fork the package. The package asks the installed mutator at each decision point. Every method has a default, so override only what you need.
+A service mutator, an `ApproovServiceMutator`, is the object that holds the package's decisions, such as whether a failed token fetch fails the request. It has one method for each decision, and the package asks the installed mutator at each decision point. The standard mutators and their decisions are in [What happens by default](#what-happens-by-default).
 
-The default mutator is `DEFAULT`, which is `CLOSE_FAILURE` (see [What happens by default](#what-happens-by-default)).
+Write your own mutator when your app needs a decision that the standard ones do not make. You do not need to fork the package. Every method has a default, so override only what you need. A mutator of your own that should never abort a request delegates the token decisions to `ApproovServiceMutator.ALWAYS_PROCEED`. A mutator you install applies to requests processed after the call.
 
-Install a standard mutator to change the token fetch decisions, or your own when your app needs a decision the standard ones do not make. A custom mutator that should never abort a request delegates those decisions to `ApproovServiceMutator.ALWAYS_PROCEED`.
-
-```kotlin
-ApproovService.setServiceMutator(ApproovServiceMutator.ALWAYS_PROCEED)
-```
-
-The package's signer, `ApproovDefaultMessageSigning`, is itself a mutator. Installing another mutator removes it, so a mutator of your own that should also sign calls the signer from its `handleInterceptorProcessedRequest` (see [Message signing](#message-signing)). Each `initialize` that succeeds puts back `DEFAULT`. A mutator you install applies to requests processed after the call.
+The package's signer is also a mutator. To sign under decisions of your own, see [Message signing](#message-signing).
 
 The hooks:
 
