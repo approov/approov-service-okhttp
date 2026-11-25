@@ -19,18 +19,16 @@ package io.approov.service.okhttp;
 
 import com.criticalblue.approovsdk.Approov;
 
-/**
- * Exception raised when an Approov token fetch returns a status other than success.
- */
+// ApproovFetchStatusException is thrown if an Approov fetch returns a status other than success.
 public class ApproovFetchStatusException extends ApproovException {
-
+    // the fetch status returned by the Approov SDK, or null if not available
     private final Approov.TokenFetchStatus tokenFetchStatus;
 
     /**
-     * Constructs a token fetch status exception with the provided status.
+     * Constructs an exception due to an Approov fetch status.
      *
-     * @param status status returned by the Approov SDK, may be {@code null} if unavailable
-     * @param message information describing the exception cause
+     * @param status is the fetch status returned by the Approov SDK, or null if not available
+     * @param message is the basic information about the exception cause
      */
     public ApproovFetchStatusException(Approov.TokenFetchStatus status, String message) {
         super(message);
@@ -38,9 +36,9 @@ public class ApproovFetchStatusException extends ApproovException {
     }
 
     /**
-     * Retrieves the token fetch status associated with this exception.
+     * Gets the fetch status associated with this exception.
      *
-     * @return the status returned by the Approov SDK, or {@code null} if not provided
+     * @return the status returned by the Approov SDK, or null if not available
      */
     public Approov.TokenFetchStatus getTokenFetchStatus() {
         return tokenFetchStatus;

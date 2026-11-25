@@ -19,16 +19,46 @@ package io.approov.service.okhttp;
 
 import java.util.List;
 
-/**
- * ApproovRequestMutations stores information about changes made to a network request
- * during Approov processing, such as token headers, substituted headers, and query parameters.
- */
+// ApproovRequestMutations holds the changes made to a request by Approov, such as the token header and the
+// substituted headers and query parameters
 public class ApproovRequestMutations {
+    // the header carrying the Approov token, or null if none was added
     private String tokenHeaderKey;
+
+    // the prefix placed before the Approov token, or null if none
+    private String tokenHeaderPrefix;
+
+    // the header carrying the Approov TraceID, or null if none was added
     private String traceIDHeaderKey;
+
+    // the headers substituted with secure strings, or null if none
     private List<String> substitutionHeaderKeys;
+
+    // the URL before any query parameter substitution, or null if there was none
     private String originalURL;
+
+    // the query parameters substituted with secure strings, or null if none
     private List<String> substitutionQueryParamKeys;
+
+    /**
+     * Gets a copy of these mutations that is not changed by later calls to the setters of this object. The
+     * layer keeps such a copy of what it applied to a request, since the service mutator may change the
+     * object it is given.
+     *
+     * @return the copy of the mutations
+     */
+    ApproovRequestMutations copy() {
+        ApproovRequestMutations copy = new ApproovRequestMutations();
+        copy.tokenHeaderKey = tokenHeaderKey;
+        copy.tokenHeaderPrefix = tokenHeaderPrefix;
+        copy.traceIDHeaderKey = traceIDHeaderKey;
+        copy.substitutionHeaderKeys = (substitutionHeaderKeys != null)
+                ? new java.util.ArrayList<>(substitutionHeaderKeys) : null;
+        copy.originalURL = originalURL;
+        copy.substitutionQueryParamKeys = (substitutionQueryParamKeys != null)
+                ? new java.util.ArrayList<>(substitutionQueryParamKeys) : null;
+        return copy;
+    }
 
     /**
      * Gets the header key used for the Approov token.
@@ -42,17 +72,35 @@ public class ApproovRequestMutations {
     /**
      * Sets the header key used for the Approov token.
      *
-     * @param tokenHeaderKey the Approov token header key
+     * @param tokenHeaderKey is the Approov token header key
      */
     public void setTokenHeaderKey(String tokenHeaderKey) {
         this.tokenHeaderKey = tokenHeaderKey;
     }
 
     /**
+     * Gets the prefix placed before the Approov token in the token header, as configured when the request
+     * was processed.
+     *
+     * @return the token header prefix, or an empty string if there is none
+     */
+    public String getTokenHeaderPrefix() {
+        return (tokenHeaderPrefix != null) ? tokenHeaderPrefix : "";
+    }
+
+    /**
+     * Sets the prefix placed before the Approov token in the token header.
+     *
+     * @param tokenHeaderPrefix is the token header prefix
+     */
+    public void setTokenHeaderPrefix(String tokenHeaderPrefix) {
+        this.tokenHeaderPrefix = tokenHeaderPrefix;
+    }
+
+    /**
      * Gets the header key used for the optional Approov TraceID debug header.
      *
-     * @return the Approov TraceID header key. Null if the TraceID header was
-     *         not used.
+     * @return the Approov TraceID header key, or null if the TraceID header was not used
      */
     public String getTraceIDHeaderKey() {
         return traceIDHeaderKey;
@@ -61,14 +109,15 @@ public class ApproovRequestMutations {
     /**
      * Sets the header key used for the optional Approov TraceID debug header.
      *
-     * @param traceIDHeaderKey the Approov TraceID header key
+     * @param traceIDHeaderKey is the Approov TraceID header key
      */
     public void setTraceIDHeaderKey(String traceIDHeaderKey) {
         this.traceIDHeaderKey = traceIDHeaderKey;
     }
 
     /**
-     * Gets the list of headers that were substituted with secure strings.
+     * Gets the list of headers that were substituted with secure strings. A header whose secure string
+     * fetch failed, carrying the fetch status in place of its placeholder, is not listed.
      *
      * @return the list of substituted header keys
      */
@@ -79,23 +128,25 @@ public class ApproovRequestMutations {
     /**
      * Sets the list of headers that were substituted with secure strings.
      *
-     * @param substitutionHeaderKeys the list of substituted header keys
+     * @param substitutionHeaderKeys is the list of substituted header keys
      */
     public void setSubstitutionHeaderKeys(List<String> substitutionHeaderKeys) {
         this.substitutionHeaderKeys = substitutionHeaderKeys;
     }
 
     /**
-     * Gets the original URL before any query parameter substitutions.
+     * Gets the original URL before any query parameter substitutions, if a query parameter was substituted
+     * with a secure string.
      *
-     * @return the original URL
+     * @return the original URL, or null if no query parameter was substituted with a secure string
      */
     public String getOriginalURL() {
         return originalURL;
     }
 
     /**
-     * Gets the list of query parameter keys that were substituted with secure strings.
+     * Gets the list of query parameter keys that were substituted with secure strings. A query parameter
+     * whose secure string fetch failed, carrying the fetch status in place of its placeholder, is not listed.
      *
      * @return the list of substituted query parameter keys
      */
@@ -104,10 +155,10 @@ public class ApproovRequestMutations {
     }
 
     /**
-     * Sets the results of query parameter substitutions, including the original URL and the keys of substituted parameters.
+     * Sets the results of query parameter substitutions.
      *
-     * @param originalURL the original URL before substitutions
-     * @param substitutionQueryParamKeys the list of substituted query parameter keys
+     * @param originalURL is the original URL before substitutions
+     * @param substitutionQueryParamKeys is the list of substituted query parameter keys
      */
     public void setSubstitutionQueryParamResults(String originalURL, List<String> substitutionQueryParamKeys) {
         this.originalURL = originalURL;

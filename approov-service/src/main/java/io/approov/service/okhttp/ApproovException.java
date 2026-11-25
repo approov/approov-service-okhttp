@@ -19,37 +19,32 @@ package io.approov.service.okhttp;
 
 import java.io.IOException;
 
-/**
- * Base exception indicating an error while using the Approov SDK.
- * <p>
- * For token fetch failures prefer using {@link ApproovFetchStatusException}, which preserves the
- * {@link com.criticalblue.approovsdk.Approov.TokenFetchStatus} reported by the SDK.
- */
+// ApproovException is thrown if there is an error from Approov.
 public class ApproovException extends IOException {
 
     /**
      * Constructs an exception due to an Approov error.
      *
-     * @param message information describing the exception cause
+     * @param message is the basic information about the exception cause
      */
     public ApproovException(String message) {
         super(message);
     }
 
     /**
-     * Constructs an exception with an underlying cause.
+     * Constructs an exception due to an Approov error with an underlying cause.
      *
-     * @param message information describing the exception cause
-     * @param cause underlying cause of the exception
+     * @param message is the basic information about the exception cause
+     * @param cause is the underlying cause of the exception
      */
     public ApproovException(String message, Throwable cause) {
         super(message, cause);
     }
 
     /**
-     * Constructs an exception with an underlying cause, using the cause message when available.
+     * Constructs an exception wrapping an underlying cause, using its class name and message.
      *
-     * @param cause underlying cause of the exception
+     * @param cause is the underlying cause of the exception
      */
     public ApproovException(Throwable cause) {
         super("Wrapped " + cause.getClass().getName() + ": " + cause.getMessage(), cause);

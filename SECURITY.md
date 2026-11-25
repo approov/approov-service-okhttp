@@ -3,10 +3,11 @@
 ## Supported Versions
 
 We maintain updates and patches in the latest release. Earlier versions will still work, but will have fewer features than later versions. 
-We encourage all users of these service layers to update to the latest version for the best experience.
+We encourage all users of this package to update to the latest version for the best experience.
 
 | Version | Supported          |
 | ------- | ------------------ |
+| 3.7.x   | :white_check_mark: |
 | 3.5.x   | :white_check_mark: |
 | < 3.5   | :x:                |
 

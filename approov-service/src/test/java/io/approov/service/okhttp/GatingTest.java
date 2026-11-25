@@ -28,12 +28,10 @@ public class GatingTest {
 
     @Test
     public void testGetOkHttpClientBeforeInitialization() {
-        try {
-            ApproovService.getOkHttpClient();
-            fail("Expected IllegalStateException but none was thrown");
-        } catch (IllegalStateException e) {
-            assertEquals("getOkHttpClient: SDK not initialized", e.getMessage());
-        }
+        // the client is available before initialize and its
+        // requests go out without Approov processing until protection is enabled
+        assertNotNull(ApproovService.getOkHttpClient());
+        assertSame(ApproovService.getOkHttpClient(), ApproovService.getOkHttpClient());
     }
 
     @Test
@@ -45,32 +43,32 @@ public class GatingTest {
     @Test
     public void testInitializationWithEmptyConfigAndNullComment() {
         ApproovService.initialize(ApplicationProvider.getApplicationContext(), "", null);
-        assertTrue(ApproovService.isInitialized());
-        assertFalse(ApproovService.isApproovEnabled());
+        assertTrue(ApproovService.isApproovServiceEnabled());
+        assertFalse(ApproovService.isApproovProtectionEnabled());
     }
 
     @Test
     public void testGetMethodsBeforeInitialization() {
-        try {
-            ApproovService.getSubstitutionHeaders();
-            fail("Expected IllegalStateException for getSubstitutionHeaders");
-        } catch (IllegalStateException e) {
-            assertEquals("ApproovService is not initialized", e.getMessage());
+        // the substitution and exclusion maps cannot be read before initialize, as initialize resets them
+        for (Runnable getter : new Runnable[] {ApproovService::getSubstitutionHeaders,
+                ApproovService::getSubstitutionQueryParams, ApproovService::getExclusionURLRegexs}) {
+            try {
+                getter.run();
+                fail("Expected IllegalStateException before initialize");
+            } catch (IllegalStateException e) {
+                assertEquals("ApproovService is not initialized", e.getMessage());
+            }
         }
-
-        try {
-            ApproovService.getSubstitutionQueryParams();
-            fail("Expected IllegalStateException for getSubstitutionQueryParams");
-        } catch (IllegalStateException e) {
-            assertEquals("ApproovService is not initialized", e.getMessage());
-        }
-
-        try {
-            ApproovService.getExclusionURLRegexs();
-            fail("Expected IllegalStateException for getExclusionURLRegexs");
-        } catch (IllegalStateException e) {
-            assertEquals("ApproovService is not initialized", e.getMessage());
-        }
+        ApproovService.initialize(ApplicationProvider.getApplicationContext(), "");
+        assertTrue(ApproovService.getSubstitutionHeaders().isEmpty());
+        assertTrue(ApproovService.getSubstitutionQueryParams().isEmpty());
+        assertTrue(ApproovService.getExclusionURLRegexs().isEmpty());
+        ApproovService.addSubstitutionHeader("Api-Key", null);
+        ApproovService.addSubstitutionQueryParam("api_key");
+        ApproovService.addExclusionURLRegex("^https://excluded\\.example\\.com/");
+        assertEquals(1, ApproovService.getSubstitutionHeaders().size());
+        assertEquals(1, ApproovService.getSubstitutionQueryParams().size());
+        assertEquals(1, ApproovService.getExclusionURLRegexs().size());
     }
 }
 

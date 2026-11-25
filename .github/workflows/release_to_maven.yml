@@ -123,8 +123,15 @@ jobs:
           fi
           printf 'trust\n5\ny\nquit\n' | gpg --batch --yes --command-fd 0 --edit-key "$KEY_ID"
 
+      # development and tests may run on an older Approov SDK, but a release must depend on the SDK it was built for
+      - name: Verify Approov SDK dependency
+        run: ./gradlew verifyReleaseSdkVersion -PapproovServiceVersion="$CURRENT_TAG"
+
       - name: Build AAR
         run: ./gradlew assembleRelease -PapproovServiceVersion="$CURRENT_TAG"
+
+      - name: Verify AAR contents and published POM
+        run: ./gradlew verifyReleaseAar verifyPublishedPom -PapproovServiceVersion="$CURRENT_TAG"
 
       - name: Create Package
         working-directory: .maven
