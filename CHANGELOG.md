@@ -9,7 +9,7 @@ The format is based on Keep a Changelog and this project adheres to Semantic Ver
 ### Added
 - `ApproovDefaultMessageSigning(ApproovServiceMutator decisions)` signs requests under the decisions of any mutator, for example `new ApproovDefaultMessageSigning(ApproovServiceMutator.ALWAYS_PROCEED)`. See [message signing](ADVANCED.md#message-signing).
 
-## [3.7.0] - 2026-11-02
+## [3.7.0] - 2026-11-25
 
 Entries marked **Breaking** need a source change. See [Upgrading from 3.5.x](README.md#upgrading-from-35x).
 
