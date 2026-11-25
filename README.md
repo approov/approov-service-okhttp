@@ -33,9 +33,12 @@ Make sure `mavenCentral()` is in your repositories. Then add the package to your
 
 ```groovy
 implementation("io.approov:service.okhttp:3.7.1")
+implementation("com.squareup.okhttp3:okhttp:5.3.2")
 ```
 
-The package supports Android 6.0 (API level 23) and later. It brings in OkHttp 5.3.2, and also works if your app stays on OkHttp 4.12 or later. OkHttp 3.x is not supported. If your app compiles Kotlin, it needs Kotlin 2.1 or later. See [OkHttp version](ADVANCED.md#okhttp-version).
+Your app uses OkHttp types, such as `OkHttpClient`, so declare OkHttp in your app too. Gradle uses the highest OkHttp version that anything in your app asks for.
+
+The package supports Android 6.0 (API level 23) and later. It works with OkHttp 5.3.2 or later, and also if your app stays on OkHttp 4.12 or later. OkHttp 3.x is not supported. If your app compiles Kotlin, it needs Kotlin 2.1 or later. See [OkHttp version](ADVANCED.md#okhttp-version).
 
 Add these permissions to your app manifest:
 
@@ -43,6 +46,8 @@ Add these permissions to your app manifest:
 <uses-permission android:name="android.permission.ACCESS_NETWORK_STATE" />
 <uses-permission android:name="android.permission.INTERNET" />
 ```
+
+If the manifest merge reports a conflict on `application@label`, add `tools:replace="android:label"` to your `<application>` element. The `tools` prefix needs `xmlns:tools="http://schemas.android.com/tools"` on the `<manifest>` element.
 
 Next, [initialize the package](#initializing).
 
