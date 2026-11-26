@@ -32,7 +32,7 @@ The [Approov documentation for this package](https://docs.approov.io/app-integra
 Make sure `mavenCentral()` is in your repositories. Then add the package to your app's Gradle dependencies:
 
 ```groovy
-implementation("io.approov:service.okhttp:3.7.0")
+implementation("io.approov:service.okhttp:3.7.1")
 implementation("com.squareup.okhttp3:okhttp:5.3.2")
 ```
 
