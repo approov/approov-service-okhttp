@@ -36,6 +36,7 @@ import java.util.List;
 import java.util.Locale;
 import java.util.Map;
 import java.util.concurrent.ConcurrentHashMap;
+import java.util.concurrent.atomic.AtomicBoolean;
 
 import io.approov.util.okhttp.http.sfv.ByteSequenceItem;
 import io.approov.util.okhttp.http.sfv.Dictionary;
@@ -100,6 +101,19 @@ public class ApproovDefaultMessageSigning implements ApproovServiceMutator {
     // factories for individual hosts, keyed by the lowercase host name without any port; protected so that
     // subclasses can read and change them
     protected final Map<String, SignatureParametersFactory> hostFactories = new ConcurrentHashMap<>();
+
+    // true once a missing install signature, a missing account signature, and a request left unsigned for
+    // want of any signature have been logged at a visible level, after which they are logged at debug level
+    private static final AtomicBoolean installMissingLogged = new AtomicBoolean();
+    private static final AtomicBoolean accountMissingLogged = new AtomicBoolean();
+    private static final AtomicBoolean unsignedLogged = new AtomicBoolean();
+
+    // clears the once per process flags of the missing signature logs
+    static void resetMissingSignatureLogsForTesting() {
+        installMissingLogged.set(false);
+        accountMissingLogged.set(false);
+        unsignedLogged.set(false);
+    }
 
     // the mutator whose decisions the signer makes, or null for the interface default decisions
     private final ApproovServiceMutator decisions;
@@ -426,6 +440,8 @@ public class ApproovDefaultMessageSigning implements ApproovServiceMutator {
         Map<String, ListElement<?>> signatures = new LinkedHashMap<>();
         Map<String, ListElement<?>> signatureInputs = new LinkedHashMap<>();
         Map<String, String> messages = new LinkedHashMap<>();
+        // the reason each signature that could not be produced is missing, by signature identifier
+        Map<String, String> missing = new LinkedHashMap<>();
         for (String alg : algs) {
             SignatureParameters algParams = new SignatureParameters(params).setAlg(alg);
             // apply the params to get the message, leaving the request unsigned if this fails; WARNING never
@@ -438,10 +454,10 @@ public class ApproovDefaultMessageSigning implements ApproovServiceMutator {
                 return request;
             }
             String sigId = ALG_ES256.equals(alg) ? SIG_ID_INSTALL : SIG_ID_ACCOUNT;
-            byte[] signature = ALG_ES256.equals(alg) ? installSignature(message) : accountSignature(message);
+            byte[] signature = ALG_ES256.equals(alg) ? installSignature(message, missing)
+                    : accountSignature(message, missing);
             if (signature == null) {
                 // this signature could not be produced so we proceed with any other
-                ApproovLog.e(TAG, "Message signing: skipping the " + sigId + " signature");
                 continue;
             }
             signatures.put(sigId, ByteSequenceItem.valueOf(signature));
@@ -449,8 +465,23 @@ public class ApproovDefaultMessageSigning implements ApproovServiceMutator {
             messages.put(sigId, message);
         }
         if (signatures.isEmpty()) {
-            ApproovLog.e(TAG, "Message signing: no signature produced, proceeding unsigned");
+            StringBuilder line = new StringBuilder("Message signing: no signature produced, proceeding unsigned");
+            for (Map.Entry<String, String> entry : missing.entrySet())
+                line.append(": ").append(entry.getKey()).append(" signature ").append(entry.getValue());
+            if (unsignedLogged.compareAndSet(false, true))
+                ApproovLog.e(TAG, line.toString());
+            else
+                ApproovLog.d(TAG, line.toString());
             return request;
+        }
+        for (Map.Entry<String, String> entry : missing.entrySet()) {
+            String line = "Message signing: " + entry.getKey() + " signature " + entry.getValue()
+                    + ", signed without it";
+            AtomicBoolean logged = SIG_ID_INSTALL.equals(entry.getKey()) ? installMissingLogged : accountMissingLogged;
+            if (logged.compareAndSet(false, true))
+                ApproovLog.w(TAG, line);
+            else
+                ApproovLog.d(TAG, line);
         }
 
         // each signature is a Byte Sequence member of the same Signature and Signature-Input dictionaries,
@@ -486,32 +517,33 @@ public class ApproovDefaultMessageSigning implements ApproovServiceMutator {
      * ecdsa-p256-sha256 requires.
      *
      * @param message is the signature base
+     * @param missing receives the reason if the signature is not available
      * @return the signature bytes, or null if not available
      */
-    private static byte[] installSignature(String message) {
+    private static byte[] installSignature(String message, Map<String, String> missing) {
         String base64;
         try {
             base64 = ApproovService.getInstallMessageSignature(message);
         } catch (ApproovException e) {
-            ApproovLog.e(TAG, "Message signing: install signature unavailable: " + e);
+            missing.put(SIG_ID_INSTALL, "unavailable: " + e);
             return null;
         }
         if (base64.isEmpty()) {
-            ApproovLog.e(TAG, "Message signing: install signature unavailable");
+            missing.put(SIG_ID_INSTALL, "unavailable");
             return null;
         }
         byte[] signature;
         try {
             signature = Base64.decode(base64, Base64.NO_WRAP);
         } catch (Exception e) {
-            ApproovLog.e(TAG, "Message signing: install signature not base64: " + e);
+            missing.put(SIG_ID_INSTALL, "not base64: " + e);
             return null;
         }
         // decode the signature from ASN.1 DER format
         try {
             return es256DerToRaw(signature);
         } catch (Exception e) {
-            ApproovLog.e(TAG, "Message signing: install signature not ASN.1 DER ES256: " + e);
+            missing.put(SIG_ID_INSTALL, "not ASN.1 DER ES256: " + e);
             return null;
         }
     }
@@ -544,24 +576,25 @@ public class ApproovDefaultMessageSigning implements ApproovServiceMutator {
      * account key is only delivered on a successful attestation.
      *
      * @param message is the signature base
+     * @param missing receives the reason if the signature is not available
      * @return the signature bytes, or null if not available
      */
-    private static byte[] accountSignature(String message) {
+    private static byte[] accountSignature(String message, Map<String, String> missing) {
         String base64;
         try {
             base64 = ApproovService.getAccountMessageSignature(message);
         } catch (ApproovException e) {
-            ApproovLog.e(TAG, "Message signing: account signature unavailable: " + e);
+            missing.put(SIG_ID_ACCOUNT, "unavailable: " + e);
             return null;
         }
         if (base64.isEmpty()) {
-            ApproovLog.e(TAG, "Message signing: account signature unavailable");
+            missing.put(SIG_ID_ACCOUNT, "unavailable");
             return null;
         }
         try {
             return Base64.decode(base64, Base64.NO_WRAP);
         } catch (Exception e) {
-            ApproovLog.e(TAG, "Message signing: account signature not base64: " + e);
+            missing.put(SIG_ID_ACCOUNT, "not base64: " + e);
             return null;
         }
     }
