@@ -19,6 +19,8 @@ package io.approov.service.okhttp;
 
 import android.util.Base64;
 
+import com.criticalblue.approovsdk.Approov;
+
 import io.approov.util.okhttp.tink.subtle.EllipticCurves;
 
 import java.io.IOException;
@@ -99,16 +101,98 @@ public class ApproovDefaultMessageSigning implements ApproovServiceMutator {
     // subclasses can read and change them
     protected final Map<String, SignatureParametersFactory> hostFactories = new ConcurrentHashMap<>();
 
+    // the mutator whose decisions the signer makes, or null for the interface default decisions
+    private final ApproovServiceMutator decisions;
+
     /**
      * Constructs a message signing service mutator with no factory, so that nothing is signed until a
      * default factory or a host factory is set. Install it with ApproovService.setServiceMutator.
      */
     public ApproovDefaultMessageSigning() {
+        decisions = null;
+    }
+
+    /**
+     * Constructs a message signing service mutator with no factory that makes the decisions of another
+     * mutator, such as ApproovServiceMutator.ALWAYS_PROCEED or your own. Every decision hook calls the hook of
+     * that mutator. The processed request hook calls the processed request hook of that mutator first and
+     * then signs the result, so that the signature covers any change that mutator makes. Nothing is signed
+     * until a default factory or a host factory is set. Apps use combined(ApproovServiceMutator) to get a
+     * signer.
+     *
+     * @param decisions is the mutator whose decisions are to be made
+     * @throws IllegalArgumentException if decisions is null
+     */
+    ApproovDefaultMessageSigning(ApproovServiceMutator decisions) {
+        if (decisions == null)
+            throw new IllegalArgumentException("decisions must not be null");
+        this.decisions = decisions;
     }
 
     @Override
     public String toString() {
-        return "ApproovDefaultMessageSigning";
+        if (decisions == null)
+            return "ApproovDefaultMessageSigning";
+        return "ApproovDefaultMessageSigning(" + ApproovService.describe(decisions) + ")";
+    }
+
+    /**
+     * Gets the mutator whose decisions the signer makes.
+     *
+     * @return the mutator given to the constructor, or CLOSE_FAILURE, whose decisions are the interface
+     * defaults, for the signer constructed with no argument
+     */
+    private ApproovServiceMutator decisions() {
+        return (decisions != null) ? decisions : ApproovServiceMutator.CLOSE_FAILURE;
+    }
+
+    @Override
+    public void handlePrecheckResult(Approov.TokenFetchResult approovResults) throws ApproovException {
+        decisions().handlePrecheckResult(approovResults);
+    }
+
+    @Override
+    public void handleFetchTokenResult(Approov.TokenFetchResult approovResults) throws ApproovException {
+        decisions().handleFetchTokenResult(approovResults);
+    }
+
+    @Override
+    public void handleFetchSecureStringResult(Approov.TokenFetchResult approovResults, String operation, String key)
+            throws ApproovException {
+        decisions().handleFetchSecureStringResult(approovResults, operation, key);
+    }
+
+    @Override
+    public void handleFetchCustomJWTResult(Approov.TokenFetchResult approovResults) throws ApproovException {
+        decisions().handleFetchCustomJWTResult(approovResults);
+    }
+
+    @Override
+    public boolean handleInterceptorShouldProcessRequest(Request request) throws ApproovException {
+        return decisions().handleInterceptorShouldProcessRequest(request);
+    }
+
+    @Override
+    public boolean handleInterceptorFetchTokenResult(Approov.TokenFetchResult approovResults, String url)
+            throws ApproovException {
+        return decisions().handleInterceptorFetchTokenResult(approovResults, url);
+    }
+
+    @Override
+    public boolean handleInterceptorHeaderSubstitutionResult(Approov.TokenFetchResult approovResults, String header)
+            throws ApproovException {
+        return decisions().handleInterceptorHeaderSubstitutionResult(approovResults, header);
+    }
+
+    @Override
+    public boolean handleInterceptorQueryParamSubstitutionResult(Approov.TokenFetchResult approovResults,
+            String queryKey) throws ApproovException {
+        return decisions().handleInterceptorQueryParamSubstitutionResult(approovResults, queryKey);
+    }
+
+    @Override
+    public boolean handlePinningShouldProcessRequest(Request request) {
+        return decisions().handlePinningShouldProcessRequest(request);
     }
 
     /**
@@ -167,19 +251,28 @@ public class ApproovDefaultMessageSigning implements ApproovServiceMutator {
     /**
      * Signs the request, if it carries the Approov token header, with the signatures configured for its
      * host. This is called by the interceptor after all the other changes Approov makes to the request, and
-     * again whenever its protection is refreshed.
+     * again whenever its protection is refreshed. The processed request hook of the mutator whose decisions
+     * the signer makes is called first, so that the signature covers any change it makes.
      *
      * @param request is the request to sign
      * @param changes is the mutations applied to the request by Approov
-     * @return the signed request, or the request unchanged if it is not signed
+     * @return the signed request, or the request as the decisions left it if it is not signed
      * @throws ApproovException if a body digest configured as required cannot be generated, with the
-     * RequiredBodyDigestException as its cause, or a configured signature algorithm is not supported
+     * RequiredBodyDigestException as its cause, or a configured signature algorithm is not supported, or the
+     * processed request hook of the decisions throws one
      */
     @Override
     public Request handleInterceptorProcessedRequest(Request request, ApproovRequestMutations changes)
             throws ApproovException {
+        // the decisions make their changes before signing, and an exception they throw is theirs rather than a
+        // signing decision, so it is called outside the try below
+        Request processed = decisions().handleInterceptorProcessedRequest(request, changes);
+        if (processed == null) {
+            // the interceptor reports a null result as a failure of this hook
+            return null;
+        }
         try {
-            return sign(request, changes);
+            return sign(processed, changes);
         } catch (ApproovException e) {
             // the signing decisions keep their own type rather than being reported as a failing mutator hook
             throw ApproovService.standardDecision(e);
