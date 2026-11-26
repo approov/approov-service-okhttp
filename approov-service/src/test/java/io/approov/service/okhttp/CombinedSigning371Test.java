@@ -18,12 +18,15 @@ package io.approov.service.okhttp;
 
 import static org.junit.Assert.assertEquals;
 import static org.junit.Assert.assertFalse;
+import static org.junit.Assert.assertNotNull;
+import static org.junit.Assert.assertNotSame;
 import static org.junit.Assert.assertNull;
 import static org.junit.Assert.assertSame;
 import static org.junit.Assert.assertTrue;
 import static org.junit.Assert.fail;
 
 import com.criticalblue.approovsdk.Approov;
+import com.criticalblue.minisdk.testing.AttesterProxyController;
 
 import org.junit.After;
 import org.junit.Test;
@@ -39,8 +42,12 @@ import java.util.Collections;
 import java.util.List;
 import java.util.Set;
 import java.util.TreeSet;
+import java.util.concurrent.TimeUnit;
 
 import okhttp3.Request;
+import okhttp3.Response;
+import okhttp3.mockwebserver.MockResponse;
+import okhttp3.mockwebserver.RecordedRequest;
 
 /**
  * The signer makes the decisions of another mutator: every decision hook calls the hook of that mutator, and
@@ -270,5 +277,65 @@ public class CombinedSigning371Test {
         assertTrue(plain.handleInterceptorFetchTokenResult(success, "https://localhost/data"));
         plain.handlePrecheckResult(success);
         assertEquals("ApproovDefaultMessageSigning", plain.toString());
+    }
+
+    // a NO_NETWORK token fetch result from the SDK
+    private static Approov.TokenFetchResult noNetwork() {
+        AttesterProxyController.setNextAttestationDirectiveJson(
+                "{\"operation\": \"fetchApproovToken\", \"response\": {\"status\": \"NO_NETWORK\"}}");
+        Approov.TokenFetchResult result = Approov.fetchApproovTokenAndWait("https://localhost/data");
+        assertSame("control: a NO_NETWORK result", Approov.TokenFetchStatus.NO_NETWORK, result.getStatus());
+        return result;
+    }
+
+    // the result of the token decision of the signer for a failed fetch, true if the request proceeds
+    private static boolean proceedsOnNoNetwork(ApproovDefaultMessageSigning signer) {
+        try {
+            return signer.handleInterceptorFetchTokenResult(noNetwork(), "https://localhost/data");
+        } catch (ApproovException e) {
+            return false;
+        }
+    }
+
+    @Test
+    public void combinedMakesTheDecisionsGiven() throws Exception {
+        start();
+        assertTrue(proceedsOnNoNetwork(ApproovDefaultMessageSigning.combined(ApproovServiceMutator.ALWAYS_PROCEED)));
+        assertFalse(proceedsOnNoNetwork(ApproovDefaultMessageSigning.combined(ApproovServiceMutator.CLOSE_FAILURE)));
+        assertFalse("the DEFAULT decisions", proceedsOnNoNetwork(ApproovDefaultMessageSigning.combined()));
+    }
+
+    @Test
+    public void combinedRejectsNullDecisions() {
+        try {
+            ApproovDefaultMessageSigning.combined(null);
+            fail("null decisions must be rejected");
+        } catch (IllegalArgumentException e) {
+            assertTrue(e.getMessage(), e.getMessage().contains("decisions"));
+        }
+    }
+
+    @Test
+    public void combinedReturnsANewSignerEachTime() {
+        assertNotSame(ApproovDefaultMessageSigning.combined(), ApproovDefaultMessageSigning.combined());
+    }
+
+    @Test
+    public void combinedSignsWithBothTheInstallAndTheAccountSignature() throws Exception {
+        start();
+        ApproovService.setServiceMutator(ApproovDefaultMessageSigning.combined());
+        ApproovService.setOkHttpClientBuilder(fixture.trustingBuilder());
+        fixture.protectedServer.enqueue(new MockResponse().setBody("ok"));
+        try (Response response = ApproovService.getOkHttpClient().newCall(request("/data")).execute()) {
+            assertEquals(200, response.code());
+        }
+        RecordedRequest recorded = fixture.protectedServer.takeRequest(5, TimeUnit.SECONDS);
+        assertNotNull(recorded);
+        String input = recorded.getHeader("Signature-Input");
+        String signature = recorded.getHeader("Signature");
+        assertNotNull(input);
+        assertNotNull(signature);
+        assertTrue(input, input.contains("install=(") && input.contains("account=("));
+        assertTrue(signature, signature.contains("install=:") && signature.contains("account=:"));
     }
 }

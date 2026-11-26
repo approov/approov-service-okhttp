@@ -129,6 +129,32 @@ public class ApproovDefaultMessageSigning implements ApproovServiceMutator {
         this.decisions = decisions;
     }
 
+    /**
+     * Gets a new message signing service mutator that adds both the install and the account signature to
+     * every request carrying the Approov token header, and makes the decisions of the given mutator, such as
+     * ApproovServiceMutator.CLOSE_FAILURE, ApproovServiceMutator.ALWAYS_PROCEED or your own. A signature that
+     * cannot be produced is left out and the request goes ahead with the other one, or unsigned. Install it
+     * with ApproovService.setServiceMutator.
+     *
+     * @param decisions is the mutator whose decisions are to be made
+     * @return a new signer with the default factory set to sign with both signatures
+     * @throws IllegalArgumentException if decisions is null
+     */
+    public static ApproovDefaultMessageSigning combined(ApproovServiceMutator decisions) {
+        return new ApproovDefaultMessageSigning(decisions).setDefaultFactory(
+                generateDefaultSignatureParametersFactory().setUseInstallAndAccountMessageSigning());
+    }
+
+    /**
+     * Gets a new message signing service mutator that adds both the install and the account signature and
+     * makes the ApproovServiceMutator.DEFAULT decisions. See combined(ApproovServiceMutator).
+     *
+     * @return a new signer with the default factory set to sign with both signatures
+     */
+    public static ApproovDefaultMessageSigning combined() {
+        return combined(ApproovServiceMutator.DEFAULT);
+    }
+
     @Override
     public String toString() {
         if (decisions == null)
