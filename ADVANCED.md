@@ -167,7 +167,7 @@ Your backend verifies the signatures as [Installation Message Signing](https://d
 
 ### Sign with other decisions
 
-`ApproovDefaultMessageSigning.combined(decisions)` returns a signer that adds both the install and the account signature. It makes the decisions of `decisions`: `ApproovServiceMutator.CLOSE_FAILURE`, `ALWAYS_PROCEED`, `DEFAULT` or a mutator of your own. `combined()` uses `ApproovServiceMutator.DEFAULT`, the same as `CLOSE_FAILURE`. If `decisions` is `null`, the call throws `IllegalArgumentException`. A signature that cannot be produced is left out, and the request goes ahead with the other signature or unsigned. Each call returns a new `ApproovDefaultMessageSigning`, so `setDefaultFactory` and `putHostFactory` on it change only that signer.
+`ApproovDefaultMessageSigning.combined(decisions)` returns a signer that adds both the install and the account signature. It makes the decisions of `decisions`: `ApproovServiceMutator.CLOSE_FAILURE`, `ALWAYS_PROCEED`, `DEFAULT` or a mutator of your own. `combined()` uses `ApproovServiceMutator.DEFAULT`, the same as `CLOSE_FAILURE`. If `decisions` is `null`, the call throws `IllegalArgumentException`. A signature that cannot be produced is left out, and the request goes ahead with the other signature or unsigned. Your backend can check the install signature only if the Approov token carries the install public key. Turn that on for your account with `approov policy -setInstallPubKey on` (see [installation message signing](https://docs.approov.io/operations/message-signing/installation/)). Each call returns a new `ApproovDefaultMessageSigning`, so `setDefaultFactory` and `putHostFactory` on it change only that signer.
 
 ```kotlin
 ApproovService.setServiceMutator(
