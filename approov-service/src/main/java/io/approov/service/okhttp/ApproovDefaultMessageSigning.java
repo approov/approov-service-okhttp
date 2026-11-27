@@ -19,6 +19,8 @@ package io.approov.service.okhttp;
 
 import android.util.Base64;
 
+import com.criticalblue.approovsdk.Approov;
+
 import io.approov.util.okhttp.tink.subtle.EllipticCurves;
 
 import java.io.IOException;
@@ -34,6 +36,7 @@ import java.util.List;
 import java.util.Locale;
 import java.util.Map;
 import java.util.concurrent.ConcurrentHashMap;
+import java.util.concurrent.atomic.AtomicBoolean;
 
 import io.approov.util.okhttp.http.sfv.ByteSequenceItem;
 import io.approov.util.okhttp.http.sfv.Dictionary;
@@ -99,16 +102,137 @@ public class ApproovDefaultMessageSigning implements ApproovServiceMutator {
     // subclasses can read and change them
     protected final Map<String, SignatureParametersFactory> hostFactories = new ConcurrentHashMap<>();
 
+    // true once a missing install signature, a missing account signature, and a request left unsigned for
+    // want of any signature have been logged at a visible level, after which they are logged at debug level
+    private static final AtomicBoolean installMissingLogged = new AtomicBoolean();
+    private static final AtomicBoolean accountMissingLogged = new AtomicBoolean();
+    private static final AtomicBoolean unsignedLogged = new AtomicBoolean();
+
+    // clears the once per process flags of the missing signature logs
+    static void resetMissingSignatureLogsForTesting() {
+        installMissingLogged.set(false);
+        accountMissingLogged.set(false);
+        unsignedLogged.set(false);
+    }
+
+    // the mutator whose decisions the signer makes, or null for the interface default decisions
+    private final ApproovServiceMutator decisions;
+
     /**
      * Constructs a message signing service mutator with no factory, so that nothing is signed until a
      * default factory or a host factory is set. Install it with ApproovService.setServiceMutator.
      */
     public ApproovDefaultMessageSigning() {
+        decisions = null;
+    }
+
+    /**
+     * Constructs a message signing service mutator with no factory that makes the decisions of another
+     * mutator, such as ApproovServiceMutator.ALWAYS_PROCEED or your own. Every decision hook calls the hook of
+     * that mutator. The processed request hook calls the processed request hook of that mutator first and
+     * then signs the result, so that the signature covers any change that mutator makes. Nothing is signed
+     * until a default factory or a host factory is set. Apps use combined(ApproovServiceMutator) to get a
+     * signer.
+     *
+     * @param decisions is the mutator whose decisions are to be made
+     * @throws IllegalArgumentException if decisions is null
+     */
+    ApproovDefaultMessageSigning(ApproovServiceMutator decisions) {
+        if (decisions == null)
+            throw new IllegalArgumentException("decisions must not be null");
+        this.decisions = decisions;
+    }
+
+    /**
+     * Gets a new message signing service mutator that adds both the install and the account signature to
+     * every request carrying the Approov token header, and makes the decisions of the given mutator, such as
+     * ApproovServiceMutator.CLOSE_FAILURE, ApproovServiceMutator.ALWAYS_PROCEED or your own. A signature that
+     * cannot be produced is left out and the request goes ahead with the other one, or unsigned. Install it
+     * with ApproovService.setServiceMutator.
+     *
+     * @param decisions is the mutator whose decisions are to be made
+     * @return a new signer with the default factory set to sign with both signatures
+     * @throws IllegalArgumentException if decisions is null
+     */
+    public static ApproovDefaultMessageSigning combined(ApproovServiceMutator decisions) {
+        return new ApproovDefaultMessageSigning(decisions).setDefaultFactory(
+                generateDefaultSignatureParametersFactory().setUseInstallAndAccountMessageSigning());
+    }
+
+    /**
+     * Gets a new message signing service mutator that adds both the install and the account signature and
+     * makes the ApproovServiceMutator.DEFAULT decisions. See combined(ApproovServiceMutator).
+     *
+     * @return a new signer with the default factory set to sign with both signatures
+     */
+    public static ApproovDefaultMessageSigning combined() {
+        return combined(ApproovServiceMutator.DEFAULT);
     }
 
     @Override
     public String toString() {
-        return "ApproovDefaultMessageSigning";
+        if (decisions == null)
+            return "ApproovDefaultMessageSigning";
+        return "ApproovDefaultMessageSigning(" + ApproovService.describe(decisions) + ")";
+    }
+
+    /**
+     * Gets the mutator whose decisions the signer makes.
+     *
+     * @return the mutator given to the constructor, or CLOSE_FAILURE, whose decisions are the interface
+     * defaults, for the signer constructed with no argument
+     */
+    private ApproovServiceMutator decisions() {
+        return (decisions != null) ? decisions : ApproovServiceMutator.CLOSE_FAILURE;
+    }
+
+    @Override
+    public void handlePrecheckResult(Approov.TokenFetchResult approovResults) throws ApproovException {
+        decisions().handlePrecheckResult(approovResults);
+    }
+
+    @Override
+    public void handleFetchTokenResult(Approov.TokenFetchResult approovResults) throws ApproovException {
+        decisions().handleFetchTokenResult(approovResults);
+    }
+
+    @Override
+    public void handleFetchSecureStringResult(Approov.TokenFetchResult approovResults, String operation, String key)
+            throws ApproovException {
+        decisions().handleFetchSecureStringResult(approovResults, operation, key);
+    }
+
+    @Override
+    public void handleFetchCustomJWTResult(Approov.TokenFetchResult approovResults) throws ApproovException {
+        decisions().handleFetchCustomJWTResult(approovResults);
+    }
+
+    @Override
+    public boolean handleInterceptorShouldProcessRequest(Request request) throws ApproovException {
+        return decisions().handleInterceptorShouldProcessRequest(request);
+    }
+
+    @Override
+    public boolean handleInterceptorFetchTokenResult(Approov.TokenFetchResult approovResults, String url)
+            throws ApproovException {
+        return decisions().handleInterceptorFetchTokenResult(approovResults, url);
+    }
+
+    @Override
+    public boolean handleInterceptorHeaderSubstitutionResult(Approov.TokenFetchResult approovResults, String header)
+            throws ApproovException {
+        return decisions().handleInterceptorHeaderSubstitutionResult(approovResults, header);
+    }
+
+    @Override
+    public boolean handleInterceptorQueryParamSubstitutionResult(Approov.TokenFetchResult approovResults,
+            String queryKey) throws ApproovException {
+        return decisions().handleInterceptorQueryParamSubstitutionResult(approovResults, queryKey);
+    }
+
+    @Override
+    public boolean handlePinningShouldProcessRequest(Request request) {
+        return decisions().handlePinningShouldProcessRequest(request);
     }
 
     /**
@@ -167,19 +291,28 @@ public class ApproovDefaultMessageSigning implements ApproovServiceMutator {
     /**
      * Signs the request, if it carries the Approov token header, with the signatures configured for its
      * host. This is called by the interceptor after all the other changes Approov makes to the request, and
-     * again whenever its protection is refreshed.
+     * again whenever its protection is refreshed. The processed request hook of the mutator whose decisions
+     * the signer makes is called first, so that the signature covers any change it makes.
      *
      * @param request is the request to sign
      * @param changes is the mutations applied to the request by Approov
-     * @return the signed request, or the request unchanged if it is not signed
+     * @return the signed request, or the request as the decisions left it if it is not signed
      * @throws ApproovException if a body digest configured as required cannot be generated, with the
-     * RequiredBodyDigestException as its cause, or a configured signature algorithm is not supported
+     * RequiredBodyDigestException as its cause, or a configured signature algorithm is not supported, or the
+     * processed request hook of the decisions throws one
      */
     @Override
     public Request handleInterceptorProcessedRequest(Request request, ApproovRequestMutations changes)
             throws ApproovException {
+        // the decisions make their changes before signing, and an exception they throw is theirs rather than a
+        // signing decision, so it is called outside the try below
+        Request processed = decisions().handleInterceptorProcessedRequest(request, changes);
+        if (processed == null) {
+            // the interceptor reports a null result as a failure of this hook
+            return null;
+        }
         try {
-            return sign(request, changes);
+            return sign(processed, changes);
         } catch (ApproovException e) {
             // the signing decisions keep their own type rather than being reported as a failing mutator hook
             throw ApproovService.standardDecision(e);
@@ -307,6 +440,8 @@ public class ApproovDefaultMessageSigning implements ApproovServiceMutator {
         Map<String, ListElement<?>> signatures = new LinkedHashMap<>();
         Map<String, ListElement<?>> signatureInputs = new LinkedHashMap<>();
         Map<String, String> messages = new LinkedHashMap<>();
+        // the reason each signature that could not be produced is missing, by signature identifier
+        Map<String, String> missing = new LinkedHashMap<>();
         for (String alg : algs) {
             SignatureParameters algParams = new SignatureParameters(params).setAlg(alg);
             // apply the params to get the message, leaving the request unsigned if this fails; WARNING never
@@ -319,10 +454,10 @@ public class ApproovDefaultMessageSigning implements ApproovServiceMutator {
                 return request;
             }
             String sigId = ALG_ES256.equals(alg) ? SIG_ID_INSTALL : SIG_ID_ACCOUNT;
-            byte[] signature = ALG_ES256.equals(alg) ? installSignature(message) : accountSignature(message);
+            byte[] signature = ALG_ES256.equals(alg) ? installSignature(message, missing)
+                    : accountSignature(message, missing);
             if (signature == null) {
                 // this signature could not be produced so we proceed with any other
-                ApproovLog.e(TAG, "Message signing: skipping the " + sigId + " signature");
                 continue;
             }
             signatures.put(sigId, ByteSequenceItem.valueOf(signature));
@@ -330,8 +465,23 @@ public class ApproovDefaultMessageSigning implements ApproovServiceMutator {
             messages.put(sigId, message);
         }
         if (signatures.isEmpty()) {
-            ApproovLog.e(TAG, "Message signing: no signature produced, proceeding unsigned");
+            StringBuilder line = new StringBuilder("Message signing: no signature produced, proceeding unsigned");
+            for (Map.Entry<String, String> entry : missing.entrySet())
+                line.append(": ").append(entry.getKey()).append(" signature ").append(entry.getValue());
+            if (unsignedLogged.compareAndSet(false, true))
+                ApproovLog.e(TAG, line.toString());
+            else
+                ApproovLog.d(TAG, line.toString());
             return request;
+        }
+        for (Map.Entry<String, String> entry : missing.entrySet()) {
+            String line = "Message signing: " + entry.getKey() + " signature " + entry.getValue()
+                    + ", signed without it";
+            AtomicBoolean logged = SIG_ID_INSTALL.equals(entry.getKey()) ? installMissingLogged : accountMissingLogged;
+            if (logged.compareAndSet(false, true))
+                ApproovLog.w(TAG, line);
+            else
+                ApproovLog.d(TAG, line);
         }
 
         // each signature is a Byte Sequence member of the same Signature and Signature-Input dictionaries,
@@ -367,32 +517,33 @@ public class ApproovDefaultMessageSigning implements ApproovServiceMutator {
      * ecdsa-p256-sha256 requires.
      *
      * @param message is the signature base
+     * @param missing receives the reason if the signature is not available
      * @return the signature bytes, or null if not available
      */
-    private static byte[] installSignature(String message) {
+    private static byte[] installSignature(String message, Map<String, String> missing) {
         String base64;
         try {
             base64 = ApproovService.getInstallMessageSignature(message);
         } catch (ApproovException e) {
-            ApproovLog.e(TAG, "Message signing: install signature unavailable: " + e);
+            missing.put(SIG_ID_INSTALL, "unavailable: " + e);
             return null;
         }
         if (base64.isEmpty()) {
-            ApproovLog.e(TAG, "Message signing: install signature unavailable");
+            missing.put(SIG_ID_INSTALL, "unavailable");
             return null;
         }
         byte[] signature;
         try {
             signature = Base64.decode(base64, Base64.NO_WRAP);
         } catch (Exception e) {
-            ApproovLog.e(TAG, "Message signing: install signature not base64: " + e);
+            missing.put(SIG_ID_INSTALL, "not base64: " + e);
             return null;
         }
         // decode the signature from ASN.1 DER format
         try {
             return es256DerToRaw(signature);
         } catch (Exception e) {
-            ApproovLog.e(TAG, "Message signing: install signature not ASN.1 DER ES256: " + e);
+            missing.put(SIG_ID_INSTALL, "not ASN.1 DER ES256: " + e);
             return null;
         }
     }
@@ -425,24 +576,25 @@ public class ApproovDefaultMessageSigning implements ApproovServiceMutator {
      * account key is only delivered on a successful attestation.
      *
      * @param message is the signature base
+     * @param missing receives the reason if the signature is not available
      * @return the signature bytes, or null if not available
      */
-    private static byte[] accountSignature(String message) {
+    private static byte[] accountSignature(String message, Map<String, String> missing) {
         String base64;
         try {
             base64 = ApproovService.getAccountMessageSignature(message);
         } catch (ApproovException e) {
-            ApproovLog.e(TAG, "Message signing: account signature unavailable: " + e);
+            missing.put(SIG_ID_ACCOUNT, "unavailable: " + e);
             return null;
         }
         if (base64.isEmpty()) {
-            ApproovLog.e(TAG, "Message signing: account signature unavailable");
+            missing.put(SIG_ID_ACCOUNT, "unavailable");
             return null;
         }
         try {
             return Base64.decode(base64, Base64.NO_WRAP);
         } catch (Exception e) {
-            ApproovLog.e(TAG, "Message signing: account signature not base64: " + e);
+            missing.put(SIG_ID_ACCOUNT, "not base64: " + e);
             return null;
         }
     }

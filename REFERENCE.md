@@ -1026,7 +1026,7 @@ ApproovService.setServiceMutator(new ApproovDefaultMessageSigning().setDefaultFa
 
 Every request that carries the Approov token header is signed after all the other changes the package makes, so the signature covers what is sent. That includes a request to one of your Approov API domains that goes ahead after a failed token fetch, whose token header holds an empty token or the status. A request is signed again whenever its protection is reapplied: on a redirect within a protected domain, an authenticator retry or a stale protection refresh.
 
-Signing is off unless you install it. The signer makes the interface default decisions, the same as `CLOSE_FAILURE`. Installing another mutator, passing `null` to `setServiceMutator` or calling `initialize` removes it. To sign under other decisions, call it from your own mutator (see [signing with other decisions](ADVANCED.md#message-signing)).
+Signing is off unless you install it. The signer makes the interface default decisions, the same as `CLOSE_FAILURE`. Installing another mutator, passing `null` to `setServiceMutator` or calling `initialize` removes it. To sign under other decisions, use `combined(decisions)`, or call the signer from your own mutator (see [sign with other decisions](ADVANCED.md#sign-with-other-decisions)).
 
 A signature that cannot be produced is left out, and the request goes ahead with the other one, or unsigned. Only configuration errors fail the request: a required body digest that cannot be generated (an `ApproovException` whose cause is `RequiredBodyDigestException`), or an unsupported signature algorithm (`ApproovException` with the message `Message signing: unsupported algorithm identifier: <alg>`).
 
@@ -1040,6 +1040,8 @@ A signature that cannot be produced is left out, and the request goes ahead with
 | `boolean supportsProtectionRefresh()` | `true` |
 | `Request processedRequest(Request, ApproovRequestMutations) throws ApproovException` | deprecated; the same as `handleInterceptorProcessedRequest` |
 | `static SignatureParametersFactory generateDefaultSignatureParametersFactory()` | The default factory. It produces the install signature only. It covers the method and target URI; the token and trace headers; `Authorization`, `Content-Length` and `Content-Type` when present (the last two as OkHttp sends them, from the body); and a SHA-256 body digest when one can be computed (an empty body included). It adds `created` and a 15 second `expires` |
+| `static ApproovDefaultMessageSigning combined()` | a signer whose default factory adds both the install and the account signature. It makes the `ApproovServiceMutator.DEFAULT` decisions. Install it with `setServiceMutator` |
+| `static ApproovDefaultMessageSigning combined(ApproovServiceMutator decisions)` | as `combined()`, but it makes the decisions of `decisions`, for example `ApproovServiceMutator.CLOSE_FAILURE` or `ALWAYS_PROCEED`. Each call returns a new signer. Throws `IllegalArgumentException` if `decisions` is `null` |
 | `static SignatureParametersFactory generateDefaultSignatureParametersFactory(SignatureParameters base)` | as above, over a custom base set of components |
 | `DIGEST_SHA256`, `DIGEST_SHA512` | body digest algorithms |
 | `ALG_ES256`, `ALG_HS256` | signature algorithms (`ecdsa-p256-sha256`, `hmac-sha256`) |
